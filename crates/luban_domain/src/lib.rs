@@ -176,6 +176,28 @@ fn entry_is_same_codex_item(entry: &ConversationEntry, item: &CodexThreadItem) -
     }
 }
 
+fn entries_contain_codex_item(entries: &[ConversationEntry], item: &CodexThreadItem) -> bool {
+    entries.iter().any(|e| entry_is_same_codex_item(e, item))
+}
+
+fn flush_in_progress_items(conversation: &mut WorkspaceConversation) {
+    let pending = conversation
+        .in_progress_order
+        .iter()
+        .filter_map(|id| conversation.in_progress_items.get(id))
+        .cloned()
+        .collect::<Vec<_>>();
+
+    for item in pending {
+        if entries_contain_codex_item(&conversation.entries, &item) {
+            continue;
+        }
+        conversation.entries.push(ConversationEntry::CodexItem {
+            item: Box::new(item),
+        });
+    }
+}
+
 fn entry_is_same(a: &ConversationEntry, b: &ConversationEntry) -> bool {
     match (a, b) {
         (
@@ -592,9 +614,7 @@ impl AppState {
                 workspace_id,
                 snapshot,
             } => {
-                if let Some(conversation) = self.conversations.get_mut(&workspace_id)
-                    && conversation.run_status == OperationStatus::Running
-                {
+                if let Some(conversation) = self.conversations.get_mut(&workspace_id) {
                     if conversation.thread_id.is_none() {
                         conversation.thread_id = snapshot.thread_id;
                     }
@@ -607,23 +627,22 @@ impl AppState {
                     let snapshot_is_newer =
                         entries_is_prefix(&conversation.entries, &snapshot.entries)
                             || entries_is_suffix(&conversation.entries, &snapshot.entries);
-                    if snapshot_is_newer {
+                    let conversation_is_newer =
+                        entries_is_prefix(&snapshot.entries, &conversation.entries)
+                            || entries_is_suffix(&snapshot.entries, &conversation.entries);
+
+                    if snapshot_is_newer && !conversation_is_newer {
                         conversation.entries = snapshot.entries;
                     }
 
                     return Vec::new();
                 }
 
-                let draft = self
-                    .conversations
-                    .get(&workspace_id)
-                    .map(|c| c.draft.clone())
-                    .unwrap_or_default();
                 self.conversations.insert(
                     workspace_id,
                     WorkspaceConversation {
                         thread_id: snapshot.thread_id,
-                        draft,
+                        draft: String::new(),
                         entries: snapshot.entries,
                         run_status: OperationStatus::Idle,
                         in_progress_items: BTreeMap::new(),
@@ -755,6 +774,7 @@ impl AppState {
                     CodexThreadEvent::TurnCompleted { usage } => {
                         let _ = usage;
                         conversation.run_status = OperationStatus::Idle;
+                        flush_in_progress_items(conversation);
                         conversation.in_progress_items.clear();
                         conversation.in_progress_order.clear();
                         start_next_queued_prompt(conversation, workspace_id)
@@ -768,6 +788,7 @@ impl AppState {
                         Vec::new()
                     }
                     CodexThreadEvent::TurnFailed { error } => {
+                        flush_in_progress_items(conversation);
                         conversation.entries.push(ConversationEntry::TurnError {
                             message: error.message.clone(),
                         });
@@ -795,10 +816,7 @@ impl AppState {
                         {
                             conversation.in_progress_order.remove(pos);
                         }
-                        let is_duplicate = conversation
-                            .entries
-                            .last()
-                            .is_some_and(|e| entry_is_same_codex_item(e, &item));
+                        let is_duplicate = entries_contain_codex_item(&conversation.entries, &item);
                         if !is_duplicate {
                             conversation.entries.push(ConversationEntry::CodexItem {
                                 item: Box::new(item),
@@ -807,6 +825,7 @@ impl AppState {
                         Vec::new()
                     }
                     CodexThreadEvent::Error { message } => {
+                        flush_in_progress_items(conversation);
                         conversation.entries.push(ConversationEntry::TurnError {
                             message: message.clone(),
                         });
@@ -824,6 +843,7 @@ impl AppState {
                     && conversation.run_status == OperationStatus::Running
                 {
                     conversation.run_status = OperationStatus::Idle;
+                    flush_in_progress_items(conversation);
                     conversation.in_progress_items.clear();
                     conversation.in_progress_order.clear();
                 }
@@ -837,6 +857,7 @@ impl AppState {
                     return Vec::new();
                 }
                 conversation.run_status = OperationStatus::Idle;
+                flush_in_progress_items(conversation);
                 conversation.in_progress_items.clear();
                 conversation.in_progress_order.clear();
                 conversation.queue_paused = true;
@@ -1361,6 +1382,80 @@ mod tests {
     }
 
     #[test]
+    fn conversation_loaded_does_not_overwrite_newer_local_entries() {
+        let mut state = AppState::demo();
+        let workspace_id = state.projects[0].workspaces[0].id;
+
+        state.apply(Action::SendAgentMessage {
+            workspace_id,
+            text: "Hello".to_owned(),
+        });
+        state.apply(Action::AgentEventReceived {
+            workspace_id,
+            event: CodexThreadEvent::TurnDuration { duration_ms: 1234 },
+        });
+
+        state.apply(Action::ConversationLoaded {
+            workspace_id,
+            snapshot: ConversationSnapshot {
+                thread_id: None,
+                entries: vec![ConversationEntry::UserMessage {
+                    text: "Hello".to_owned(),
+                }],
+            },
+        });
+
+        let after = &state.workspace_conversation(workspace_id).unwrap().entries;
+        assert_eq!(after.len(), 2);
+        assert!(matches!(
+            &after[0],
+            ConversationEntry::UserMessage { text } if text == "Hello"
+        ));
+        assert!(matches!(
+            &after[1],
+            ConversationEntry::TurnDuration { duration_ms: 1234 }
+        ));
+    }
+
+    #[test]
+    fn conversation_loaded_replaces_entries_when_snapshot_is_newer() {
+        let mut state = AppState::demo();
+        let workspace_id = state.projects[0].workspaces[0].id;
+
+        state.apply(Action::ConversationLoaded {
+            workspace_id,
+            snapshot: ConversationSnapshot {
+                thread_id: None,
+                entries: vec![ConversationEntry::UserMessage {
+                    text: "Hello".to_owned(),
+                }],
+            },
+        });
+
+        state.apply(Action::ConversationLoaded {
+            workspace_id,
+            snapshot: ConversationSnapshot {
+                thread_id: None,
+                entries: vec![
+                    ConversationEntry::UserMessage {
+                        text: "Hello".to_owned(),
+                    },
+                    ConversationEntry::TurnDuration { duration_ms: 1234 },
+                ],
+            },
+        });
+
+        let after = &state.workspace_conversation(workspace_id).unwrap().entries;
+        assert!(matches!(
+            &after[..],
+            [
+                ConversationEntry::UserMessage { .. },
+                ConversationEntry::TurnDuration { duration_ms: 1234 }
+            ]
+        ));
+    }
+
+    #[test]
     fn send_agent_message_sets_running_and_emits_effect() {
         let mut state = AppState::demo();
         let workspace_id = state.projects[0].workspaces[0].id;
@@ -1399,6 +1494,43 @@ mod tests {
         state.apply(Action::AgentEventReceived {
             workspace_id,
             event: CodexThreadEvent::ItemCompleted { item: item.clone() },
+        });
+        state.apply(Action::AgentEventReceived {
+            workspace_id,
+            event: CodexThreadEvent::ItemCompleted { item },
+        });
+
+        let conversation = state.workspace_conversation(workspace_id).unwrap();
+        let completed_items = conversation
+            .entries
+            .iter()
+            .filter(|e| matches!(e, ConversationEntry::CodexItem { .. }))
+            .count();
+        assert_eq!(completed_items, 1);
+    }
+
+    #[test]
+    fn agent_item_completed_is_idempotent_even_if_not_last_entry() {
+        let mut state = AppState::demo();
+        let workspace_id = state.projects[0].workspaces[0].id;
+
+        state.apply(Action::SendAgentMessage {
+            workspace_id,
+            text: "Hello".to_owned(),
+        });
+
+        let item = CodexThreadItem::AgentMessage {
+            id: "item_0".to_owned(),
+            text: "Hi".to_owned(),
+        };
+
+        state.apply(Action::AgentEventReceived {
+            workspace_id,
+            event: CodexThreadEvent::ItemCompleted { item: item.clone() },
+        });
+        state.apply(Action::AgentEventReceived {
+            workspace_id,
+            event: CodexThreadEvent::TurnDuration { duration_ms: 1000 },
         });
         state.apply(Action::AgentEventReceived {
             workspace_id,
