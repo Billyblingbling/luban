@@ -192,6 +192,7 @@ pub struct TerminalView {
     viewport_style_runs: Vec<Vec<StyleRun>>,
     line_layouts: Vec<Option<gpui::ShapedLine>>,
     line_layout_key: Option<(Pixels, Pixels)>,
+    last_bounds: Option<Bounds<Pixels>>,
     focus_handle: FocusHandle,
     last_window_title: Option<String>,
     input: Option<TerminalInput>,
@@ -229,6 +230,7 @@ impl TerminalView {
             viewport_style_runs: Vec::new(),
             line_layouts: Vec::new(),
             line_layout_key: None,
+            last_bounds: None,
             focus_handle,
             last_window_title: None,
             input: None,
@@ -255,6 +257,7 @@ impl TerminalView {
             viewport_style_runs: Vec::new(),
             line_layouts: Vec::new(),
             line_layout_key: None,
+            last_bounds: None,
             focus_handle,
             last_window_title: None,
             input: Some(input),
@@ -1057,6 +1060,7 @@ impl TerminalView {
         let cols = self.session.cols();
         let rows = self.session.rows();
 
+        let position = self.mouse_position_to_local(position);
         let (cell_width, cell_height) = cell_metrics(window, &self.font)?;
         let x = f32::from(position.x);
         let y = f32::from(position.y);
@@ -1078,6 +1082,17 @@ impl TerminalView {
         }
 
         Some((col as u16, row as u16))
+    }
+
+    fn mouse_position_to_local(
+        &self,
+        position: gpui::Point<gpui::Pixels>,
+    ) -> gpui::Point<gpui::Pixels> {
+        let origin = self
+            .last_bounds
+            .map(|bounds| bounds.origin)
+            .unwrap_or_else(|| point(px(0.0), px(0.0)));
+        point(position.x - origin.x, position.y - origin.y)
     }
 }
 
@@ -1852,6 +1867,10 @@ impl Element for TerminalTextElement {
         window: &mut Window,
         cx: &mut App,
     ) {
+        self.view.update(cx, |view, _cx| {
+            view.last_bounds = Some(bounds);
+        });
+
         let focus_handle = { self.view.read(cx).focus_handle.clone() };
         window.handle_input(
             &focus_handle,
@@ -2000,8 +2019,10 @@ pub(crate) fn cell_metrics(window: &mut gpui::Window, font: &gpui::Font) -> Opti
 #[cfg(test)]
 mod tests {
     use ghostty_vt::Rgb;
+    use gpui::prelude::*;
 
-    use super::{url_at_byte_index, url_at_column_in_line};
+    use super::{Copy, TerminalSession, TerminalView, url_at_byte_index, url_at_column_in_line};
+    use crate::TerminalConfig;
 
     #[test]
     fn url_detection_finds_https_links() {
@@ -2024,6 +2045,92 @@ mod tests {
             url_at_column_in_line(line, 10).as_deref(),
             Some("https://google.com")
         );
+    }
+
+    #[gpui::test]
+    async fn mouse_selection_and_copy_work_when_terminal_is_offset(cx: &mut gpui::TestAppContext) {
+        struct Root {
+            terminal: gpui::Entity<TerminalView>,
+        }
+
+        impl gpui::Render for Root {
+            fn render(
+                &mut self,
+                _window: &mut gpui::Window,
+                _cx: &mut gpui::Context<Self>,
+            ) -> impl gpui::IntoElement {
+                gpui::div()
+                    .size_full()
+                    .flex()
+                    .child(gpui::div().w(gpui::px(320.0)))
+                    .child(
+                        gpui::div()
+                            .w(gpui::px(240.0))
+                            .h_full()
+                            .debug_selector(|| "terminal-wrapper".to_owned())
+                            .child(self.terminal.clone()),
+                    )
+            }
+        }
+
+        let config = TerminalConfig {
+            cols: 20,
+            rows: 5,
+            default_fg: Rgb {
+                r: 0xFF,
+                g: 0xFF,
+                b: 0xFF,
+            },
+            default_bg: Rgb {
+                r: 0x00,
+                g: 0x00,
+                b: 0x00,
+            },
+            update_window_title: false,
+        };
+
+        let (root, window_cx) = cx.add_window_view(|_window, cx| {
+            let session = TerminalSession::new(config).expect("terminal session should construct");
+            let terminal = cx.new(|cx| TerminalView::new(session, cx.focus_handle()));
+            Root { terminal }
+        });
+
+        window_cx.simulate_resize(gpui::size(gpui::px(800.0), gpui::px(240.0)));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        let terminal = root.read_with(window_cx, |r, _| r.terminal.clone());
+        window_cx.update(|_window, app| {
+            terminal.update(app, |this, cx| {
+                this.queue_output_bytes(b"hello world", cx);
+            });
+        });
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        let bounds = window_cx
+            .debug_bounds("terminal-wrapper")
+            .expect("missing terminal wrapper bounds");
+        let start = gpui::point(bounds.left() + gpui::px(6.0), bounds.top() + gpui::px(6.0));
+        let end = gpui::point(
+            bounds.left() + gpui::px(120.0),
+            bounds.top() + gpui::px(6.0),
+        );
+
+        window_cx.simulate_mouse_down(start, gpui::MouseButton::Left, gpui::Modifiers::none());
+        window_cx.simulate_mouse_move(end, Some(gpui::MouseButton::Left), gpui::Modifiers::none());
+        window_cx.simulate_mouse_up(end, gpui::MouseButton::Left, gpui::Modifiers::none());
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        window_cx.dispatch_action(Copy);
+        window_cx.run_until_parked();
+
+        let copied = cx
+            .read_from_clipboard()
+            .and_then(|item| item.text())
+            .unwrap_or_default();
+        assert!(copied.contains("hello"), "clipboard={copied:?}");
     }
 
     #[test]
