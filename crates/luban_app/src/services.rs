@@ -1294,6 +1294,33 @@ impl ProjectWorkspaceService for GitWorkspaceService {
 
         result.map_err(|e| format!("{e:#}"))
     }
+
+    fn gh_is_authorized(&self) -> Result<bool, String> {
+        let output = Command::new("gh")
+            .args(["auth", "status", "-h", "github.com"])
+            .output();
+
+        Ok(output.ok().map(|o| o.status.success()).unwrap_or(false))
+    }
+
+    fn gh_pull_request_number(&self, worktree_path: PathBuf) -> Result<Option<u64>, String> {
+        let output = Command::new("gh")
+            .args(["pr", "view", "--json", "number"])
+            .current_dir(worktree_path)
+            .output();
+
+        let Ok(output) = output else {
+            return Ok(None);
+        };
+        if !output.status.success() {
+            return Ok(None);
+        }
+
+        let Ok(value) = serde_json::from_slice::<serde_json::Value>(&output.stdout) else {
+            return Ok(None);
+        };
+        Ok(value.get("number").and_then(|v| v.as_u64()))
+    }
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]

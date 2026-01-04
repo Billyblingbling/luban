@@ -117,6 +117,10 @@ pub trait ProjectWorkspaceService: Send + Sync {
         cancel: Arc<AtomicBool>,
         on_event: Arc<dyn Fn(CodexThreadEvent) + Send + Sync>,
     ) -> Result<(), String>;
+
+    fn gh_is_authorized(&self) -> Result<bool, String>;
+
+    fn gh_pull_request_number(&self, worktree_path: PathBuf) -> Result<Option<u64>, String>;
 }
 
 pub struct LubanRootView {
@@ -133,6 +137,11 @@ pub struct LubanRootView {
     last_terminal_grid_size: Option<(u16, u16)>,
     workspace_terminals: HashMap<WorkspaceId, WorkspaceTerminal>,
     workspace_terminal_errors: HashMap<WorkspaceId, String>,
+    gh_authorized: Option<bool>,
+    gh_auth_check_inflight: bool,
+    gh_last_auth_check_at: Option<Instant>,
+    workspace_pull_request_numbers: HashMap<WorkspaceId, Option<u64>>,
+    workspace_pull_request_inflight: HashSet<WorkspaceId>,
     chat_input: Option<gpui::Entity<InputState>>,
     expanded_agent_items: HashSet<String>,
     expanded_agent_turns: HashSet<String>,
@@ -166,6 +175,11 @@ impl LubanRootView {
             last_terminal_grid_size: None,
             workspace_terminals: HashMap::new(),
             workspace_terminal_errors: HashMap::new(),
+            gh_authorized: None,
+            gh_auth_check_inflight: false,
+            gh_last_auth_check_at: None,
+            workspace_pull_request_numbers: HashMap::new(),
+            workspace_pull_request_inflight: HashSet::new(),
             chat_input: None,
             expanded_agent_items: HashSet::new(),
             expanded_agent_turns: HashSet::new(),
@@ -207,6 +221,11 @@ impl LubanRootView {
             last_terminal_grid_size: None,
             workspace_terminals: HashMap::new(),
             workspace_terminal_errors: HashMap::new(),
+            gh_authorized: None,
+            gh_auth_check_inflight: false,
+            gh_last_auth_check_at: None,
+            workspace_pull_request_numbers: HashMap::new(),
+            workspace_pull_request_inflight: HashSet::new(),
             chat_input: None,
             expanded_agent_items: HashSet::new(),
             expanded_agent_turns: HashSet::new(),
@@ -241,6 +260,8 @@ impl LubanRootView {
             if let Some(mut terminal) = self.workspace_terminals.remove(workspace_id) {
                 terminal.kill();
             }
+            self.workspace_pull_request_numbers.remove(workspace_id);
+            self.workspace_pull_request_inflight.remove(workspace_id);
         }
 
         let start_timer_workspace = match &action {
@@ -311,12 +332,135 @@ impl LubanRootView {
         for effect in effects {
             self.run_effect(effect, cx);
         }
+
+        self.ensure_workspace_pull_request_numbers(cx);
     }
 
     fn bump_turn_generation(&mut self, workspace_id: WorkspaceId) -> u64 {
         let entry = self.turn_generation.entry(workspace_id).or_insert(0);
         *entry += 1;
         *entry
+    }
+
+    fn ensure_workspace_pull_request_numbers(&mut self, cx: &mut Context<Self>) {
+        let has_active_workspaces = self.state.projects.iter().any(|project| {
+            project.workspaces.iter().any(|workspace| {
+                workspace.status == WorkspaceStatus::Active
+                    && workspace.worktree_path != project.path
+            })
+        });
+        if !has_active_workspaces {
+            return;
+        }
+
+        if self.gh_authorized != Some(true) {
+            self.maybe_check_gh_authorized(cx);
+            return;
+        }
+
+        let services = self.services.clone();
+        for project in &self.state.projects {
+            for workspace in &project.workspaces {
+                if workspace.status != WorkspaceStatus::Active {
+                    continue;
+                }
+                if workspace.worktree_path == project.path {
+                    continue;
+                }
+
+                let workspace_id = workspace.id;
+                if self
+                    .workspace_pull_request_numbers
+                    .contains_key(&workspace_id)
+                    || self.workspace_pull_request_inflight.contains(&workspace_id)
+                {
+                    continue;
+                }
+
+                self.workspace_pull_request_inflight.insert(workspace_id);
+                let worktree_path = workspace.worktree_path.clone();
+                let services = services.clone();
+
+                cx.spawn(
+                    move |this: gpui::WeakEntity<LubanRootView>, cx: &mut gpui::AsyncApp| {
+                        let mut async_cx = cx.clone();
+                        async move {
+                            let result = async_cx
+                                .background_spawn(async move {
+                                    services.gh_pull_request_number(worktree_path)
+                                })
+                                .await;
+
+                            let pr_number: Option<u64> = result.unwrap_or_default();
+
+                            let _ = this.update(
+                                &mut async_cx,
+                                |view: &mut LubanRootView, view_cx: &mut Context<LubanRootView>| {
+                                    view.workspace_pull_request_inflight.remove(&workspace_id);
+                                    let still_active = view.state.projects.iter().any(|project| {
+                                        project.workspaces.iter().any(|workspace| {
+                                            workspace.id == workspace_id
+                                                && workspace.status == WorkspaceStatus::Active
+                                                && workspace.worktree_path != project.path
+                                        })
+                                    });
+                                    if still_active {
+                                        view.workspace_pull_request_numbers
+                                            .insert(workspace_id, pr_number);
+                                    } else {
+                                        view.workspace_pull_request_numbers.remove(&workspace_id);
+                                    }
+                                    view_cx.notify();
+                                },
+                            );
+                        }
+                    },
+                )
+                .detach();
+            }
+        }
+    }
+
+    fn maybe_check_gh_authorized(&mut self, cx: &mut Context<Self>) {
+        if self.gh_auth_check_inflight {
+            return;
+        }
+
+        let should_retry = self
+            .gh_last_auth_check_at
+            .map(|last| last.elapsed() >= Duration::from_secs(10))
+            .unwrap_or(true);
+        if !should_retry {
+            return;
+        }
+
+        self.gh_auth_check_inflight = true;
+        self.gh_last_auth_check_at = Some(Instant::now());
+
+        let services = self.services.clone();
+        cx.spawn(
+            move |this: gpui::WeakEntity<LubanRootView>, cx: &mut gpui::AsyncApp| {
+                let mut async_cx = cx.clone();
+                async move {
+                    let result = async_cx
+                        .background_spawn(async move { services.gh_is_authorized() })
+                        .await;
+
+                    let authorized: bool = result.unwrap_or_default();
+
+                    let _ = this.update(
+                        &mut async_cx,
+                        |view: &mut LubanRootView, view_cx: &mut Context<LubanRootView>| {
+                            view.gh_auth_check_inflight = false;
+                            view.gh_authorized = Some(authorized);
+                            view.ensure_workspace_pull_request_numbers(view_cx);
+                            view_cx.notify();
+                        },
+                    );
+                }
+            },
+        )
+        .detach();
     }
 
     fn collapse_agent_turn_summary(&mut self, id: &str) {
@@ -829,7 +973,12 @@ impl gpui::Render for LubanRootView {
                 div()
                     .flex_1()
                     .flex()
-                    .child(render_sidebar(cx, &self.state, sidebar_width))
+                    .child(render_sidebar(
+                        cx,
+                        &self.state,
+                        sidebar_width,
+                        &self.workspace_pull_request_numbers,
+                    ))
                     .child(
                         div()
                             .w(px(SIDEBAR_RESIZER_WIDTH))
@@ -1436,6 +1585,7 @@ fn render_sidebar(
     cx: &mut Context<LubanRootView>,
     state: &AppState,
     sidebar_width: gpui::Pixels,
+    workspace_pull_request_numbers: &HashMap<WorkspaceId, Option<u64>>,
 ) -> impl IntoElement {
     let theme = cx.theme();
     let view_handle = cx.entity().downgrade();
@@ -1530,13 +1680,15 @@ fn render_sidebar(
                 .id("projects-scroll")
                 .overflow_scroll()
                 .py_2()
-                .children(
-                    state
-                        .projects
-                        .iter()
-                        .enumerate()
-                        .map(|(i, project)| render_project(cx, i, project, state.main_pane)),
-                ),
+                .children(state.projects.iter().enumerate().map(|(i, project)| {
+                    render_project(
+                        cx,
+                        i,
+                        project,
+                        state.main_pane,
+                        workspace_pull_request_numbers,
+                    )
+                })),
         )
 }
 
@@ -1545,6 +1697,7 @@ fn render_project(
     project_index: usize,
     project: &luban_domain::Project,
     main_pane: MainPane,
+    workspace_pull_request_numbers: &HashMap<WorkspaceId, Option<u64>>,
 ) -> AnyElement {
     let theme = cx.theme();
     let is_selected = matches!(main_pane, MainPane::ProjectSettings(id) if id == project.id);
@@ -1686,6 +1839,10 @@ fn render_project(
         .filter(|w| w.status == WorkspaceStatus::Active && w.worktree_path != project.path)
         .enumerate()
         .map(|(workspace_index, workspace)| {
+            let pr_number = workspace_pull_request_numbers
+                .get(&workspace.id)
+                .copied()
+                .flatten();
             render_workspace_row(
                 cx,
                 view_handle.clone(),
@@ -1694,6 +1851,7 @@ fn render_project(
                 &project.slug,
                 workspace,
                 main_pane,
+                pr_number,
             )
         })
         .collect();
@@ -1731,6 +1889,7 @@ fn format_relative_age(when: Option<SystemTime>) -> Option<String> {
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_workspace_row(
     cx: &mut Context<LubanRootView>,
     view_handle: gpui::WeakEntity<LubanRootView>,
@@ -1739,6 +1898,7 @@ fn render_workspace_row(
     project_slug: &str,
     workspace: &luban_domain::Workspace,
     main_pane: MainPane,
+    pr_number: Option<u64>,
 ) -> AnyElement {
     let theme = cx.theme();
     let is_selected = matches!(main_pane, MainPane::Workspace(id) if id == workspace.id);
@@ -1758,7 +1918,7 @@ fn render_workspace_row(
             None => workspace.branch_name.clone(),
         }
     };
-    let index_label = format!("#{}", workspace_index + 1);
+    let pr_label = pr_number.map(|number| format!("#{number}"));
 
     let row = div()
         .mx_3()
@@ -1824,12 +1984,17 @@ fn render_workspace_row(
                 .items_center()
                 .gap_2()
                 .flex_shrink_0()
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(theme.muted_foreground)
-                        .child(index_label),
-                )
+                .when_some(pr_label, |s, label| {
+                    s.child(
+                        div()
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .debug_selector(move || {
+                                format!("workspace-pr-{project_index}-{workspace_index}")
+                            })
+                            .child(label),
+                    )
+                })
                 .child(
                     div()
                         .debug_selector(move || {
@@ -4099,6 +4264,14 @@ mod tests {
             });
             Ok(())
         }
+
+        fn gh_is_authorized(&self) -> Result<bool, String> {
+            Ok(false)
+        }
+
+        fn gh_pull_request_number(&self, _worktree_path: PathBuf) -> Result<Option<u64>, String> {
+            Ok(None)
+        }
     }
 
     #[test]
@@ -6264,5 +6437,148 @@ mod tests {
         });
         assert_eq!(value, Some("draft-2".to_owned()));
         assert!(cursor_at_end);
+    }
+
+    struct FakeGhService {
+        pr_numbers: HashMap<PathBuf, Option<u64>>,
+    }
+
+    impl ProjectWorkspaceService for FakeGhService {
+        fn load_app_state(&self) -> Result<PersistedAppState, String> {
+            Ok(PersistedAppState {
+                projects: Vec::new(),
+                sidebar_width: None,
+                terminal_pane_width: None,
+            })
+        }
+
+        fn save_app_state(&self, _snapshot: PersistedAppState) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn create_workspace(
+            &self,
+            _project_path: PathBuf,
+            _project_slug: String,
+        ) -> Result<CreatedWorkspace, String> {
+            Ok(CreatedWorkspace {
+                workspace_name: "abandon-about".to_owned(),
+                branch_name: "luban/abandon-about".to_owned(),
+                worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+            })
+        }
+
+        fn open_workspace_in_ide(&self, _worktree_path: PathBuf) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn archive_workspace(
+            &self,
+            _project_path: PathBuf,
+            _worktree_path: PathBuf,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn ensure_conversation(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn load_conversation(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+        ) -> Result<ConversationSnapshot, String> {
+            Ok(ConversationSnapshot {
+                thread_id: None,
+                entries: Vec::new(),
+            })
+        }
+
+        fn run_agent_turn_streamed(
+            &self,
+            request: RunAgentTurnRequest,
+            cancel: Arc<AtomicBool>,
+            on_event: Arc<dyn Fn(CodexThreadEvent) + Send + Sync>,
+        ) -> Result<(), String> {
+            FakeService.run_agent_turn_streamed(request, cancel, on_event)
+        }
+
+        fn gh_is_authorized(&self) -> Result<bool, String> {
+            Ok(true)
+        }
+
+        fn gh_pull_request_number(&self, worktree_path: PathBuf) -> Result<Option<u64>, String> {
+            Ok(self.pr_numbers.get(&worktree_path).copied().flatten())
+        }
+    }
+
+    #[gpui::test]
+    async fn workspace_row_shows_pull_request_number_when_available(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "w1".to_owned(),
+            branch_name: "repo/w1".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/w1"),
+        });
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "w2".to_owned(),
+            branch_name: "repo/w2".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/w2"),
+        });
+        state.projects[0].expanded = true;
+
+        let mut pr_numbers = HashMap::new();
+        pr_numbers.insert(PathBuf::from("/tmp/luban/worktrees/repo/w1"), Some(123));
+        pr_numbers.insert(PathBuf::from("/tmp/luban/worktrees/repo/w2"), None);
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeGhService { pr_numbers });
+
+        let view_slot: Arc<std::sync::Mutex<Option<gpui::Entity<LubanRootView>>>> =
+            Arc::new(std::sync::Mutex::new(None));
+        let view_slot_for_window = view_slot.clone();
+
+        let (_, window_cx) = cx.add_window_view(|window, cx| {
+            let view = cx.new(|cx| LubanRootView::with_state(services, state, cx));
+            *view_slot_for_window.lock().expect("poisoned mutex") = Some(view.clone());
+            gpui_component::Root::new(view, window, cx)
+        });
+        let view = view_slot
+            .lock()
+            .expect("poisoned mutex")
+            .clone()
+            .expect("missing view handle");
+
+        window_cx.refresh().unwrap();
+        window_cx.update(|_, app| {
+            view.update(app, |view, cx| {
+                view.dispatch(Action::ClearError, cx);
+            });
+        });
+
+        for _ in 0..8 {
+            window_cx.run_until_parked();
+            window_cx.refresh().unwrap();
+        }
+
+        assert!(
+            window_cx.debug_bounds("workspace-pr-0-0").is_some(),
+            "expected PR label to be rendered for workspace with PR number"
+        );
+        assert!(
+            window_cx.debug_bounds("workspace-pr-0-1").is_none(),
+            "expected PR label to be hidden for workspace without PR number"
+        );
     }
 }
