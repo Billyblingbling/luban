@@ -22,7 +22,7 @@ use std::{
     path::PathBuf,
     sync::Arc,
     sync::atomic::{AtomicBool, Ordering},
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 use crate::terminal_panel::{WorkspaceTerminal, spawn_workspace_terminal, terminal_cell_metrics};
@@ -1205,34 +1205,19 @@ fn render_project(
     };
     let create_loading = matches!(project.create_workspace_status, OperationStatus::Running);
 
-    let selection_border = if is_selected {
-        theme.primary
-    } else {
-        theme.transparent
-    };
     let header = div()
-        .mx_2()
-        .mt_1()
-        .h(px(32.0))
-        .px_2()
+        .mx_3()
+        .mt_2()
+        .h(px(28.0))
         .flex()
         .items_center()
         .justify_between()
-        .rounded_md()
-        .border_l_2()
-        .border_color(selection_border)
-        .bg(if is_selected {
-            theme.sidebar_accent
-        } else {
-            theme.transparent
-        })
-        .hover(move |s| s.bg(theme.sidebar_accent))
-        .group("")
         .text_color(if is_selected {
             theme.sidebar_accent_foreground
         } else {
             theme.sidebar_foreground
         })
+        .group("")
         .debug_selector(move || format!("project-header-{project_index}"))
         .child(
             div()
@@ -1251,93 +1236,78 @@ fn render_project(
                 )
                 .child(
                     div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .child(
-                            div()
-                                .max_w(px(220.0))
-                                .truncate()
-                                .text_lg()
-                                .font_semibold()
-                                .child(project.name.clone()),
-                        )
-                        .child(
-                            div()
-                                .w(px(16.0))
-                                .debug_selector(move || format!("project-toggle-{project_index}"))
-                                .child(
-                                    Icon::new(disclosure_icon)
-                                        .with_size(Size::Small)
-                                        .text_color(theme.muted_foreground),
-                                ),
-                        ),
+                        .max_w(px(260.0))
+                        .truncate()
+                        .text_lg()
+                        .font_semibold()
+                        .child(project.name.clone()),
                 ),
         )
         .child(
-            div().flex().items_center().gap_1().child(
+            div()
+                .w(px(16.0))
+                .debug_selector(move || format!("project-toggle-{project_index}"))
+                .child(
+                    Icon::new(disclosure_icon)
+                        .with_size(Size::Small)
+                        .text_color(theme.muted_foreground),
+                ),
+        );
+
+    let new_workspace_row = {
+        let view_handle = view_handle.clone();
+        let create_icon = if create_loading {
+            IconName::LoaderCircle
+        } else {
+            IconName::Plus
+        };
+
+        div()
+            .mx_3()
+            .mt_1()
+            .h(px(32.0))
+            .px_2()
+            .rounded_md()
+            .flex()
+            .items_center()
+            .justify_between()
+            .text_color(theme.muted_foreground)
+            .hover(|s| s.bg(theme.sidebar_accent))
+            .child(
                 div()
-                    .when(!create_loading, |s| s.invisible())
-                    .group_hover("", |s| s.visible())
                     .flex()
                     .items_center()
-                    .gap_1()
-                    .child(
-                        div()
-                            .debug_selector(move || {
-                                format!("project-create-workspace-{project_index}")
-                            })
-                            .child(
-                                Button::new(format!("project-create-workspace-{project_index}"))
-                                    .ghost()
-                                    .compact()
-                                    .disabled(create_loading)
-                                    .loading(create_loading)
-                                    .icon(
-                                        Icon::new(IconName::Plus)
-                                            .text_color(theme.muted_foreground),
-                                    )
-                                    .tooltip("Create workspace")
-                                    .on_click({
-                                        let view_handle = view_handle.clone();
-                                        move |_, _, app| {
-                                            let _ = view_handle.update(app, |view, cx| {
-                                                view.dispatch(
-                                                    Action::CreateWorkspace { project_id },
-                                                    cx,
-                                                );
-                                            });
-                                        }
-                                    }),
-                            ),
+                    .gap_2()
+                    .when(!create_loading, |s| s.cursor_pointer())
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _, _, cx| {
+                            if create_loading {
+                                return;
+                            }
+                            this.dispatch(Action::CreateWorkspace { project_id }, cx);
+                        }),
                     )
                     .child(
-                        div()
-                            .debug_selector(move || format!("project-settings-{project_index}"))
-                            .child(
-                                Button::new(format!("project-settings-{project_index}"))
-                                    .ghost()
-                                    .compact()
-                                    .icon(
-                                        Icon::new(IconName::Ellipsis)
-                                            .text_color(theme.muted_foreground),
-                                    )
-                                    .tooltip("Project settings")
-                                    .on_click({
-                                        let view_handle = view_handle.clone();
-                                        move |_, _, app| {
-                                            let _ = view_handle.update(app, |view, cx| {
-                                                view.dispatch(
-                                                    Action::OpenProjectSettings { project_id },
-                                                    cx,
-                                                );
-                                            });
-                                        }
-                                    }),
-                            ),
-                    ),
-            ),
-        );
+                        Icon::new(create_icon)
+                            .with_size(Size::Small)
+                            .text_color(theme.muted_foreground),
+                    )
+                    .child(div().text_sm().child("New workspace")),
+            )
+            .child(
+                Button::new(format!("project-settings-{project_index}"))
+                    .ghost()
+                    .compact()
+                    .icon(Icon::new(IconName::Ellipsis).text_color(theme.muted_foreground))
+                    .tooltip("Project settings")
+                    .on_click(move |_, _, app| {
+                        let _ = view_handle.update(app, |view, cx| {
+                            view.dispatch(Action::OpenProjectSettings { project_id }, cx);
+                        });
+                    }),
+            )
+    };
 
     let children = project
         .workspaces
@@ -1350,7 +1320,7 @@ fn render_project(
                 view_handle.clone(),
                 project_index,
                 workspace_index,
-                project.id,
+                &project.slug,
                 workspace,
                 main_pane,
             )
@@ -1361,9 +1331,31 @@ fn render_project(
         .flex_col()
         .child(header)
         .when(project.expanded, |s| {
-            s.child(div().pl(px(22.0)).flex().flex_col().children(children))
+            s.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .child(new_workspace_row)
+                    .child(div().mt_1().flex().flex_col().children(children)),
+            )
         })
         .into_any_element()
+}
+
+fn format_relative_age(when: Option<SystemTime>) -> Option<String> {
+    let when = when?;
+    let elapsed = SystemTime::now().duration_since(when).ok()?;
+    let seconds = elapsed.as_secs();
+
+    Some(if seconds < 60 {
+        "just now".to_owned()
+    } else if seconds < 60 * 60 {
+        format!("{}m ago", seconds / 60)
+    } else if seconds < 60 * 60 * 24 {
+        format!("{}h ago", seconds / (60 * 60))
+    } else {
+        format!("{}d ago", seconds / (60 * 60 * 24))
+    })
 }
 
 fn render_workspace_row(
@@ -1371,7 +1363,7 @@ fn render_workspace_row(
     view_handle: gpui::WeakEntity<LubanRootView>,
     project_index: usize,
     workspace_index: usize,
-    _project_id: ProjectId,
+    project_slug: &str,
     workspace: &luban_domain::Workspace,
     main_pane: MainPane,
 ) -> AnyElement {
@@ -1385,21 +1377,24 @@ fn render_workspace_row(
         IconName::Inbox
     };
 
-    let selection_border = if is_selected {
-        theme.primary
-    } else {
-        theme.transparent
+    let title = format!("{}/{}", project_slug, workspace.workspace_name);
+    let metadata = {
+        let age = format_relative_age(workspace.last_activity_at);
+        match age {
+            Some(age) => format!("{} · {}", workspace.branch_name, age),
+            None => workspace.branch_name.clone(),
+        }
     };
+    let index_label = format!("#{}", workspace_index + 1);
+
     let row = div()
-        .mx_2()
-        .h(px(30.0))
+        .mx_3()
         .px_2()
+        .py_2()
         .flex()
-        .items_center()
-        .gap_2()
+        .items_start()
+        .gap_3()
         .rounded_md()
-        .border_l_2()
-        .border_color(selection_border)
         .bg(if is_selected {
             theme.sidebar_accent
         } else {
@@ -1414,10 +1409,17 @@ fn render_workspace_row(
         })
         .debug_selector(move || format!("workspace-row-{project_index}-{workspace_index}"))
         .child(
+            div().pt(px(1.0)).child(
+                Icon::new(IconName::Network)
+                    .with_size(Size::Small)
+                    .text_color(theme.muted_foreground),
+            ),
+        )
+        .child(
             div()
                 .flex_1()
                 .flex()
-                .items_center()
+                .flex_col()
                 .gap_2()
                 .cursor_pointer()
                 .on_mouse_down(
@@ -1428,62 +1430,86 @@ fn render_workspace_row(
                 )
                 .child(
                     div()
-                        .flex_1()
+                        .w_full()
                         .truncate()
-                        .text_base()
-                        .child(workspace.workspace_name.clone()),
+                        .text_sm()
+                        .font_semibold()
+                        .child(title),
+                )
+                .child(
+                    div()
+                        .w_full()
+                        .truncate()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child(metadata),
                 ),
         )
         .child(
             div()
-                .debug_selector(move || {
-                    format!("workspace-archive-{project_index}-{workspace_index}")
-                })
-                .when(!archive_disabled, |s| s.invisible())
-                .group_hover("", |s| s.visible())
+                .flex()
+                .items_center()
+                .gap_2()
                 .child(
-                    Button::new(format!("workspace-archive-{project_index}-{workspace_index}"))
-                        .ghost()
-                        .compact()
-                        .disabled(archive_disabled)
-                        .icon(Icon::new(archive_icon).text_color(theme.muted_foreground))
-                        .tooltip("Archive workspace")
-                        .on_click(move |_, window, app| {
-                            if archive_disabled {
-                                return;
-                            }
-
-                            let receiver = window.prompt(
-                                PromptLevel::Warning,
-                                "Archive workspace?",
-                                Some("This will remove the git worktree on disk."),
-                                &[PromptButton::ok("Archive"), PromptButton::cancel("Cancel")],
-                                app,
-                            );
-
-                            let view_handle = view_handle.clone();
-                            app.spawn(move |cx: &mut gpui::AsyncApp| {
-                                let mut async_cx = cx.clone();
-                                async move {
-                                    let Ok(choice) = receiver.await else {
-                                        return;
-                                    };
-                                    if choice != 0 {
-                                        return;
-                                    }
-                                    let _ = view_handle.update(
-                                        &mut async_cx,
-                                        |view: &mut LubanRootView, view_cx: &mut Context<LubanRootView>| {
-                                            view.dispatch(
-                                                Action::ArchiveWorkspace { workspace_id },
-                                                view_cx,
-                                            );
-                                        },
-                                    );
+                    div()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child(index_label),
+                )
+                .child(
+                    div()
+                        .debug_selector(move || {
+                            format!("workspace-archive-{project_index}-{workspace_index}")
+                        })
+                        .when(!archive_disabled, |s| s.invisible())
+                        .group_hover("", |s| s.visible())
+                        .child(
+                            Button::new(format!(
+                                "workspace-archive-{project_index}-{workspace_index}"
+                            ))
+                            .ghost()
+                            .compact()
+                            .disabled(archive_disabled)
+                            .icon(Icon::new(archive_icon).text_color(theme.muted_foreground))
+                            .tooltip("Archive workspace")
+                            .on_click(move |_, window, app| {
+                                if archive_disabled {
+                                    return;
                                 }
-                            })
-                            .detach();
-                        }),
+
+                                let receiver = window.prompt(
+                                    PromptLevel::Warning,
+                                    "Archive workspace?",
+                                    Some("This will remove the git worktree on disk."),
+                                    &[PromptButton::ok("Archive"), PromptButton::cancel("Cancel")],
+                                    app,
+                                );
+
+                                let view_handle = view_handle.clone();
+                                app.spawn(move |cx: &mut gpui::AsyncApp| {
+                                    let mut async_cx = cx.clone();
+                                    async move {
+                                        let Ok(choice) = receiver.await else {
+                                            return;
+                                        };
+                                        if choice != 0 {
+                                            return;
+                                        }
+                                        let _ = view_handle.update(
+                                            &mut async_cx,
+                                            |view: &mut LubanRootView,
+                                             view_cx: &mut Context<LubanRootView>| {
+                                                view.dispatch(
+                                                    Action::ArchiveWorkspace { workspace_id },
+                                                    view_cx,
+                                                );
+                                            },
+                                        );
+                                    }
+                                })
+                                .detach();
+                            }),
+                        ),
                 ),
         );
 
