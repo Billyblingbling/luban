@@ -1863,51 +1863,55 @@ impl LubanRootView {
                 self.last_chat_workspace_id = Some(workspace_id);
                 self.last_chat_item_count = entries_len;
 
-                let history = div()
-                    .flex_1()
-                    .id("workspace-chat-scroll")
-                    .overflow_scroll()
-                    .track_scroll(&self.chat_scroll_handle)
-                    .overflow_x_hidden()
-                    .w_full()
-                    .px_4()
-                    .py_3()
-                    .child(min_width_zero(
-                        div()
-                            .debug_selector(|| "workspace-chat-column".to_owned())
-                            .on_prepaint({
-                                let view_handle = view_handle.clone();
-                                move |bounds, _window, app| {
-                                    let width = bounds.size.width;
-                                    let _ = view_handle.update(app, |view, cx| {
-                                        let should_update = match view.chat_column_width {
-                                            Some(prev) => (prev - width).abs() > px(0.5),
-                                            None => true,
-                                        };
-                                        if should_update {
-                                            view.chat_column_width = Some(width);
-                                            cx.notify();
-                                        }
-                                    });
-                                }
-                            })
-                            .w_full()
-                            .max_w(px(900.0))
-                            .mx_auto()
-                            .flex()
-                            .flex_col()
-                            .gap_3()
-                            .whitespace_normal()
-                            .pb_2()
-                            .children(history_children)
-                            .when_some(tail_duration, |s, (elapsed, running)| {
-                                s.child(
-                                    div()
-                                        .debug_selector(|| "chat-tail-turn-duration".to_owned())
-                                        .child(render_turn_duration_row(theme, elapsed, running)),
-                                )
-                            }),
-                    ));
+                let history = min_height_zero(
+                    div()
+                        .flex_1()
+                        .id("workspace-chat-scroll")
+                        .overflow_scroll()
+                        .track_scroll(&self.chat_scroll_handle)
+                        .overflow_x_hidden()
+                        .w_full()
+                        .px_4()
+                        .py_3()
+                        .child(min_width_zero(
+                            div()
+                                .debug_selector(|| "workspace-chat-column".to_owned())
+                                .on_prepaint({
+                                    let view_handle = view_handle.clone();
+                                    move |bounds, _window, app| {
+                                        let width = bounds.size.width;
+                                        let _ = view_handle.update(app, |view, cx| {
+                                            let should_update = match view.chat_column_width {
+                                                Some(prev) => (prev - width).abs() > px(0.5),
+                                                None => true,
+                                            };
+                                            if should_update {
+                                                view.chat_column_width = Some(width);
+                                                cx.notify();
+                                            }
+                                        });
+                                    }
+                                })
+                                .w_full()
+                                .max_w(px(900.0))
+                                .mx_auto()
+                                .flex()
+                                .flex_col()
+                                .gap_3()
+                                .whitespace_normal()
+                                .pb_2()
+                                .children(history_children)
+                                .when_some(tail_duration, |s, (elapsed, running)| {
+                                    s.child(
+                                        div()
+                                            .debug_selector(|| "chat-tail-turn-duration".to_owned())
+                                            .child(render_turn_duration_row(
+                                                theme, elapsed, running,
+                                            )),
+                                    )
+                                }),
+                        )),
+                );
 
                 let queue_panel = if !queued_prompts.is_empty() {
                     let theme = cx.theme();
@@ -2074,24 +2078,30 @@ impl LubanRootView {
                     div().hidden().into_any_element()
                 };
 
-                let composer = div().w_full().px_4().pb_4().child(
-                    div()
-                        .w_full()
-                        .max_w(px(900.0))
-                        .mx_auto()
-                        .p_2()
-                        .rounded_lg()
-                        .bg(theme.background)
-                        .border_1()
-                        .border_color(theme.border)
-                        .child(
-                            div()
-                                .w_full()
-                                .flex()
-                                .flex_col()
-                                .gap_2()
-                                .child(queue_panel)
-                                .child(
+                let composer = div()
+                    .debug_selector(|| "workspace-chat-composer".to_owned())
+                    .w_full()
+                    .flex_shrink_0()
+                    .px_4()
+                    .pb_4()
+                    .child(
+                        div()
+                            .w_full()
+                            .max_w(px(900.0))
+                            .mx_auto()
+                            .p_2()
+                            .rounded_lg()
+                            .bg(theme.background)
+                            .border_1()
+                            .border_color(theme.border)
+                            .child(
+                                div()
+                                    .w_full()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_2()
+                                    .child(queue_panel)
+                                    .child(
                                     div()
                                         .w_full()
                                         .flex()
@@ -2168,8 +2178,8 @@ impl LubanRootView {
                                             )
                                         }),
                                 ),
-                        ),
-                );
+                            ),
+                    );
 
                 div()
                     .flex()
@@ -2185,6 +2195,7 @@ impl LubanRootView {
 
         min_width_zero(
             div()
+                .debug_selector(|| "main-pane".to_owned())
                 .flex_1()
                 .h_full()
                 .flex()
@@ -2348,6 +2359,11 @@ fn render_conversation_entry(
 
 fn min_width_zero(mut element: gpui::Div) -> gpui::Div {
     element.style().min_size.width = Some(px(0.0).into());
+    element
+}
+
+fn min_height_zero<E: gpui::Styled>(mut element: E) -> E {
+    element.style().min_size.height = Some(px(0.0).into());
     element
 }
 
@@ -4363,6 +4379,64 @@ mod tests {
         window_cx
             .debug_bounds("chat-send-message")
             .expect("missing chat composer send button");
+    }
+
+    #[gpui::test]
+    async fn chat_composer_remains_visible_with_long_history(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "abandon-about".to_owned(),
+            branch_name: "luban/abandon-about".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+        });
+        let workspace_id = state.projects[0].workspaces[0].id;
+        state.main_pane = MainPane::Workspace(workspace_id);
+
+        let long_markdownish = std::iter::repeat_n(
+            "- A very long bullet line that should wrap and force the history to overflow and scroll.\n",
+            40,
+        )
+        .collect::<String>();
+
+        let mut entries = Vec::new();
+        for i in 0..12 {
+            entries.push(ConversationEntry::UserMessage {
+                text: format!("message {i} {long_markdownish}"),
+            });
+            entries.push(ConversationEntry::TurnDuration { duration_ms: 1000 });
+        }
+
+        state.apply(Action::ConversationLoaded {
+            workspace_id,
+            snapshot: ConversationSnapshot {
+                thread_id: Some("thread-1".to_owned()),
+                entries,
+            },
+        });
+
+        let (_view, window_cx) =
+            cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+        window_cx.simulate_resize(size(px(1200.0), px(720.0)));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        let send_bounds = window_cx
+            .debug_bounds("chat-send-message")
+            .expect("missing chat composer send button");
+        let main_bounds = window_cx
+            .debug_bounds("main-pane")
+            .expect("missing debug bounds for main-pane");
+        assert!(send_bounds.size.height > px(0.0));
+        assert!(send_bounds.bottom() <= main_bounds.bottom() + px(2.0));
     }
 
     #[gpui::test]
