@@ -1008,7 +1008,6 @@ fn render_titlebar(
 
     let TitlebarContext {
         branch_label,
-        worktree_label,
         ide_workspace_id,
     } = titlebar_context(state);
 
@@ -1023,7 +1022,8 @@ fn render_titlebar(
             .outline()
             .compact()
             .disabled(ide_workspace_id.is_none())
-            .label("Open ▾")
+            .icon(IconName::ExternalLink)
+            .label("Open")
             .tooltip(open_in_zed_tooltip)
             .on_click(move |_, _, app| {
                 let Some(workspace_id) = ide_workspace_id else {
@@ -1130,38 +1130,6 @@ fn render_titlebar(
         )
         .child(div().text_sm().child(branch_label));
 
-    let worktree_chip = worktree_label
-        .map(|label| {
-            let icon = div()
-                .w(px(18.0))
-                .h(px(18.0))
-                .rounded_sm()
-                .bg(theme.foreground)
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(
-                    Icon::new(IconName::FolderOpen)
-                        .with_size(Size::Small)
-                        .text_color(theme.primary_foreground),
-                );
-
-            div()
-                .h(px(28.0))
-                .px_2()
-                .flex()
-                .items_center()
-                .gap_2()
-                .rounded_md()
-                .border_1()
-                .border_color(theme.border)
-                .bg(theme.background)
-                .child(icon)
-                .child(div().text_sm().child(label))
-                .into_any_element()
-        })
-        .unwrap_or_else(|| div().hidden().into_any_element());
-
     let main_titlebar = div()
         .flex_1()
         .h(titlebar_height)
@@ -1187,13 +1155,17 @@ fn render_titlebar(
                 .flex()
                 .items_center()
                 .gap_2()
-                .child(worktree_chip)
+                .child(
+                    div()
+                        .debug_selector(|| "titlebar-open-in-zed".to_owned())
+                        .child(open_in_zed_button),
+                )
                 .child(
                     div()
                         .debug_selector(|| "titlebar-toggle-terminal".to_owned())
                         .child(terminal_toggle_button),
                 )
-                .child(open_in_zed_button),
+                .flex_shrink_0(),
         );
 
     div()
@@ -1207,7 +1179,6 @@ fn render_titlebar(
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct TitlebarContext {
     branch_label: String,
-    worktree_label: Option<String>,
     ide_workspace_id: Option<WorkspaceId>,
 }
 
@@ -1222,9 +1193,6 @@ fn titlebar_context(state: &AppState) -> TitlebarContext {
         branch_label: active_workspace
             .map(|workspace| workspace.branch_name.clone())
             .unwrap_or(fallback_title),
-        worktree_label: active_workspace
-            .and_then(|workspace| workspace.worktree_path.file_name())
-            .map(|name| format!("/{}", name.to_string_lossy())),
         ide_workspace_id: active_workspace.map(|workspace| workspace.id),
     }
 }
@@ -3751,7 +3719,6 @@ mod tests {
             titlebar_context(&state),
             TitlebarContext {
                 branch_label: String::new(),
-                worktree_label: None,
                 ide_workspace_id: None,
             }
         );
@@ -3773,8 +3740,49 @@ mod tests {
 
         let context = titlebar_context(&state);
         assert_eq!(context.branch_label, "luban/abandon-about".to_owned());
-        assert_eq!(context.worktree_label.as_deref(), Some("/abandon-about"));
         assert_eq!(context.ide_workspace_id, Some(workspace_id));
+    }
+
+    #[gpui::test]
+    async fn titlebar_buttons_keep_terminal_toggle_on_far_right(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "abandon-about".to_owned(),
+            branch_name: "b".repeat(256),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+        });
+        let workspace_id = state.projects[0].workspaces[0].id;
+        state.apply(Action::OpenWorkspace { workspace_id });
+
+        let (_view, window_cx) =
+            cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+        let window_size = size(px(900.0), px(240.0));
+        window_cx.simulate_resize(window_size);
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        let open_bounds = window_cx
+            .debug_bounds("titlebar-open-in-zed")
+            .expect("missing titlebar open button");
+        let toggle_bounds = window_cx
+            .debug_bounds("titlebar-toggle-terminal")
+            .expect("missing titlebar terminal toggle button");
+
+        assert!(
+            open_bounds.right() <= toggle_bounds.left() + px(1.0),
+            "open={:?} toggle={:?}",
+            open_bounds,
+            toggle_bounds
+        );
     }
 
     #[gpui::test]
