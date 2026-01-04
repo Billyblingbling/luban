@@ -976,6 +976,7 @@ impl gpui::Render for LubanRootView {
                 cx,
                 &self.state,
                 sidebar_width,
+                right_pane_width,
                 self.terminal_enabled,
             ))
             .child(min_height_zero(
@@ -1299,10 +1300,6 @@ impl LubanRootView {
         self.dispatch(Action::TerminalPaneWidthChanged { width }, cx);
     }
 
-    fn right_pane_header_height(&self) -> gpui::Pixels {
-        px(40.0)
-    }
-
     fn right_pane_grid_size(
         &self,
         window: &mut Window,
@@ -1310,9 +1307,7 @@ impl LubanRootView {
     ) -> Option<(u16, u16)> {
         let right_pane_width = self.right_pane_width(window, sidebar_width);
         let width = f32::from(right_pane_width).max(1.0);
-        let height = (f32::from(window.viewport_size().height)
-            - f32::from(self.right_pane_header_height()))
-        .max(1.0);
+        let height = (f32::from(window.viewport_size().height) - f32::from(px(44.0))).max(1.0);
 
         let (cell_width, cell_height) = terminal_cell_metrics(window)?;
         let cols = (width / cell_width).floor().max(1.0) as u16;
@@ -1375,17 +1370,9 @@ impl LubanRootView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let header_height = self.right_pane_header_height();
-
         let MainPane::Workspace(workspace_id) = self.state.main_pane else {
             return div().into_any_element();
         };
-
-        let title = self
-            .state
-            .workspace(workspace_id)
-            .map(|w| w.workspace_name.clone())
-            .unwrap_or_else(|| "Terminal".to_owned());
 
         let error = self.workspace_terminal_errors.get(&workspace_id).cloned();
         let terminal_view = if error.is_none() {
@@ -1405,18 +1392,6 @@ impl LubanRootView {
             .bg(theme.secondary)
             .border_l_1()
             .border_color(theme.border)
-            .child(
-                div()
-                    .h(header_height)
-                    .px_2()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .border_b_1()
-                    .border_color(theme.border)
-                    .child(div().text_sm().font_semibold().child("Terminal"))
-                    .child(div().truncate().text_sm().child(title)),
-            )
             .child(
                 div().flex_1().h_full().cursor(CursorStyle::IBeam).child(
                     error
@@ -1441,6 +1416,7 @@ fn render_titlebar(
     cx: &mut Context<LubanRootView>,
     state: &AppState,
     sidebar_width: gpui::Pixels,
+    right_pane_width: gpui::Pixels,
     terminal_enabled: bool,
 ) -> AnyElement {
     fn handle_titlebar_double_click(window: &Window) {
@@ -1497,6 +1473,21 @@ fn render_titlebar(
             })
     };
 
+    let open_in_zed_button = ide_workspace_id.map(|workspace_id| {
+        let view_handle = cx.entity().downgrade();
+        Button::new("workspace-open-in-zed")
+            .outline()
+            .compact()
+            .icon(IconName::ExternalLink)
+            .label("Open")
+            .tooltip("Open in Zed")
+            .on_click(move |_, _, app| {
+                let _ = view_handle.update(app, |view, cx| {
+                    view.dispatch(Action::OpenWorkspaceInIde { workspace_id }, cx);
+                });
+            })
+    });
+
     let sidebar_titlebar = div()
         .w(sidebar_width)
         .h(titlebar_height)
@@ -1547,25 +1538,73 @@ fn render_titlebar(
         .border_b_1()
         .border_color(theme.title_bar_border)
         .bg(theme.title_bar)
+        .debug_selector(|| "titlebar-main".to_owned())
         .child(min_width_zero(titlebar_zoom_area))
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .gap_2()
-                .child(
-                    div()
-                        .debug_selector(|| "titlebar-toggle-terminal".to_owned())
-                        .child(terminal_toggle_button),
-                )
-                .flex_shrink_0(),
-        );
+        .when_some(open_in_zed_button, |s, button| {
+            s.child(
+                div()
+                    .debug_selector(|| "titlebar-open-in-zed".to_owned())
+                    .child(button)
+                    .flex_shrink_0(),
+            )
+        });
+
+    let terminal_titlebar = {
+        let title = ide_workspace_id.and_then(|workspace_id| {
+            state
+                .workspace(workspace_id)
+                .map(|w| w.workspace_name.clone())
+        });
+        let right_width = if state.right_pane == RightPane::Terminal && terminal_toggle_enabled {
+            right_pane_width
+        } else if terminal_toggle_enabled {
+            px(44.0)
+        } else {
+            px(0.0)
+        };
+
+        div()
+            .w(right_width)
+            .h(titlebar_height)
+            .flex_shrink_0()
+            .flex()
+            .items_center()
+            .justify_between()
+            .px_3()
+            .border_b_1()
+            .border_color(theme.title_bar_border)
+            .bg(theme.title_bar)
+            .when(right_width > px(0.0), |s| {
+                s.border_l_1().border_color(theme.border)
+            })
+            .debug_selector(|| "titlebar-terminal".to_owned())
+            .when(
+                state.right_pane == RightPane::Terminal && terminal_toggle_enabled,
+                |s| {
+                    s.child(div().text_sm().font_semibold().child("Terminal"))
+                        .child(min_width_zero(
+                            div()
+                                .flex_1()
+                                .px_2()
+                                .truncate()
+                                .text_sm()
+                                .child(title.unwrap_or_default()),
+                        ))
+                },
+            )
+            .child(
+                div()
+                    .debug_selector(|| "titlebar-toggle-terminal".to_owned())
+                    .child(terminal_toggle_button),
+            )
+    };
 
     div()
         .w_full()
         .flex()
         .child(sidebar_titlebar)
         .child(main_titlebar)
+        .child(terminal_titlebar)
         .into_any_element()
 }
 
@@ -2790,43 +2829,6 @@ impl LubanRootView {
         let theme = cx.theme();
         let debug_layout_enabled = self.debug_layout_enabled;
 
-        let workspace_header = match self.state.main_pane {
-            MainPane::Workspace(workspace_id) => {
-                let open_in_zed_button = {
-                    let view_handle = cx.entity().downgrade();
-                    Button::new("workspace-open-in-zed")
-                        .outline()
-                        .compact()
-                        .icon(IconName::ExternalLink)
-                        .label("Open")
-                        .tooltip("Open in Zed")
-                        .on_click(move |_, _, app| {
-                            let _ = view_handle.update(app, |view, cx| {
-                                view.dispatch(Action::OpenWorkspaceInIde { workspace_id }, cx);
-                            });
-                        })
-                };
-
-                div()
-                    .h(px(40.0))
-                    .px_4()
-                    .flex()
-                    .items_center()
-                    .justify_end()
-                    .border_b_1()
-                    .border_color(theme.border)
-                    .bg(theme.background)
-                    .debug_selector(|| "workspace-pane-header".to_owned())
-                    .child(
-                        div()
-                            .debug_selector(|| "workspace-open-in-zed".to_owned())
-                            .child(open_in_zed_button),
-                    )
-                    .into_any_element()
-            }
-            _ => div().hidden().into_any_element(),
-        };
-
         min_width_zero(min_height_zero(
             div()
                 .debug_selector(|| "main-pane".to_owned())
@@ -2872,7 +2874,6 @@ impl LubanRootView {
                             ),
                     )
                 })
-                .child(workspace_header)
                 .child(content),
         ))
         .into_any_element()
@@ -4447,6 +4448,44 @@ mod tests {
     }
 
     #[gpui::test]
+    async fn terminal_title_is_rendered_in_titlebar_when_visible(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "abandon-about".to_owned(),
+            branch_name: "repo/branch".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+        });
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
+        state.main_pane = MainPane::Workspace(workspace_id);
+        state.right_pane = RightPane::Terminal;
+
+        let (_view, window_cx) = cx.add_window_view(|_window, cx| {
+            let mut view = LubanRootView::with_state(services, state, cx);
+            view.terminal_enabled = true;
+            view.workspace_terminal_errors
+                .insert(workspace_id, "stub terminal".to_owned());
+            view
+        });
+        window_cx.simulate_resize(size(px(900.0), px(240.0)));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        assert!(
+            window_cx.debug_bounds("titlebar-terminal").is_some(),
+            "expected terminal header to be rendered in titlebar"
+        );
+    }
+
+    #[gpui::test]
     async fn titlebar_uses_branch_symbol_instead_of_github_icon(cx: &mut gpui::TestAppContext) {
         cx.update(gpui_component::init);
 
@@ -4526,7 +4565,7 @@ mod tests {
     }
 
     #[gpui::test]
-    async fn open_button_is_in_workspace_pane_header(cx: &mut gpui::TestAppContext) {
+    async fn open_button_is_in_titlebar_for_workspace(cx: &mut gpui::TestAppContext) {
         cx.update(gpui_component::init);
 
         let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
@@ -4552,22 +4591,22 @@ mod tests {
         window_cx.refresh().unwrap();
 
         assert!(
-            window_cx.debug_bounds("titlebar-open-in-zed").is_none(),
-            "open button should not be rendered in titlebar"
+            window_cx.debug_bounds("workspace-pane-header").is_none(),
+            "workspace header should not be rendered when controls are in titlebar"
         );
 
-        let header_bounds = window_cx
-            .debug_bounds("workspace-pane-header")
-            .expect("missing workspace pane header");
+        let titlebar_bounds = window_cx
+            .debug_bounds("titlebar-main")
+            .expect("missing titlebar main segment");
         let open_bounds = window_cx
-            .debug_bounds("workspace-open-in-zed")
-            .expect("missing workspace open button");
+            .debug_bounds("titlebar-open-in-zed")
+            .expect("missing titlebar open button");
 
         assert!(
-            open_bounds.right() <= header_bounds.right() + px(2.0),
-            "open={:?} header={:?}",
+            open_bounds.right() <= titlebar_bounds.right() + px(2.0),
+            "open={:?} titlebar={:?}",
             open_bounds,
-            header_bounds
+            titlebar_bounds
         );
     }
 
