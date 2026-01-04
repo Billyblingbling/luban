@@ -129,6 +129,8 @@ pub struct LubanRootView {
     sidebar_resize: Option<SidebarResizeState>,
     terminal_pane_width_preview: Option<Pixels>,
     terminal_pane_resize: Option<TerminalPaneResizeState>,
+    #[cfg(test)]
+    last_terminal_grid_size: Option<(u16, u16)>,
     workspace_terminals: HashMap<WorkspaceId, WorkspaceTerminal>,
     workspace_terminal_errors: HashMap<WorkspaceId, String>,
     chat_input: Option<gpui::Entity<InputState>>,
@@ -160,6 +162,8 @@ impl LubanRootView {
             sidebar_resize: None,
             terminal_pane_width_preview: None,
             terminal_pane_resize: None,
+            #[cfg(test)]
+            last_terminal_grid_size: None,
             workspace_terminals: HashMap::new(),
             workspace_terminal_errors: HashMap::new(),
             chat_input: None,
@@ -199,6 +203,8 @@ impl LubanRootView {
             sidebar_resize: None,
             terminal_pane_width_preview: None,
             terminal_pane_resize: None,
+            #[cfg(test)]
+            last_terminal_grid_size: None,
             workspace_terminals: HashMap::new(),
             workspace_terminal_errors: HashMap::new(),
             chat_input: None,
@@ -222,6 +228,11 @@ impl LubanRootView {
     #[cfg(test)]
     pub fn debug_state(&self) -> &AppState {
         &self.state
+    }
+
+    #[cfg(test)]
+    pub fn debug_last_terminal_grid_size(&self) -> Option<(u16, u16)> {
+        self.last_terminal_grid_size
     }
 
     fn dispatch(&mut self, action: Action, cx: &mut Context<Self>) {
@@ -869,6 +880,7 @@ impl gpui::Render for LubanRootView {
                                     let viewport_width = window.viewport_size().width;
                                     let _ = view_handle.update(app, |view, cx| {
                                         view.finish_sidebar_resize(viewport_width, cx);
+                                        view.resize_workspace_terminals(window, cx);
                                     });
                                 }
                             })
@@ -878,6 +890,7 @@ impl gpui::Render for LubanRootView {
                                     let viewport_width = window.viewport_size().width;
                                     let _ = view_handle.update(app, |view, cx| {
                                         view.finish_sidebar_resize(viewport_width, cx);
+                                        view.resize_workspace_terminals(window, cx);
                                     });
                                 }
                             }),
@@ -940,6 +953,7 @@ impl gpui::Render for LubanRootView {
                                             sidebar_width,
                                             cx,
                                         );
+                                        view.resize_workspace_terminals(window, cx);
                                     });
                                 }
                             })
@@ -953,6 +967,7 @@ impl gpui::Render for LubanRootView {
                                             sidebar_width,
                                             cx,
                                         );
+                                        view.resize_workspace_terminals(window, cx);
                                     });
                                 }
                             });
@@ -1148,10 +1163,14 @@ impl LubanRootView {
     }
 
     fn resize_workspace_terminals(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let sidebar_width = px(300.0);
+        let sidebar_width = self.sidebar_width(window);
         let Some((cols, rows)) = self.right_pane_grid_size(window, sidebar_width) else {
             return;
         };
+        #[cfg(test)]
+        {
+            self.last_terminal_grid_size = Some((cols, rows));
+        }
         for terminal in self.workspace_terminals.values() {
             if terminal.is_closed() {
                 continue;
@@ -5198,7 +5217,7 @@ mod tests {
             },
         });
 
-        let (_view, window_cx) = cx.add_window_view(|_window, cx| {
+        let (view, window_cx) = cx.add_window_view(|_window, cx| {
             let mut view = LubanRootView::with_state(services, state, cx);
             view.terminal_enabled = true;
             view.workspace_terminal_errors
@@ -5213,6 +5232,9 @@ mod tests {
         let initial_right_pane = window_cx
             .debug_bounds("workspace-right-pane")
             .expect("missing debug bounds for workspace-right-pane");
+        let initial_grid = view
+            .read_with(window_cx, |v, _| v.debug_last_terminal_grid_size())
+            .expect("missing initial terminal grid size");
         let resizer = window_cx
             .debug_bounds("terminal-pane-resizer")
             .expect("missing terminal pane resizer");
@@ -5239,6 +5261,14 @@ mod tests {
             "initial={:?} resized={:?}",
             initial_right_pane.size,
             resized_right_pane.size
+        );
+
+        let resized_grid = view
+            .read_with(window_cx, |v, _| v.debug_last_terminal_grid_size())
+            .expect("missing resized terminal grid size");
+        assert!(
+            resized_grid.0 > initial_grid.0,
+            "initial={initial_grid:?} resized={resized_grid:?}"
         );
     }
 
@@ -5305,6 +5335,65 @@ mod tests {
 
         let saved_width = view.read_with(window_cx, |v, _| v.debug_state().sidebar_width);
         assert!(saved_width.is_some());
+    }
+
+    #[gpui::test]
+    async fn terminal_grid_updates_after_sidebar_resize(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "abandon-about".to_owned(),
+            branch_name: "repo/branch".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+        });
+        let workspace_id = state.projects[0].workspaces[0].id;
+        state.main_pane = MainPane::Workspace(workspace_id);
+        state.right_pane = RightPane::Terminal;
+
+        let (view, window_cx) = cx.add_window_view(|_window, cx| {
+            let mut view = LubanRootView::with_state(services, state, cx);
+            view.terminal_enabled = true;
+            view.workspace_terminal_errors
+                .insert(workspace_id, "stub terminal".to_owned());
+            view
+        });
+
+        window_cx.simulate_resize(size(px(1200.0), px(720.0)));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        let initial_grid = view
+            .read_with(window_cx, |v, _| v.debug_last_terminal_grid_size())
+            .expect("missing initial terminal grid size");
+        let resizer = window_cx
+            .debug_bounds("sidebar-resizer")
+            .expect("missing debug bounds for sidebar-resizer");
+
+        let start = resizer.center();
+        let mid = point(start.x + px(24.0), start.y);
+        let end = point(start.x + px(160.0), start.y);
+        window_cx.simulate_mouse_down(start, gpui::MouseButton::Left, Modifiers::none());
+        window_cx.simulate_mouse_move(mid, Some(gpui::MouseButton::Left), Modifiers::none());
+        window_cx.simulate_mouse_move(end, Some(gpui::MouseButton::Left), Modifiers::none());
+        window_cx.simulate_mouse_up(end, gpui::MouseButton::Left, Modifiers::none());
+
+        for _ in 0..3 {
+            window_cx.run_until_parked();
+            window_cx.refresh().unwrap();
+        }
+
+        let resized_grid = view
+            .read_with(window_cx, |v, _| v.debug_last_terminal_grid_size())
+            .expect("missing resized terminal grid size");
+        assert_ne!(resized_grid, initial_grid);
     }
 
     #[gpui::test]
