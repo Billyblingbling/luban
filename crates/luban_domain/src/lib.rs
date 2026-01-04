@@ -411,6 +411,8 @@ pub enum Action {
         workspace_id: WorkspaceId,
     },
 
+    ToggleTerminalPane,
+
     AppStateLoaded {
         persisted: PersistedAppState,
     },
@@ -875,6 +877,23 @@ impl AppState {
                 conversation.entries.push(ConversationEntry::TurnCanceled);
                 vec![Effect::CancelAgentTurn { workspace_id }]
             }
+            Action::ToggleTerminalPane => {
+                let can_show_terminal = match self.main_pane {
+                    MainPane::Workspace(workspace_id) => self.workspace(workspace_id).is_some(),
+                    _ => false,
+                };
+
+                if can_show_terminal {
+                    self.right_pane = match self.right_pane {
+                        RightPane::Terminal => RightPane::None,
+                        RightPane::None => RightPane::Terminal,
+                    };
+                } else {
+                    self.right_pane = RightPane::None;
+                }
+
+                Vec::new()
+            }
 
             Action::AppStateLoaded { persisted } => {
                 if !self.projects.is_empty() {
@@ -1168,6 +1187,46 @@ mod tests {
         assert_eq!(state.right_pane, RightPane::Terminal);
 
         state.apply(Action::OpenProjectSettings { project_id });
+        assert_eq!(state.right_pane, RightPane::None);
+    }
+
+    #[test]
+    fn toggle_terminal_pane_hides_and_shows_when_workspace_open() {
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "w1".to_owned(),
+            branch_name: "repo/w1".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/w1"),
+        });
+        let workspace_id = state.projects[0].workspaces[0].id;
+        state.apply(Action::OpenWorkspace { workspace_id });
+
+        assert_eq!(state.right_pane, RightPane::Terminal);
+
+        state.apply(Action::ToggleTerminalPane);
+        assert_eq!(state.right_pane, RightPane::None);
+
+        state.apply(Action::ToggleTerminalPane);
+        assert_eq!(state.right_pane, RightPane::Terminal);
+    }
+
+    #[test]
+    fn toggle_terminal_pane_is_disabled_outside_workspace() {
+        let mut state = AppState::new();
+        state.apply(Action::ToggleTerminalPane);
+        assert_eq!(state.right_pane, RightPane::None);
+
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::OpenProjectSettings { project_id });
+        state.apply(Action::ToggleTerminalPane);
         assert_eq!(state.right_pane, RightPane::None);
     }
 

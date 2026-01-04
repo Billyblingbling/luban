@@ -748,7 +748,12 @@ impl gpui::Render for LubanRootView {
             .flex_col()
             .bg(theme.background)
             .text_color(theme.foreground)
-            .child(render_titlebar(cx, &self.state, sidebar_width))
+            .child(render_titlebar(
+                cx,
+                &self.state,
+                sidebar_width,
+                self.terminal_enabled,
+            ))
             .child(
                 div()
                     .flex_1()
@@ -915,6 +920,7 @@ fn render_titlebar(
     cx: &mut Context<LubanRootView>,
     state: &AppState,
     sidebar_width: gpui::Pixels,
+    terminal_enabled: bool,
 ) -> AnyElement {
     let theme = cx.theme();
     let view_handle = cx.entity().downgrade();
@@ -990,6 +996,35 @@ fn render_titlebar(
                 };
                 let _ = view_handle.update(app, |view, cx| {
                     view.dispatch(Action::OpenWorkspaceInIde { workspace_id }, cx);
+                });
+            })
+    };
+
+    let terminal_toggle_enabled = terminal_enabled && ide_workspace_id.is_some();
+    let terminal_toggle_icon = if state.right_pane == RightPane::Terminal {
+        IconName::PanelRightClose
+    } else {
+        IconName::PanelRightOpen
+    };
+    let terminal_toggle_tooltip = if state.right_pane == RightPane::Terminal {
+        "Hide terminal"
+    } else {
+        "Show terminal"
+    };
+    let terminal_toggle_button = {
+        let view_handle = cx.entity().downgrade();
+        Button::new("titlebar-toggle-terminal")
+            .ghost()
+            .compact()
+            .disabled(!terminal_toggle_enabled)
+            .icon(terminal_toggle_icon)
+            .tooltip(terminal_toggle_tooltip)
+            .on_click(move |_, _, app| {
+                if !terminal_toggle_enabled {
+                    return;
+                }
+                let _ = view_handle.update(app, |view, cx| {
+                    view.dispatch(Action::ToggleTerminalPane, cx);
                 });
             })
     };
@@ -1118,6 +1153,11 @@ fn render_titlebar(
                 .items_center()
                 .gap_2()
                 .child(worktree_chip)
+                .child(
+                    div()
+                        .debug_selector(|| "titlebar-toggle-terminal".to_owned())
+                        .child(terminal_toggle_button),
+                )
                 .child(open_in_zed_button),
         );
 
