@@ -1260,7 +1260,7 @@ fn render_project(
         })
         .group("")
         .debug_selector(move || format!("project-header-{project_index}"))
-        .child(
+        .child(min_width_zero(
             div()
                 .flex_1()
                 .flex()
@@ -1277,16 +1277,17 @@ fn render_project(
                 )
                 .child(
                     div()
-                        .max_w(px(260.0))
+                        .w_full()
                         .truncate()
                         .text_lg()
                         .font_semibold()
                         .child(project.name.clone()),
                 ),
-        )
+        ))
         .child(
             div()
                 .w(px(16.0))
+                .flex_shrink_0()
                 .debug_selector(move || format!("project-toggle-{project_index}"))
                 .child(
                     Icon::new(disclosure_icon)
@@ -1314,8 +1315,10 @@ fn render_project(
             .justify_between()
             .text_color(theme.muted_foreground)
             .hover(|s| s.bg(theme.sidebar_accent))
-            .child(
+            .debug_selector(move || format!("project-new-workspace-{project_index}"))
+            .child(min_width_zero(
                 div()
+                    .flex_1()
                     .flex()
                     .items_center()
                     .gap_2()
@@ -1334,19 +1337,26 @@ fn render_project(
                             .with_size(Size::Small)
                             .text_color(theme.muted_foreground),
                     )
-                    .child(div().text_sm().child("New workspace")),
-            )
+                    .child(min_width_zero(
+                        div().flex_1().truncate().text_sm().child("New workspace"),
+                    )),
+            ))
             .child(
-                Button::new(format!("project-settings-{project_index}"))
-                    .ghost()
-                    .compact()
-                    .icon(Icon::new(IconName::Ellipsis).text_color(theme.muted_foreground))
-                    .tooltip("Project settings")
-                    .on_click(move |_, _, app| {
-                        let _ = view_handle.update(app, |view, cx| {
-                            view.dispatch(Action::OpenProjectSettings { project_id }, cx);
-                        });
-                    }),
+                div()
+                    .flex_shrink_0()
+                    .debug_selector(move || format!("project-settings-{project_index}"))
+                    .child(
+                        Button::new(format!("project-settings-{project_index}"))
+                            .ghost()
+                            .compact()
+                            .icon(Icon::new(IconName::Ellipsis).text_color(theme.muted_foreground))
+                            .tooltip("Project settings")
+                            .on_click(move |_, _, app| {
+                                let _ = view_handle.update(app, |view, cx| {
+                                    view.dispatch(Action::OpenProjectSettings { project_id }, cx);
+                                });
+                            }),
+                    ),
             )
     };
 
@@ -1456,7 +1466,7 @@ fn render_workspace_row(
                     .text_color(theme.muted_foreground),
             ),
         )
-        .child(
+        .child(min_width_zero(
             div()
                 .flex_1()
                 .flex()
@@ -1485,12 +1495,13 @@ fn render_workspace_row(
                         .text_color(theme.muted_foreground)
                         .child(metadata),
                 ),
-        )
+        ))
         .child(
             div()
                 .flex()
                 .items_center()
                 .gap_2()
+                .flex_shrink_0()
                 .child(
                     div()
                         .text_xs()
@@ -4321,6 +4332,58 @@ mod tests {
         window_cx
             .debug_bounds("chat-send-message")
             .expect("missing chat composer send button");
+    }
+
+    #[gpui::test]
+    async fn sidebar_buttons_remain_visible_with_long_titles(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.projects[0].name = "a".repeat(256);
+        state.apply(Action::ToggleProjectExpanded { project_id });
+
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "w".repeat(128),
+            branch_name: "repo/branch".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/w1"),
+        });
+
+        let (_view, window_cx) =
+            cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+        window_cx.simulate_resize(size(px(320.0), px(480.0)));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        let header_bounds = window_cx
+            .debug_bounds("project-header-0")
+            .expect("missing debug bounds for project-header-0");
+        let toggle_bounds = window_cx
+            .debug_bounds("project-toggle-0")
+            .expect("missing debug bounds for project-toggle-0");
+        assert!(toggle_bounds.right() <= header_bounds.right() + px(2.0));
+
+        let new_workspace_bounds = window_cx
+            .debug_bounds("project-new-workspace-0")
+            .expect("missing debug bounds for project-new-workspace-0");
+        let settings_bounds = window_cx
+            .debug_bounds("project-settings-0")
+            .expect("missing debug bounds for project-settings-0");
+        assert!(settings_bounds.right() <= new_workspace_bounds.right() + px(2.0));
+
+        let row_bounds = window_cx
+            .debug_bounds("workspace-row-0-0")
+            .expect("missing debug bounds for workspace-row-0-0");
+        let archive_bounds = window_cx
+            .debug_bounds("workspace-archive-0-0")
+            .expect("missing debug bounds for workspace-archive-0-0");
+        assert!(archive_bounds.right() <= row_bounds.right() + px(2.0));
     }
 
     #[gpui::test]
