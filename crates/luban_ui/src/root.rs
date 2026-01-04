@@ -793,11 +793,20 @@ impl LubanRootView {
         }
 
         let available = viewport - sidebar_width;
-        let min_width = px(260.0);
+        let min_main_width = px(720.0);
+        let preferred_main_width = px(900.0);
         let max_width = px(420.0);
-        let ratio_width = px((f32::from(available) * 0.33).round());
+        let ratio_width = px((f32::from(available) * 0.33).round()).min(max_width);
 
-        ratio_width.max(min_width).min(max_width).min(available)
+        if available > preferred_main_width + px(1.0) {
+            let max_by_preferred_main = available - preferred_main_width;
+            ratio_width.min(max_by_preferred_main).min(available)
+        } else if available > min_main_width + px(1.0) {
+            let max_by_min_main = available - min_main_width;
+            ratio_width.min(max_by_min_main).min(available)
+        } else {
+            ratio_width.min(available)
+        }
     }
 
     fn right_pane_header_height(&self) -> gpui::Pixels {
@@ -4458,6 +4467,12 @@ mod tests {
             .debug_bounds("workspace-right-pane")
             .expect("missing debug bounds for workspace-right-pane");
 
+        assert!(
+            chat_bounds.size.width >= px(640.0),
+            "chat={:?} right_pane={:?}",
+            chat_bounds.size,
+            right_pane_bounds.size
+        );
         assert!(
             chat_bounds.size.width >= right_pane_bounds.size.width + px(120.0),
             "chat={:?} right_pane={:?}",
