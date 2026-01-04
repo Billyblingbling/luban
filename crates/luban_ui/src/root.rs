@@ -1850,6 +1850,23 @@ fn render_project(
             })
     };
 
+    let action_row = div()
+        .flex()
+        .items_center()
+        .gap_1()
+        .invisible()
+        .group_hover("", |s| s.visible())
+        .child(
+            div()
+                .debug_selector(move || format!("project-create-workspace-{project_index}"))
+                .child(create_button),
+        )
+        .child(
+            div()
+                .debug_selector(move || format!("project-settings-{project_index}"))
+                .child(settings_button),
+        );
+
     let header = div()
         .mx_3()
         .mt_2()
@@ -1869,7 +1886,7 @@ fn render_project(
                 .flex_1()
                 .flex()
                 .items_center()
-                .gap_2()
+                .gap_1()
                 .cursor_pointer()
                 .on_mouse_down(
                     MouseButton::Left,
@@ -1881,41 +1898,36 @@ fn render_project(
                 )
                 .child(min_width_zero(
                     div()
-                        .flex_1()
-                        .truncate()
-                        .text_lg()
-                        .font_semibold()
-                        .child(project.name.clone()),
-                ))
-                .child(
-                    div()
-                        .w(px(16.0))
-                        .flex_shrink_0()
-                        .debug_selector(move || format!("project-toggle-{project_index}"))
+                        .flex()
+                        .items_center()
+                        .gap_1()
+                        .child(min_width_zero(
+                            div()
+                                .debug_selector(move || format!("project-title-{project_index}"))
+                                .truncate()
+                                .text_lg()
+                                .font_semibold()
+                                .child(project.name.clone()),
+                        ))
                         .child(
-                            Icon::new(disclosure_icon)
-                                .with_size(Size::Small)
-                                .text_color(theme.muted_foreground),
+                            div()
+                                .flex_shrink_0()
+                                .debug_selector(move || format!("project-toggle-{project_index}"))
+                                .child(
+                                    Icon::new(disclosure_icon)
+                                        .with_size(Size::Small)
+                                        .text_color(theme.muted_foreground),
+                                ),
                         ),
-                ),
+                )),
         ))
         .child(
             div()
                 .flex()
                 .items_center()
-                .gap_1()
                 .flex_shrink_0()
                 .debug_selector(move || format!("project-actions-{project_index}"))
-                .child(
-                    div()
-                        .debug_selector(move || format!("project-create-workspace-{project_index}"))
-                        .child(create_button),
-                )
-                .child(
-                    div()
-                        .debug_selector(move || format!("project-settings-{project_index}"))
-                        .child(settings_button),
-                ),
+                .child(action_row),
         );
 
     let main_workspace = project
@@ -5728,6 +5740,14 @@ mod tests {
         let header_bounds = window_cx
             .debug_bounds("project-header-0")
             .expect("missing debug bounds for project-header-0");
+        let title_bounds = window_cx
+            .debug_bounds("project-title-0")
+            .expect("missing debug bounds for project-title-0");
+
+        window_cx.simulate_mouse_move(header_bounds.center(), None, Modifiers::none());
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
         let toggle_bounds = window_cx
             .debug_bounds("project-toggle-0")
             .expect("missing debug bounds for project-toggle-0");
@@ -5740,7 +5760,7 @@ mod tests {
 
         assert!(settings_bounds.right() <= header_bounds.right() + px(2.0));
         assert!(create_bounds.right() <= settings_bounds.left() + px(4.0));
-        assert!(toggle_bounds.right() <= create_bounds.left() + px(8.0));
+        assert!(toggle_bounds.left() <= title_bounds.right() + px(8.0));
 
         let row_bounds = window_cx
             .debug_bounds("workspace-row-0-0")
