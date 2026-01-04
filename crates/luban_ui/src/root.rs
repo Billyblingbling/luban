@@ -1856,7 +1856,7 @@ impl LubanRootView {
                             .flex_col()
                             .gap_3()
                             .whitespace_normal()
-                            .pb(px(160.0))
+                            .pb_2()
                             .children(history_children)
                             .when_some(tail_duration, |s, (elapsed, running)| {
                                 s.child(
@@ -2032,111 +2032,107 @@ impl LubanRootView {
                     div().hidden().into_any_element()
                 };
 
-                let composer = div()
-                    .absolute()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .px_4()
-                    .pb_4()
-                    .child(
-                        div()
-                            .w_full()
-                            .max_w(px(900.0))
-                            .mx_auto()
-                            .p_2()
-                            .rounded_lg()
-                            .bg(theme.background)
-                            .border_1()
-                            .border_color(theme.border)
-                            .child(
-                                div()
-                                    .w_full()
-                                    .flex()
-                                    .flex_col()
-                                    .gap_2()
-                                    .child(queue_panel)
-                                    .child(
-                                        div()
-                                            .w_full()
-                                            .flex()
-                                            .items_end()
-                                            .gap_2()
-                                            .child(
-                                                div().flex_1().child(
-                                                    Input::new(&input_state)
-                                                        .appearance(false)
-                                                        .with_size(Size::Large),
-                                                ),
-                                            )
-                                            .child({
-                                                let view_handle = view_handle.clone();
-                                                let input_state = input_state.clone();
-                                                let draft = draft.clone();
-                                                Button::new("chat-send-message")
-                                                    .primary()
-                                                    .compact()
-                                                    .disabled(send_disabled)
-                                                    .icon(Icon::new(IconName::ArrowUp))
-                                                    .tooltip(if is_running {
-                                                        "Queue"
-                                                    } else {
-                                                        "Send"
-                                                    })
-                                                    .on_click(move |_, window, app| {
-                                                        if draft.trim().is_empty() {
-                                                            return;
-                                                        }
-
-                                                        input_state.update(app, |state, cx| {
-                                                            state.set_value("", window, cx);
-                                                        });
-
-                                                        let _ =
-                                                            view_handle.update(app, |view, cx| {
-                                                                view.dispatch(
-                                                                    Action::SendAgentMessage {
-                                                                        workspace_id,
-                                                                        text: draft.clone(),
-                                                                    },
-                                                                    cx,
-                                                                );
-                                                            });
-                                                    })
-                                                    .into_any_element()
-                                            })
-                                            .when(is_running, |s| {
-                                                let view_handle = view_handle.clone();
-                                                s.child(
-                                                    Button::new("chat-cancel-turn")
-                                                        .danger()
+                let composer = div().w_full().px_4().pb_4().child(
+                    div()
+                        .w_full()
+                        .max_w(px(900.0))
+                        .mx_auto()
+                        .p_2()
+                        .rounded_lg()
+                        .bg(theme.background)
+                        .border_1()
+                        .border_color(theme.border)
+                        .child(
+                            div()
+                                .w_full()
+                                .flex()
+                                .flex_col()
+                                .gap_2()
+                                .child(queue_panel)
+                                .child(
+                                    div()
+                                        .w_full()
+                                        .flex()
+                                        .items_end()
+                                        .gap_2()
+                                        .child(
+                                            div().flex_1().child(
+                                                Input::new(&input_state)
+                                                    .appearance(false)
+                                                    .with_size(Size::Large),
+                                            ),
+                                        )
+                                        .child(
+                                            div()
+                                                .debug_selector(|| "chat-send-message".to_owned())
+                                                .child({
+                                                    let view_handle = view_handle.clone();
+                                                    let input_state = input_state.clone();
+                                                    let draft = draft.clone();
+                                                    Button::new("chat-send-message")
+                                                        .primary()
                                                         .compact()
-                                                        .icon(Icon::new(IconName::CircleX))
-                                                        .tooltip("Cancel")
-                                                        .on_click(move |_, _, app| {
+                                                        .disabled(send_disabled)
+                                                        .icon(Icon::new(IconName::ArrowUp))
+                                                        .tooltip(if is_running {
+                                                            "Queue"
+                                                        } else {
+                                                            "Send"
+                                                        })
+                                                        .on_click(move |_, window, app| {
+                                                            if draft.trim().is_empty() {
+                                                                return;
+                                                            }
+
+                                                            input_state.update(app, |state, cx| {
+                                                                state.set_value("", window, cx);
+                                                            });
+
                                                             let _ = view_handle.update(
                                                                 app,
                                                                 |view, cx| {
                                                                     view.dispatch(
-                                                                        Action::CancelAgentTurn {
+                                                                        Action::SendAgentMessage {
                                                                             workspace_id,
+                                                                            text: draft.clone(),
                                                                         },
                                                                         cx,
                                                                     );
                                                                 },
                                                             );
-                                                        }),
-                                                )
-                                            }),
-                                    ),
-                            ),
-                    );
+                                                        })
+                                                        .into_any_element()
+                                                }),
+                                        )
+                                        .when(is_running, |s| {
+                                            let view_handle = view_handle.clone();
+                                            s.child(
+                                                Button::new("chat-cancel-turn")
+                                                    .danger()
+                                                    .compact()
+                                                    .icon(Icon::new(IconName::CircleX))
+                                                    .tooltip("Cancel")
+                                                    .on_click(move |_, _, app| {
+                                                        let _ =
+                                                            view_handle.update(app, |view, cx| {
+                                                                view.dispatch(
+                                                                    Action::CancelAgentTurn {
+                                                                        workspace_id,
+                                                                    },
+                                                                    cx,
+                                                                );
+                                                            });
+                                                    }),
+                                            )
+                                        }),
+                                ),
+                        ),
+                );
 
                 div()
                     .flex()
                     .flex_col()
                     .h_full()
-                    .relative()
                     .child(history)
                     .child(composer)
                     .into_any_element()
@@ -4285,6 +4281,46 @@ mod tests {
 
         let copied = window_cx.read_from_clipboard().and_then(|item| item.text());
         assert_eq!(copied, Some(message));
+    }
+
+    #[gpui::test]
+    async fn chat_composer_is_visible_in_workspace(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "abandon-about".to_owned(),
+            branch_name: "luban/abandon-about".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+        });
+        let workspace_id = state.projects[0].workspaces[0].id;
+        state.main_pane = MainPane::Workspace(workspace_id);
+        state.apply(Action::ConversationLoaded {
+            workspace_id,
+            snapshot: ConversationSnapshot {
+                thread_id: Some("thread-1".to_owned()),
+                entries: vec![ConversationEntry::UserMessage {
+                    text: "Test".to_owned(),
+                }],
+            },
+        });
+
+        let (_view, window_cx) =
+            cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+        window_cx.simulate_resize(size(px(720.0), px(400.0)));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        window_cx
+            .debug_bounds("chat-send-message")
+            .expect("missing chat composer send button");
     }
 
     #[gpui::test]
