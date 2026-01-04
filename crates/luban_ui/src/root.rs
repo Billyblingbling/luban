@@ -34,6 +34,25 @@ pub struct CreatedWorkspace {
     pub worktree_path: PathBuf,
 }
 
+const TERMINAL_PANE_RESIZER_WIDTH: f32 = 6.0;
+
+#[derive(Clone, Copy, Debug)]
+struct TerminalPaneResizeState {
+    start_mouse_x: Pixels,
+    start_width: Pixels,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct TerminalPaneResizeDrag;
+
+struct TerminalPaneResizeGhost;
+
+impl gpui::Render for TerminalPaneResizeGhost {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        div().w(px(0.0)).h(px(0.0)).hidden()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct RunAgentTurnRequest {
     pub project_slug: String,
@@ -88,6 +107,8 @@ pub struct LubanRootView {
     terminal_enabled: bool,
     terminal_resize_hooked: bool,
     debug_layout_enabled: bool,
+    terminal_pane_width_preview: Option<Pixels>,
+    terminal_pane_resize: Option<TerminalPaneResizeState>,
     workspace_terminals: HashMap<WorkspaceId, WorkspaceTerminal>,
     workspace_terminal_errors: HashMap<WorkspaceId, String>,
     chat_input: Option<gpui::Entity<InputState>>,
@@ -115,6 +136,8 @@ impl LubanRootView {
             terminal_enabled: true,
             terminal_resize_hooked: false,
             debug_layout_enabled: debug_layout::enabled_from_env(),
+            terminal_pane_width_preview: None,
+            terminal_pane_resize: None,
             workspace_terminals: HashMap::new(),
             workspace_terminal_errors: HashMap::new(),
             chat_input: None,
@@ -150,6 +173,8 @@ impl LubanRootView {
             terminal_enabled: false,
             terminal_resize_hooked: false,
             debug_layout_enabled: false,
+            terminal_pane_width_preview: None,
+            terminal_pane_resize: None,
             workspace_terminals: HashMap::new(),
             workspace_terminal_errors: HashMap::new(),
             chat_input: None,
@@ -742,18 +767,23 @@ impl gpui::Render for LubanRootView {
         self.ensure_terminal_resize_observer(window, cx);
 
         let theme = cx.theme();
+        let background = theme.background;
+        let foreground = theme.foreground;
+        let transparent = theme.transparent;
+        let muted = theme.muted;
         let sidebar_width = px(300.0);
         let right_pane_width = self.right_pane_width(window, sidebar_width);
         let should_render_right_pane = self.terminal_enabled
             && self.state.right_pane == RightPane::Terminal
             && right_pane_width > px(0.0);
+        let view_handle = cx.entity().downgrade();
 
         div()
             .size_full()
             .flex()
             .flex_col()
-            .bg(theme.background)
-            .text_color(theme.foreground)
+            .bg(background)
+            .text_color(foreground)
             .child(render_titlebar(
                 cx,
                 &self.state,
@@ -767,7 +797,81 @@ impl gpui::Render for LubanRootView {
                     .child(render_sidebar(cx, &self.state, sidebar_width))
                     .child(self.render_main(window, cx))
                     .when(should_render_right_pane, |s| {
-                        s.child(self.render_right_pane(right_pane_width, window, cx))
+                        let resizer = div()
+                            .w(px(TERMINAL_PANE_RESIZER_WIDTH))
+                            .h_full()
+                            .flex_shrink_0()
+                            .cursor(CursorStyle::ResizeLeftRight)
+                            .id("terminal-pane-resizer")
+                            .debug_selector(|| "terminal-pane-resizer".to_owned())
+                            .bg(transparent)
+                            .hover(move |s| s.bg(muted))
+                            .on_drag(TerminalPaneResizeDrag, {
+                                let view_handle = view_handle.clone();
+                                move |_, _offset, window, app| {
+                                    let start_mouse_x = window.mouse_position().x;
+                                    let start_width = right_pane_width;
+                                    let _ = view_handle.update(app, |view, cx| {
+                                        view.terminal_pane_resize = Some(TerminalPaneResizeState {
+                                            start_mouse_x,
+                                            start_width,
+                                        });
+                                        view.terminal_pane_width_preview = Some(start_width);
+                                        cx.notify();
+                                    });
+                                    app.new(|_| TerminalPaneResizeGhost)
+                                }
+                            })
+                            .on_drag_move::<TerminalPaneResizeDrag>({
+                                let view_handle = view_handle.clone();
+                                move |event, window, app| {
+                                    let mouse_x = event.event.position.x;
+                                    let viewport_width = window.viewport_size().width;
+                                    let _ = view_handle.update(app, |view, cx| {
+                                        let Some(state) = view.terminal_pane_resize else {
+                                            return;
+                                        };
+                                        let desired =
+                                            state.start_width - (mouse_x - state.start_mouse_x);
+                                        let clamped = view.clamp_terminal_pane_width(
+                                            desired,
+                                            viewport_width,
+                                            sidebar_width,
+                                        );
+                                        view.terminal_pane_width_preview = Some(clamped);
+                                        cx.notify();
+                                    });
+                                }
+                            })
+                            .on_mouse_up(MouseButton::Left, {
+                                let view_handle = view_handle.clone();
+                                move |_, window, app| {
+                                    let viewport_width = window.viewport_size().width;
+                                    let _ = view_handle.update(app, |view, cx| {
+                                        view.finish_terminal_pane_resize(
+                                            viewport_width,
+                                            sidebar_width,
+                                            cx,
+                                        );
+                                    });
+                                }
+                            })
+                            .on_mouse_up_out(MouseButton::Left, {
+                                let view_handle = view_handle.clone();
+                                move |_, window, app| {
+                                    let viewport_width = window.viewport_size().width;
+                                    let _ = view_handle.update(app, |view, cx| {
+                                        view.finish_terminal_pane_resize(
+                                            viewport_width,
+                                            sidebar_width,
+                                            cx,
+                                        );
+                                    });
+                                }
+                            });
+
+                        s.child(resizer)
+                            .child(self.render_right_pane(right_pane_width, window, cx))
                     }),
             ))
     }
@@ -791,16 +895,37 @@ impl LubanRootView {
 
     fn right_pane_width(&self, window: &Window, sidebar_width: Pixels) -> gpui::Pixels {
         let viewport = window.viewport_size().width;
-        if viewport <= sidebar_width + px(1.0) {
+        let divider_width = px(TERMINAL_PANE_RESIZER_WIDTH);
+        if viewport <= sidebar_width + divider_width + px(1.0) {
             return px(0.0);
         }
 
-        let available = viewport - sidebar_width;
+        let available = viewport - sidebar_width - divider_width;
         let min_main_width = px(640.0);
+        let min_user_main_width = px(480.0);
         let preferred_main_width = px(900.0);
         let min_width = px(240.0);
         let max_width = px(480.0);
         let ratio_width = px((f32::from(available) * 0.34).round()).clamp(min_width, max_width);
+
+        let clamp_user_width = |desired: Pixels| {
+            let max_by_main = if available > min_user_main_width + px(1.0) {
+                available - min_user_main_width
+            } else {
+                available
+            };
+            desired
+                .clamp(min_width, max_width)
+                .min(max_by_main)
+                .min(available)
+        };
+
+        if let Some(desired) = self
+            .terminal_pane_width_preview
+            .or_else(|| self.state.terminal_pane_width.map(|v| px(v as f32)))
+        {
+            return clamp_user_width(desired);
+        }
 
         if available > preferred_main_width + px(1.0) {
             let max_by_preferred_main = available - preferred_main_width;
@@ -811,6 +936,50 @@ impl LubanRootView {
         } else {
             ratio_width.min(available)
         }
+    }
+
+    fn clamp_terminal_pane_width(
+        &self,
+        desired: Pixels,
+        viewport_width: Pixels,
+        sidebar_width: Pixels,
+    ) -> Pixels {
+        let divider_width = px(TERMINAL_PANE_RESIZER_WIDTH);
+        if viewport_width <= sidebar_width + divider_width + px(1.0) {
+            return px(0.0);
+        }
+
+        let available = viewport_width - sidebar_width - divider_width;
+        let min_main_width = px(480.0);
+        let min_width = px(240.0);
+        let max_width = px(480.0);
+        let max_by_main = if available > min_main_width + px(1.0) {
+            available - min_main_width
+        } else {
+            available
+        };
+
+        desired
+            .clamp(min_width, max_width)
+            .min(max_by_main)
+            .min(available)
+    }
+
+    fn finish_terminal_pane_resize(
+        &mut self,
+        viewport_width: Pixels,
+        sidebar_width: Pixels,
+        cx: &mut Context<Self>,
+    ) {
+        self.terminal_pane_resize = None;
+
+        let Some(preview) = self.terminal_pane_width_preview.take() else {
+            return;
+        };
+
+        let clamped = self.clamp_terminal_pane_width(preview, viewport_width, sidebar_width);
+        let width = f32::from(clamped).round().max(0.0) as u16;
+        self.dispatch(Action::TerminalPaneWidthChanged { width }, cx);
     }
 
     fn right_pane_header_height(&self) -> gpui::Pixels {
@@ -3552,6 +3721,7 @@ mod tests {
         fn load_app_state(&self) -> Result<PersistedAppState, String> {
             Ok(PersistedAppState {
                 projects: Vec::new(),
+                terminal_pane_width: None,
             })
         }
 
@@ -4848,6 +5018,81 @@ mod tests {
             right_pane_bounds.size.width >= px(240.0),
             "right_pane={:?}",
             right_pane_bounds.size
+        );
+    }
+
+    #[gpui::test]
+    async fn terminal_pane_can_be_resized_by_dragging_divider(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "abandon-about".to_owned(),
+            branch_name: "repo/branch".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+        });
+        let workspace_id = state.projects[0].workspaces[0].id;
+        state.main_pane = MainPane::Workspace(workspace_id);
+        state.right_pane = RightPane::Terminal;
+
+        state.apply(Action::ConversationLoaded {
+            workspace_id,
+            snapshot: ConversationSnapshot {
+                thread_id: Some("thread-1".to_owned()),
+                entries: vec![ConversationEntry::UserMessage {
+                    text: "Test".to_owned(),
+                }],
+            },
+        });
+
+        let (_view, window_cx) = cx.add_window_view(|_window, cx| {
+            let mut view = LubanRootView::with_state(services, state, cx);
+            view.terminal_enabled = true;
+            view.workspace_terminal_errors
+                .insert(workspace_id, "stub terminal".to_owned());
+            view
+        });
+
+        window_cx.simulate_resize(size(px(1200.0), px(720.0)));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        let initial_right_pane = window_cx
+            .debug_bounds("workspace-right-pane")
+            .expect("missing debug bounds for workspace-right-pane");
+        let resizer = window_cx
+            .debug_bounds("terminal-pane-resizer")
+            .expect("missing terminal pane resizer");
+
+        let start = resizer.center();
+        let mid = point(start.x - px(24.0), start.y);
+        let end = point(start.x - px(200.0), start.y);
+
+        window_cx.simulate_mouse_down(start, gpui::MouseButton::Left, Modifiers::none());
+        window_cx.simulate_mouse_move(mid, Some(gpui::MouseButton::Left), Modifiers::none());
+        window_cx.simulate_mouse_move(end, Some(gpui::MouseButton::Left), Modifiers::none());
+        window_cx.simulate_mouse_up(end, gpui::MouseButton::Left, Modifiers::none());
+
+        for _ in 0..3 {
+            window_cx.run_until_parked();
+            window_cx.refresh().unwrap();
+        }
+
+        let resized_right_pane = window_cx
+            .debug_bounds("workspace-right-pane")
+            .expect("missing debug bounds for workspace-right-pane");
+        assert!(
+            resized_right_pane.size.width >= initial_right_pane.size.width + px(120.0),
+            "initial={:?} resized={:?}",
+            initial_right_pane.size,
+            resized_right_pane.size
         );
     }
 

@@ -4,7 +4,7 @@ use rusqlite::{Connection, OptionalExtension as _, params, params_from_iter};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
-const LATEST_SCHEMA_VERSION: u32 = 2;
+const LATEST_SCHEMA_VERSION: u32 = 3;
 
 const MIGRATIONS: &[(u32, &str)] = &[
     (
@@ -19,6 +19,13 @@ const MIGRATIONS: &[(u32, &str)] = &[
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/migrations/0002_conversation_keys.sql"
+        )),
+    ),
+    (
+        3,
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/migrations/0003_app_settings.sql"
         )),
     ),
 ];
@@ -383,7 +390,21 @@ impl SqliteDatabase {
             });
         }
 
-        Ok(PersistedAppState { projects })
+        let terminal_pane_width = self
+            .conn
+            .query_row(
+                "SELECT value FROM app_settings WHERE key = 'terminal_pane_width'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .context("failed to load terminal pane width")?
+            .and_then(|value| u16::try_from(value).ok());
+
+        Ok(PersistedAppState {
+            projects,
+            terminal_pane_width,
+        })
     }
 
     fn save_app_state(&mut self, snapshot: &PersistedAppState) -> anyhow::Result<()> {
@@ -461,6 +482,22 @@ impl SqliteDatabase {
             tx.execute(
                 &format!("DELETE FROM workspaces WHERE id NOT IN ({placeholders})"),
                 params_from_iter(workspace_ids.iter().copied().map(|id| id as i64)),
+            )?;
+        }
+
+        if let Some(value) = snapshot.terminal_pane_width {
+            tx.execute(
+                "INSERT INTO app_settings (key, value, created_at, updated_at)
+                 VALUES (?1, ?2, COALESCE((SELECT created_at FROM app_settings WHERE key = ?1), ?3), ?3)
+                 ON CONFLICT(key) DO UPDATE SET
+                   value = excluded.value,
+                   updated_at = excluded.updated_at",
+                params!["terminal_pane_width", value as i64, now],
+            )?;
+        } else {
+            tx.execute(
+                "DELETE FROM app_settings WHERE key = 'terminal_pane_width'",
+                [],
             )?;
         }
 
@@ -712,12 +749,12 @@ mod tests {
         let count: i64 = db
             .conn
             .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('projects','workspaces','conversations','conversation_entries')",
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('projects','workspaces','conversations','conversation_entries','app_settings')",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(count, 4);
+        assert_eq!(count, 5);
     }
 
     #[test]
@@ -740,6 +777,7 @@ mod tests {
                     last_activity_at_unix_seconds: None,
                 }],
             }],
+            terminal_pane_width: Some(360),
         };
 
         db.save_app_state(&snapshot).unwrap();
@@ -767,6 +805,7 @@ mod tests {
                     last_activity_at_unix_seconds: None,
                 }],
             }],
+            terminal_pane_width: None,
         };
         db.save_app_state(&snapshot).unwrap();
 
@@ -814,6 +853,7 @@ mod tests {
                     last_activity_at_unix_seconds: None,
                 }],
             }],
+            terminal_pane_width: None,
         };
         db.save_app_state(&snapshot).unwrap();
 

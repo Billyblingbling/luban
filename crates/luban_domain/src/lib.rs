@@ -298,6 +298,7 @@ pub struct AppState {
     pub projects: Vec<Project>,
     pub main_pane: MainPane,
     pub right_pane: RightPane,
+    pub terminal_pane_width: Option<u16>,
     pub conversations: HashMap<WorkspaceId, WorkspaceConversation>,
     pub last_error: Option<String>,
 }
@@ -305,6 +306,7 @@ pub struct AppState {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PersistedAppState {
     pub projects: Vec<PersistedProject>,
+    pub terminal_pane_width: Option<u16>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -412,6 +414,9 @@ pub enum Action {
     },
 
     ToggleTerminalPane,
+    TerminalPaneWidthChanged {
+        width: u16,
+    },
 
     AppStateLoaded {
         persisted: PersistedAppState,
@@ -464,6 +469,7 @@ impl AppState {
             projects: Vec::new(),
             main_pane: MainPane::None,
             right_pane: RightPane::None,
+            terminal_pane_width: None,
             conversations: HashMap::new(),
             last_error: None,
         }
@@ -894,6 +900,10 @@ impl AppState {
 
                 Vec::new()
             }
+            Action::TerminalPaneWidthChanged { width } => {
+                self.terminal_pane_width = Some(width);
+                vec![Effect::SaveAppState]
+            }
 
             Action::AppStateLoaded { persisted } => {
                 if !self.projects.is_empty() {
@@ -927,6 +937,7 @@ impl AppState {
                             .collect(),
                     })
                     .collect();
+                self.terminal_pane_width = persisted.terminal_pane_width;
 
                 let max_project_id = self.projects.iter().map(|p| p.id.0).max().unwrap_or(0);
                 let max_workspace_id = self
@@ -987,6 +998,7 @@ impl AppState {
                         .collect(),
                 })
                 .collect(),
+            terminal_pane_width: self.terminal_pane_width,
         }
     }
 
@@ -1228,6 +1240,27 @@ mod tests {
         state.apply(Action::OpenProjectSettings { project_id });
         state.apply(Action::ToggleTerminalPane);
         assert_eq!(state.right_pane, RightPane::None);
+    }
+
+    #[test]
+    fn terminal_pane_width_is_persisted() {
+        let mut state = AppState::new();
+        let effects = state.apply(Action::TerminalPaneWidthChanged { width: 360 });
+        assert_eq!(state.terminal_pane_width, Some(360));
+        assert_eq!(effects.len(), 1);
+        assert!(matches!(effects[0], Effect::SaveAppState));
+
+        let persisted = state.to_persisted();
+        assert_eq!(persisted.terminal_pane_width, Some(360));
+
+        let mut state = AppState::new();
+        state.apply(Action::AppStateLoaded {
+            persisted: PersistedAppState {
+                projects: Vec::new(),
+                terminal_pane_width: Some(480),
+            },
+        });
+        assert_eq!(state.terminal_pane_width, Some(480));
     }
 
     #[test]
