@@ -2415,7 +2415,6 @@ dependencies = [
 [[package]]
 name = "gpui_ghostty_terminal"
 version = "0.1.0"
-source = "git+https://github.com/Xuanwo/gpui-ghostty?rev=1c242cb67dd3afe4dd4ccc1a1a13b921c8c03df9#1c242cb67dd3afe4dd4ccc1a1a13b921c8c03df9"
 dependencies = [
  "base64",
  "ghostty_vt",
