@@ -2030,7 +2030,7 @@ fn render_workspace_row(
         .px_2()
         .py_2()
         .flex()
-        .items_start()
+        .items_center()
         .gap_3()
         .rounded_md()
         .bg(if is_selected {
@@ -2048,7 +2048,6 @@ fn render_workspace_row(
         .debug_selector(move || format!("workspace-row-{project_index}-{workspace_index}"))
         .child(
             div()
-                .pt(px(1.0))
                 .debug_selector(move || {
                     if pr_info.is_some() {
                         format!("workspace-git-icon-pr-{project_index}-{workspace_index}")
@@ -2188,7 +2187,7 @@ fn render_main_workspace_row(
         .px_2()
         .py_2()
         .flex()
-        .items_start()
+        .items_center()
         .gap_3()
         .rounded_md()
         .bg(if is_selected {
@@ -2205,12 +2204,14 @@ fn render_main_workspace_row(
         })
         .debug_selector(move || format!("workspace-main-row-{project_index}"))
         .child(
-            div().pt(px(1.0)).child(
-                Icon::empty()
-                    .path("icons/house.svg")
-                    .with_size(Size::Small)
-                    .text_color(theme.muted_foreground),
-            ),
+            div()
+                .debug_selector(move || format!("workspace-main-icon-{project_index}"))
+                .child(
+                    Icon::empty()
+                        .path("icons/house.svg")
+                        .with_size(Size::Small)
+                        .text_color(theme.muted_foreground),
+                ),
         )
         .child(min_width_zero(
             div()
@@ -4860,6 +4861,10 @@ mod tests {
             "main workspace should not render a separate badge label"
         );
         assert!(
+            window_cx.debug_bounds("workspace-main-icon-0").is_some(),
+            "main workspace should render a leading icon"
+        );
+        assert!(
             window_cx.debug_bounds("workspace-row-0-0").is_none(),
             "main workspace should not be rendered as a normal workspace row"
         );
@@ -5815,6 +5820,60 @@ mod tests {
             .debug_bounds("workspace-archive-0-0")
             .expect("missing debug bounds for workspace-archive-0-0");
         assert!(archive_bounds.right() <= row_bounds.right() + px(2.0));
+    }
+
+    #[gpui::test]
+    async fn workspace_icons_are_vertically_centered_in_rows(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::ToggleProjectExpanded { project_id });
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "w1".to_owned(),
+            branch_name: "repo/w1".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/w1"),
+        });
+
+        let (_view, window_cx) =
+            cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+        window_cx.simulate_resize(size(px(420.0), px(360.0)));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        let main_row = window_cx
+            .debug_bounds("workspace-main-row-0")
+            .expect("missing main workspace row");
+        let main_icon = window_cx
+            .debug_bounds("workspace-main-icon-0")
+            .expect("missing main workspace icon");
+        let main_dy = (main_icon.center().y - main_row.center().y).abs();
+        assert!(
+            main_dy <= px(2.0),
+            "main icon should be vertically centered: icon={:?} row={:?}",
+            main_icon,
+            main_row
+        );
+
+        let row = window_cx
+            .debug_bounds("workspace-row-0-0")
+            .expect("missing workspace row");
+        let icon = window_cx
+            .debug_bounds("workspace-git-icon-branch-0-0")
+            .expect("missing workspace icon");
+        let dy = (icon.center().y - row.center().y).abs();
+        assert!(
+            dy <= px(2.0),
+            "workspace icon should be vertically centered: icon={:?} row={:?}",
+            icon,
+            row
+        );
     }
 
     #[gpui::test]
