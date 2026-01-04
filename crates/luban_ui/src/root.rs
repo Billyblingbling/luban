@@ -1672,11 +1672,19 @@ fn render_project(
             )
     };
 
-    let children = project
+    let main_workspace = project
         .workspaces
         .iter()
+        .find(|w| w.status == WorkspaceStatus::Active && w.worktree_path == project.path)
+        .map(|workspace| {
+            render_main_workspace_row(cx, project_index, &project.slug, workspace, main_pane)
+        });
+
+    let workspace_rows: Vec<AnyElement> = project
+        .workspaces
+        .iter()
+        .filter(|w| w.status == WorkspaceStatus::Active && w.worktree_path != project.path)
         .enumerate()
-        .filter(|(_, w)| w.status == WorkspaceStatus::Active)
         .map(|(workspace_index, workspace)| {
             render_workspace_row(
                 cx,
@@ -1687,7 +1695,8 @@ fn render_project(
                 workspace,
                 main_pane,
             )
-        });
+        })
+        .collect();
 
     div()
         .flex()
@@ -1698,8 +1707,9 @@ fn render_project(
                 div()
                     .flex()
                     .flex_col()
+                    .when_some(main_workspace, |s, row| s.child(row))
                     .child(new_workspace_row)
-                    .child(div().mt_1().flex().flex_col().children(children)),
+                    .child(div().mt_1().flex().flex_col().children(workspace_rows)),
             )
         })
         .into_any_element()
@@ -1878,6 +1888,89 @@ fn render_workspace_row(
         );
 
     row.into_any_element()
+}
+
+fn render_main_workspace_row(
+    cx: &mut Context<LubanRootView>,
+    project_index: usize,
+    project_slug: &str,
+    workspace: &luban_domain::Workspace,
+    main_pane: MainPane,
+) -> AnyElement {
+    let theme = cx.theme();
+    let is_selected = matches!(main_pane, MainPane::Workspace(id) if id == workspace.id);
+    let workspace_id = workspace.id;
+
+    let title = project_slug.to_owned();
+    let metadata = workspace.branch_name.clone();
+
+    div()
+        .mx_3()
+        .px_2()
+        .py_2()
+        .flex()
+        .items_start()
+        .gap_3()
+        .rounded_md()
+        .bg(if is_selected {
+            theme.sidebar_accent
+        } else {
+            theme.transparent
+        })
+        .hover(move |s| s.bg(theme.sidebar_accent))
+        .group("")
+        .text_color(if is_selected {
+            theme.sidebar_accent_foreground
+        } else {
+            theme.sidebar_foreground
+        })
+        .debug_selector(move || format!("workspace-main-row-{project_index}"))
+        .child(
+            div().pt(px(1.0)).child(
+                Icon::new(IconName::Star)
+                    .with_size(Size::Small)
+                    .text_color(theme.muted_foreground),
+            ),
+        )
+        .child(min_width_zero(
+            div()
+                .flex_1()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .cursor_pointer()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _, _, cx| {
+                        this.dispatch(Action::OpenWorkspace { workspace_id }, cx)
+                    }),
+                )
+                .child(
+                    div()
+                        .w_full()
+                        .truncate()
+                        .text_sm()
+                        .font_semibold()
+                        .child(title),
+                )
+                .child(
+                    div()
+                        .w_full()
+                        .truncate()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child(metadata),
+                ),
+        ))
+        .child(
+            div()
+                .flex_shrink_0()
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .debug_selector(move || format!("workspace-main-badge-{project_index}"))
+                .child("Main"),
+        )
+        .into_any_element()
 }
 
 impl LubanRootView {
@@ -3864,6 +3957,25 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
 
+    fn main_workspace_id(state: &AppState) -> WorkspaceId {
+        let project = &state.projects[0];
+        project
+            .workspaces
+            .iter()
+            .find(|w| w.status == WorkspaceStatus::Active && w.worktree_path == project.path)
+            .expect("missing main workspace")
+            .id
+    }
+
+    fn workspace_id_by_name(state: &AppState, name: &str) -> WorkspaceId {
+        state.projects[0]
+            .workspaces
+            .iter()
+            .find(|w| w.status == WorkspaceStatus::Active && w.workspace_name == name)
+            .unwrap_or_else(|| panic!("missing workspace {name}"))
+            .id
+    }
+
     #[test]
     fn agent_turn_summary_uses_thinking_label_and_omits_messages() {
         let summary = format_agent_turn_summary(TurnSummaryCounts {
@@ -4056,7 +4168,7 @@ mod tests {
             branch_name: "luban/abandon-about".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
         });
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
 
         assert_eq!(
             main_pane_title(&state, MainPane::Workspace(workspace_id)),
@@ -4086,7 +4198,7 @@ mod tests {
             branch_name: "luban/abandon-about".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
         });
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
 
         state.apply(Action::OpenWorkspace { workspace_id });
 
@@ -4112,7 +4224,7 @@ mod tests {
             branch_name: "b".repeat(256),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
         });
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
         state.apply(Action::OpenWorkspace { workspace_id });
 
         let (_view, window_cx) =
@@ -4151,7 +4263,7 @@ mod tests {
             branch_name: "repo/branch".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
         });
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
         state.apply(Action::OpenWorkspace { workspace_id });
 
         let (_view, window_cx) =
@@ -4230,7 +4342,7 @@ mod tests {
             branch_name: "luban/abandon-about".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
         });
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
         state.apply(Action::OpenWorkspace { workspace_id });
 
         let (_view, window_cx) =
@@ -4286,6 +4398,50 @@ mod tests {
     }
 
     #[gpui::test]
+    async fn main_workspace_row_is_rendered_and_is_not_archivable(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::ToggleProjectExpanded { project_id });
+
+        let (view, window_cx) =
+            cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+        window_cx.simulate_resize(size(px(900.0), px(240.0)));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        let main_bounds = window_cx
+            .debug_bounds("workspace-main-row-0")
+            .expect("missing main workspace row");
+        assert!(
+            window_cx.debug_bounds("workspace-row-0-0").is_none(),
+            "main workspace should not be rendered as a normal workspace row"
+        );
+        assert!(
+            window_cx.debug_bounds("workspace-archive-0-0").is_none(),
+            "main workspace should not be archivable"
+        );
+
+        let main_workspace_id =
+            view.read_with(window_cx, |v, _| main_workspace_id(v.debug_state()));
+
+        window_cx.simulate_click(main_bounds.center(), Modifiers::none());
+        window_cx.refresh().unwrap();
+
+        let selected = view.read_with(window_cx, |v, _| v.debug_state().main_pane);
+        assert!(
+            matches!(selected, MainPane::Workspace(id) if id == main_workspace_id),
+            "expected main workspace to be selected after click"
+        );
+    }
+
+    #[gpui::test]
     async fn archiving_workspace_shows_prompt_and_updates_state(cx: &mut gpui::TestAppContext) {
         cx.update(gpui_component::init);
 
@@ -4322,7 +4478,14 @@ mod tests {
         cx.run_until_parked();
         cx.refresh().unwrap();
 
-        let status = view.read_with(cx, |v, _| v.debug_state().projects[0].workspaces[0].status);
+        let status = view.read_with(cx, |v, _| {
+            v.debug_state().projects[0]
+                .workspaces
+                .iter()
+                .find(|w| w.workspace_name == "abandon-about")
+                .expect("missing abandon-about workspace")
+                .status
+        });
         assert_eq!(status, WorkspaceStatus::Active);
 
         let row_bounds = cx
@@ -4340,7 +4503,14 @@ mod tests {
         cx.run_until_parked();
         cx.refresh().unwrap();
 
-        let status = view.read_with(cx, |v, _| v.debug_state().projects[0].workspaces[0].status);
+        let status = view.read_with(cx, |v, _| {
+            v.debug_state().projects[0]
+                .workspaces
+                .iter()
+                .find(|w| w.workspace_name == "abandon-about")
+                .expect("missing abandon-about workspace")
+                .status
+        });
         assert_eq!(status, WorkspaceStatus::Archived);
     }
 
@@ -4361,7 +4531,7 @@ mod tests {
             branch_name: "luban/abandon-about".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
         });
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
         state.main_pane = MainPane::Workspace(workspace_id);
         state.apply(Action::ConversationLoaded {
             workspace_id,
@@ -4409,7 +4579,7 @@ mod tests {
             branch_name: "luban/abandon-about".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
         });
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
         state.main_pane = MainPane::Workspace(workspace_id);
         state.apply(Action::ConversationLoaded {
             workspace_id,
@@ -4471,7 +4641,7 @@ mod tests {
             branch_name: "luban/abandon-about".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
         });
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
         state.main_pane = MainPane::Workspace(workspace_id);
         state.apply(Action::ConversationLoaded {
             workspace_id,
@@ -4533,7 +4703,7 @@ mod tests {
             branch_name: "luban/abandon-about".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
         });
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
         state.main_pane = MainPane::Workspace(workspace_id);
         state.apply(Action::ConversationLoaded {
             workspace_id,
@@ -4600,7 +4770,7 @@ mod tests {
             branch_name: "luban/abandon-about".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
         });
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
         state.main_pane = MainPane::Workspace(workspace_id);
 
         state.apply(Action::SendAgentMessage {
@@ -4668,7 +4838,7 @@ mod tests {
             branch_name: "luban/abandon-about".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
         });
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
         state.main_pane = MainPane::Workspace(workspace_id);
 
         state.apply(Action::SendAgentMessage {
@@ -4731,7 +4901,7 @@ mod tests {
             branch_name: "luban/abandon-about".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
         });
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
         state.main_pane = MainPane::Workspace(workspace_id);
 
         state.apply(Action::SendAgentMessage {
@@ -4797,7 +4967,7 @@ mod tests {
             branch_name: "luban/abandon-about".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
         });
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
         state.main_pane = MainPane::Workspace(workspace_id);
         state.apply(Action::ConversationLoaded {
             workspace_id,
@@ -4851,7 +5021,7 @@ mod tests {
             branch_name: "luban/abandon-about".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
         });
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
         state.main_pane = MainPane::Workspace(workspace_id);
 
         let long_text = std::iter::repeat_n("word", 200)
@@ -4920,7 +5090,7 @@ mod tests {
             branch_name: "luban/abandon-about".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
         });
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
         state.main_pane = MainPane::Workspace(workspace_id);
 
         let message = "select me".to_owned();
@@ -4976,7 +5146,7 @@ mod tests {
             branch_name: "luban/abandon-about".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
         });
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
         state.main_pane = MainPane::Workspace(workspace_id);
         state.apply(Action::ConversationLoaded {
             workspace_id,
@@ -5016,7 +5186,7 @@ mod tests {
             branch_name: "luban/abandon-about".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
         });
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
         state.main_pane = MainPane::Workspace(workspace_id);
 
         let long_markdownish = std::iter::repeat_n(
@@ -5083,7 +5253,7 @@ mod tests {
             branch_name: "luban/abandon-about".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
         });
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
         state.main_pane = MainPane::Workspace(workspace_id);
         state.right_pane = RightPane::Terminal;
 
@@ -5215,7 +5385,7 @@ mod tests {
             branch_name: "luban/abandon-about".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
         });
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
         state.main_pane = MainPane::Workspace(workspace_id);
         state.right_pane = RightPane::Terminal;
 
@@ -5288,7 +5458,7 @@ mod tests {
             branch_name: "repo/branch".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
         });
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
         state.main_pane = MainPane::Workspace(workspace_id);
         state.right_pane = RightPane::Terminal;
 
@@ -5341,7 +5511,7 @@ mod tests {
             branch_name: "repo/branch".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
         });
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
         state.main_pane = MainPane::Workspace(workspace_id);
         state.right_pane = RightPane::Terminal;
 
@@ -5427,7 +5597,7 @@ mod tests {
             branch_name: "repo/branch".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
         });
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
         state.main_pane = MainPane::Workspace(workspace_id);
 
         let (view, window_cx) = cx.add_window_view(|_window, cx| {
@@ -5492,7 +5662,7 @@ mod tests {
             branch_name: "repo/branch".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
         });
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
         state.main_pane = MainPane::Workspace(workspace_id);
         state.right_pane = RightPane::Terminal;
 
@@ -5551,7 +5721,7 @@ mod tests {
             branch_name: "luban/abandon-about".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
         });
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
         state.main_pane = MainPane::Workspace(workspace_id);
 
         state.apply(Action::ConversationLoaded {
@@ -5593,7 +5763,7 @@ mod tests {
             branch_name: "luban/abandon-about".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
         });
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
         state.main_pane = MainPane::Workspace(workspace_id);
 
         state.apply(Action::SendAgentMessage {
@@ -5652,7 +5822,7 @@ mod tests {
             branch_name: "luban/abandon-about".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
         });
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
         state.main_pane = MainPane::Workspace(workspace_id);
 
         let long_command = format!(
@@ -5741,7 +5911,7 @@ mod tests {
             branch_name: "luban/abandon-about".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
         });
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
         state.main_pane = MainPane::Workspace(workspace_id);
         state.apply(Action::ConversationLoaded {
             workspace_id,
@@ -5789,7 +5959,7 @@ mod tests {
             branch_name: "luban/abandon-about".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
         });
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
         state.main_pane = MainPane::Workspace(workspace_id);
         state.apply(Action::ConversationLoaded {
             workspace_id,
@@ -5836,7 +6006,7 @@ mod tests {
             branch_name: "luban/abandon-about".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
         });
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
         state.main_pane = MainPane::Workspace(workspace_id);
         state.apply(Action::ConversationLoaded {
             workspace_id,
@@ -5898,7 +6068,7 @@ mod tests {
             branch_name: "luban/abandon-about".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
         });
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
         state.main_pane = MainPane::Workspace(workspace_id);
         state.apply(Action::ConversationLoaded {
             workspace_id,
@@ -5959,8 +6129,8 @@ mod tests {
             branch_name: "repo/w2".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/w2"),
         });
-        let w1 = state.projects[0].workspaces[0].id;
-        let w2 = state.projects[0].workspaces[1].id;
+        let w1 = workspace_id_by_name(&state, "w1");
+        let w2 = workspace_id_by_name(&state, "w2");
 
         state.apply(Action::ChatDraftChanged {
             workspace_id: w1,
@@ -6047,8 +6217,8 @@ mod tests {
             branch_name: "repo/w2".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/w2"),
         });
-        let w1 = state.projects[0].workspaces[0].id;
-        let w2 = state.projects[0].workspaces[1].id;
+        let w1 = workspace_id_by_name(&state, "w1");
+        let w2 = workspace_id_by_name(&state, "w2");
 
         state.apply(Action::ChatDraftChanged {
             workspace_id: w1,

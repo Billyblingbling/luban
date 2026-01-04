@@ -467,6 +467,9 @@ pub enum Effect {
 }
 
 impl AppState {
+    const MAIN_WORKSPACE_NAME: &'static str = "main";
+    const MAIN_WORKSPACE_BRANCH: &'static str = "main";
+
     pub fn new() -> Self {
         Self {
             next_project_id: 1,
@@ -512,7 +515,8 @@ impl AppState {
             Action::AppStarted => vec![Effect::LoadAppState],
 
             Action::AddProject { path } => {
-                self.add_project(path);
+                let project_id = self.add_project(path);
+                self.insert_main_workspace(project_id);
                 vec![Effect::SaveAppState]
             }
             Action::ToggleProjectExpanded { project_id } => {
@@ -596,6 +600,15 @@ impl AppState {
                 if let Some((project_idx, workspace_idx)) =
                     self.find_workspace_indices(workspace_id)
                 {
+                    let is_main = {
+                        let project = &self.projects[project_idx];
+                        let workspace = &project.workspaces[workspace_idx];
+                        Self::workspace_is_main(project, workspace)
+                    };
+                    if is_main {
+                        return Vec::new();
+                    }
+
                     let project = &mut self.projects[project_idx];
                     let workspace = &mut project.workspaces[workspace_idx];
 
@@ -962,7 +975,13 @@ impl AppState {
                 self.next_project_id = max_project_id + 1;
                 self.next_workspace_id = max_workspace_id + 1;
                 self.main_pane = MainPane::None;
-                Vec::new()
+
+                let upgraded = self.ensure_main_workspaces();
+                if upgraded {
+                    vec![Effect::SaveAppState]
+                } else {
+                    Vec::new()
+                }
             }
             Action::AppStateLoadFailed { message } => {
                 self.last_error = Some(message);
@@ -1056,6 +1075,57 @@ impl AppState {
         });
 
         id
+    }
+
+    fn insert_main_workspace(&mut self, project_id: ProjectId) -> WorkspaceId {
+        let workspace_id = WorkspaceId(self.next_workspace_id);
+        self.next_workspace_id += 1;
+
+        let Some(project) = self.projects.iter_mut().find(|p| p.id == project_id) else {
+            return workspace_id;
+        };
+
+        project.workspaces.push(Workspace {
+            id: workspace_id,
+            workspace_name: Self::MAIN_WORKSPACE_NAME.to_owned(),
+            branch_name: Self::MAIN_WORKSPACE_BRANCH.to_owned(),
+            worktree_path: project.path.clone(),
+            status: WorkspaceStatus::Active,
+            last_activity_at: None,
+            archive_status: OperationStatus::Idle,
+        });
+
+        workspace_id
+    }
+
+    fn ensure_main_workspaces(&mut self) -> bool {
+        let mut upgraded = false;
+
+        let project_ids: Vec<ProjectId> = self.projects.iter().map(|p| p.id).collect();
+        for project_id in project_ids {
+            let has_main = self
+                .projects
+                .iter()
+                .find(|p| p.id == project_id)
+                .map(|project| {
+                    project.workspaces.iter().any(|w| {
+                        w.status == WorkspaceStatus::Active && w.worktree_path == project.path
+                    })
+                })
+                .unwrap_or(false);
+            if has_main {
+                continue;
+            }
+
+            self.insert_main_workspace(project_id);
+            upgraded = true;
+        }
+
+        upgraded
+    }
+
+    fn workspace_is_main(project: &Project, workspace: &Workspace) -> bool {
+        workspace.worktree_path == project.path
     }
 
     fn insert_workspace(
@@ -1192,6 +1262,35 @@ fn start_next_queued_prompt(
 mod tests {
     use super::*;
 
+    fn main_workspace_id(state: &AppState) -> WorkspaceId {
+        let project = &state.projects[0];
+        project
+            .workspaces
+            .iter()
+            .find(|w| w.status == WorkspaceStatus::Active && w.worktree_path == project.path)
+            .expect("missing main workspace")
+            .id
+    }
+
+    fn workspace_id_by_name(state: &AppState, name: &str) -> WorkspaceId {
+        state.projects[0]
+            .workspaces
+            .iter()
+            .find(|w| w.status == WorkspaceStatus::Active && w.workspace_name == name)
+            .unwrap_or_else(|| panic!("missing workspace {name}"))
+            .id
+    }
+
+    fn first_non_main_workspace_id(state: &AppState) -> WorkspaceId {
+        let project = &state.projects[0];
+        project
+            .workspaces
+            .iter()
+            .find(|w| w.status == WorkspaceStatus::Active && w.worktree_path != project.path)
+            .expect("missing non-main workspace")
+            .id
+    }
+
     #[test]
     fn right_pane_tracks_selected_main_pane() {
         let mut state = AppState::new();
@@ -1205,7 +1304,7 @@ mod tests {
             branch_name: "repo/w1".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/w1"),
         });
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = workspace_id_by_name(&state, "w1");
 
         state.apply(Action::OpenWorkspace { workspace_id });
         assert_eq!(state.right_pane, RightPane::Terminal);
@@ -1227,7 +1326,7 @@ mod tests {
             branch_name: "repo/w1".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/w1"),
         });
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = workspace_id_by_name(&state, "w1");
         state.apply(Action::OpenWorkspace { workspace_id });
 
         assert_eq!(state.right_pane, RightPane::Terminal);
@@ -1312,7 +1411,7 @@ mod tests {
             branch_name: "luban/abandon-about".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
         });
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
 
         state.apply(Action::SendAgentMessage {
             workspace_id,
@@ -1395,6 +1494,28 @@ mod tests {
     }
 
     #[test]
+    fn main_workspace_cannot_be_archived() {
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+
+        let workspace_id = main_workspace_id(&state);
+        let effects = state.apply(Action::ArchiveWorkspace { workspace_id });
+        assert!(effects.is_empty());
+
+        let project = &state.projects[0];
+        let workspace = project
+            .workspaces
+            .iter()
+            .find(|w| w.id == workspace_id)
+            .expect("missing main workspace after archive attempt");
+        assert_eq!(workspace.archive_status, OperationStatus::Idle);
+        assert_eq!(workspace.status, WorkspaceStatus::Active);
+        assert_eq!(workspace.worktree_path, project.path);
+    }
+
+    #[test]
     fn demo_state_is_consistent() {
         let state = AppState::demo();
 
@@ -1435,7 +1556,7 @@ mod tests {
     #[test]
     fn open_workspace_emits_conversation_load_effect() {
         let mut state = AppState::demo();
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = first_non_main_workspace_id(&state);
 
         let effects = state.apply(Action::OpenWorkspace { workspace_id });
         assert_eq!(effects.len(), 1);
@@ -1463,8 +1584,8 @@ mod tests {
             worktree_path: PathBuf::from("/tmp/repo/worktrees/w2"),
         });
 
-        let w1 = state.projects[0].workspaces[0].id;
-        let w2 = state.projects[0].workspaces[1].id;
+        let w1 = workspace_id_by_name(&state, "w1");
+        let w2 = workspace_id_by_name(&state, "w2");
 
         state.apply(Action::ChatDraftChanged {
             workspace_id: w1,
@@ -1491,7 +1612,7 @@ mod tests {
     #[test]
     fn conversation_loaded_does_not_reset_running_turn_state() {
         let mut state = AppState::demo();
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = first_non_main_workspace_id(&state);
 
         state.apply(Action::SendAgentMessage {
             workspace_id,
@@ -1545,7 +1666,7 @@ mod tests {
     #[test]
     fn conversation_loaded_does_not_overwrite_newer_local_entries() {
         let mut state = AppState::demo();
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = first_non_main_workspace_id(&state);
 
         state.apply(Action::SendAgentMessage {
             workspace_id,
@@ -1581,7 +1702,7 @@ mod tests {
     #[test]
     fn conversation_loaded_replaces_entries_when_snapshot_is_newer() {
         let mut state = AppState::demo();
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = first_non_main_workspace_id(&state);
 
         state.apply(Action::ConversationLoaded {
             workspace_id,
@@ -1619,7 +1740,7 @@ mod tests {
     #[test]
     fn send_agent_message_sets_running_and_emits_effect() {
         let mut state = AppState::demo();
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = first_non_main_workspace_id(&state);
 
         let effects = state.apply(Action::SendAgentMessage {
             workspace_id,
@@ -1640,7 +1761,7 @@ mod tests {
     #[test]
     fn agent_item_completed_is_idempotent() {
         let mut state = AppState::demo();
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = first_non_main_workspace_id(&state);
 
         state.apply(Action::SendAgentMessage {
             workspace_id,
@@ -1673,7 +1794,7 @@ mod tests {
     #[test]
     fn agent_item_completed_is_idempotent_even_if_not_last_entry() {
         let mut state = AppState::demo();
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = first_non_main_workspace_id(&state);
 
         state.apply(Action::SendAgentMessage {
             workspace_id,
@@ -1710,7 +1831,7 @@ mod tests {
     #[test]
     fn cancel_agent_turn_sets_idle_and_emits_effect() {
         let mut state = AppState::demo();
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = first_non_main_workspace_id(&state);
 
         state.apply(Action::SendAgentMessage {
             workspace_id,
@@ -1733,7 +1854,7 @@ mod tests {
     #[test]
     fn send_agent_message_while_running_is_queued() {
         let mut state = AppState::demo();
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = first_non_main_workspace_id(&state);
 
         state.apply(Action::SendAgentMessage {
             workspace_id,
@@ -1755,7 +1876,7 @@ mod tests {
     #[test]
     fn completed_turn_auto_sends_next_queued_prompt() {
         let mut state = AppState::demo();
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = first_non_main_workspace_id(&state);
 
         state.apply(Action::SendAgentMessage {
             workspace_id,
@@ -1801,7 +1922,7 @@ mod tests {
     #[test]
     fn failed_turn_pauses_queue_until_resumed() {
         let mut state = AppState::demo();
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = first_non_main_workspace_id(&state);
 
         state.apply(Action::SendAgentMessage {
             workspace_id,
@@ -1851,7 +1972,7 @@ mod tests {
             branch_name: "luban/abandon-about".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
         });
-        let workspace_id = state.projects[0].workspaces[0].id;
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
 
         let effects = state.apply(Action::OpenWorkspaceInIde { workspace_id });
         assert!(
