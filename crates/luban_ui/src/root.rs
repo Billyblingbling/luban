@@ -2247,14 +2247,6 @@ fn render_main_workspace_row(
                         .child(metadata),
                 ),
         ))
-        .child(
-            div()
-                .flex_shrink_0()
-                .text_xs()
-                .text_color(theme.muted_foreground)
-                .debug_selector(move || format!("workspace-main-badge-{project_index}"))
-                .child("Main"),
-        )
         .into_any_element()
 }
 
@@ -4814,6 +4806,10 @@ mod tests {
         let main_bounds = window_cx
             .debug_bounds("workspace-main-row-0")
             .expect("missing main workspace row");
+        assert!(
+            window_cx.debug_bounds("workspace-main-badge-0").is_none(),
+            "main workspace should not render a separate badge label"
+        );
         assert!(
             window_cx.debug_bounds("workspace-row-0-0").is_none(),
             "main workspace should not be rendered as a normal workspace row"
