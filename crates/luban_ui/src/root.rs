@@ -10,6 +10,7 @@ use gpui_component::{
     button::*,
     collapsible::Collapsible,
     input::{Input, InputEvent, InputState},
+    scroll::ScrollableElement as _,
     spinner::Spinner,
     text::{TextView, TextViewStyle},
 };
@@ -1726,7 +1727,7 @@ fn render_sidebar(
             div()
                 .flex_1()
                 .id("projects-scroll")
-                .overflow_scroll()
+                .overflow_y_scrollbar()
                 .py_2()
                 .children(state.projects.iter().enumerate().map(|(i, project)| {
                     render_project(
