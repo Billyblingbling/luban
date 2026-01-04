@@ -37,6 +37,7 @@ pub struct CreatedWorkspace {
 
 const TERMINAL_PANE_RESIZER_WIDTH: f32 = 6.0;
 const SIDEBAR_RESIZER_WIDTH: f32 = 6.0;
+const RIGHT_PANE_CONTENT_PADDING: f32 = 8.0;
 
 #[derive(Clone, Copy, Debug)]
 struct TerminalPaneResizeState {
@@ -1307,8 +1308,10 @@ impl LubanRootView {
         sidebar_width: Pixels,
     ) -> Option<(u16, u16)> {
         let right_pane_width = self.right_pane_width(window, sidebar_width);
-        let width = f32::from(right_pane_width).max(1.0);
-        let height = (f32::from(window.viewport_size().height) - f32::from(px(44.0))).max(1.0);
+        let inset = RIGHT_PANE_CONTENT_PADDING * 2.0;
+        let width = (f32::from(right_pane_width) - inset).max(1.0);
+        let height =
+            (f32::from(window.viewport_size().height) - f32::from(px(44.0)) - inset).max(1.0);
 
         let (cell_width, cell_height) = terminal_cell_metrics(window)?;
         let cols = (width / cell_width).floor().max(1.0) as u16;
@@ -1394,20 +1397,25 @@ impl LubanRootView {
             .border_l_1()
             .border_color(theme.border)
             .child(
-                div().flex_1().h_full().cursor(CursorStyle::IBeam).child(
-                    error
-                        .map(|message| {
-                            div()
-                                .p_3()
-                                .text_color(theme.danger_foreground)
-                                .child(message)
-                                .into_any_element()
-                        })
-                        .or_else(|| {
-                            terminal_view.map(|v| div().size_full().child(v).into_any_element())
-                        })
-                        .unwrap_or_else(|| div().into_any_element()),
-                ),
+                div()
+                    .flex_1()
+                    .h_full()
+                    .p(px(RIGHT_PANE_CONTENT_PADDING))
+                    .cursor(CursorStyle::IBeam)
+                    .child(
+                        error
+                            .map(|message| {
+                                div()
+                                    .p_3()
+                                    .text_color(theme.danger_foreground)
+                                    .child(message)
+                                    .into_any_element()
+                            })
+                            .or_else(|| {
+                                terminal_view.map(|v| div().size_full().child(v).into_any_element())
+                            })
+                            .unwrap_or_else(|| div().into_any_element()),
+                    ),
             )
             .into_any_element()
     }
