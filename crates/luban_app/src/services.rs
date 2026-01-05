@@ -371,10 +371,44 @@ impl GitWorkspaceService {
         self.codex_sidecar_dir.join("dist").join("run.mjs")
     }
 
+    fn sidecar_vendor_codex_path(&self) -> anyhow::Result<PathBuf> {
+        let target_triple = match (std::env::consts::OS, std::env::consts::ARCH) {
+            ("macos", "aarch64") => "aarch64-apple-darwin",
+            ("macos", "x86_64") => "x86_64-apple-darwin",
+            ("linux", "aarch64") => "aarch64-unknown-linux-musl",
+            ("linux", "x86_64") => "x86_64-unknown-linux-musl",
+            ("windows", "aarch64") => "aarch64-pc-windows-msvc",
+            ("windows", "x86_64") => "x86_64-pc-windows-msvc",
+            (os, arch) => {
+                return Err(anyhow!(
+                    "unsupported Codex sidecar platform: {} ({})",
+                    os,
+                    arch
+                ));
+            }
+        };
+
+        let binary_name = if cfg!(windows) { "codex.exe" } else { "codex" };
+        Ok(self
+            .codex_sidecar_dir
+            .join("vendor")
+            .join(target_triple)
+            .join("codex")
+            .join(binary_name))
+    }
+
     fn ensure_sidecar_installed(&self) -> anyhow::Result<()> {
         let bundled = self.sidecar_bundled_script_path();
         if bundled.is_file() {
-            return Ok(());
+            let codex = self.sidecar_vendor_codex_path()?;
+            if codex.is_file() {
+                return Ok(());
+            }
+
+            return Err(anyhow!(
+                "missing Codex sidecar binary: run 'just sidecar-install' to vendor {}",
+                codex.display()
+            ));
         }
 
         Err(anyhow!(
@@ -731,6 +765,13 @@ mod tests {
             sqlite,
         };
 
+        let codex_path = service
+            .sidecar_vendor_codex_path()
+            .expect("test host should be supported");
+        std::fs::create_dir_all(codex_path.parent().expect("missing codex parent"))
+            .expect("vendor directory should be created");
+        std::fs::write(&codex_path, b"").expect("write should succeed");
+
         service
             .ensure_sidecar_installed()
             .expect("bundled sidecar should be accepted");
@@ -769,6 +810,44 @@ mod tests {
             .ensure_sidecar_installed()
             .expect_err("node_modules should not be accepted without bundled script");
         assert!(err.to_string().contains("missing Codex sidecar bundle"));
+
+        drop(service);
+        let _ = std::fs::remove_dir_all(&base_dir);
+    }
+
+    #[test]
+    fn ensure_sidecar_installed_rejects_bundle_without_vendor_binary() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be valid")
+            .as_nanos();
+        let base_dir = std::env::temp_dir().join(format!(
+            "luban-sidecar-missing-vendor-check-{}-{}",
+            std::process::id(),
+            unique
+        ));
+
+        std::fs::create_dir_all(&base_dir).expect("temp dir should be created");
+
+        let sidecar_dir = base_dir.join("sidecar");
+        let dist_dir = sidecar_dir.join("dist");
+        std::fs::create_dir_all(&dist_dir).expect("dist dir should be created");
+
+        let bundled_script = dist_dir.join("run.mjs");
+        std::fs::write(&bundled_script, b"// stub\n").expect("write should succeed");
+
+        let sqlite = SqliteStore::new(base_dir.join("luban.db")).expect("sqlite init should work");
+        let service = GitWorkspaceService {
+            worktrees_root: base_dir.join("worktrees"),
+            conversations_root: base_dir.join("conversations"),
+            codex_sidecar_dir: sidecar_dir,
+            sqlite,
+        };
+
+        let err = service
+            .ensure_sidecar_installed()
+            .expect_err("bundled sidecar should not be accepted without vendor binary");
+        assert!(err.to_string().contains("missing Codex sidecar binary"));
 
         drop(service);
         let _ = std::fs::remove_dir_all(&base_dir);

@@ -3,7 +3,7 @@ default:
 
 sidecar-build:
   mkdir -p tools/codex_sidecar/dist
-  if [ -f tools/codex_sidecar/dist/run.mjs ]; then exit 0; fi
+  if [ -f tools/codex_sidecar/dist/run.mjs ] && [ -d tools/codex_sidecar/vendor ]; then exit 0; fi
   cd tools/codex_sidecar && npm ci --no-fund --no-audit && npm run bundle
 
 sidecar-install: sidecar-build
