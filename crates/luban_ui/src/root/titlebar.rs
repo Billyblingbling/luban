@@ -345,11 +345,6 @@ pub(super) fn render_titlebar(
     };
 
     let terminal_titlebar = {
-        let title = ide_workspace_id.and_then(|workspace_id| {
-            state
-                .workspace(workspace_id)
-                .map(|w| w.workspace_name.clone())
-        });
         let right_width = if state.right_pane == RightPane::Terminal && terminal_toggle_enabled {
             right_pane_width
         } else if terminal_toggle_enabled {
@@ -377,17 +372,7 @@ pub(super) fn render_titlebar(
             .justify_between()
             .when(
                 state.right_pane == RightPane::Terminal && terminal_toggle_enabled,
-                |s| {
-                    s.child(div().text_sm().font_semibold().child("Terminal"))
-                        .child(min_width_zero(
-                            div()
-                                .flex_1()
-                                .px_2()
-                                .truncate()
-                                .text_sm()
-                                .child(title.unwrap_or_default()),
-                        ))
-                },
+                |s| s.child(div().text_sm().font_semibold().child("Terminal")),
             )
             .child(
                 div()
