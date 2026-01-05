@@ -357,21 +357,23 @@ pub(super) fn render_titlebar(
             px(0.0)
         };
 
-        div()
-            .w(right_width)
-            .h(titlebar_height)
+        let show_divider = state.right_pane == RightPane::Terminal && terminal_toggle_enabled;
+        let divider = div()
+            .id("titlebar-terminal-divider")
+            .w(if show_divider { px(1.0) } else { px(0.0) })
+            .h_full()
+            .bg(theme.border)
             .flex_shrink_0()
+            .debug_selector(|| "titlebar-terminal-divider".to_owned());
+
+        let content = div()
+            .id("titlebar-terminal-content")
+            .flex_1()
+            .h_full()
+            .px_3()
             .flex()
             .items_center()
             .justify_between()
-            .px_3()
-            .border_b_1()
-            .border_color(theme.title_bar_border)
-            .bg(theme.title_bar)
-            .when(right_width > px(0.0), |s| {
-                s.border_l_1().border_color(theme.border)
-            })
-            .debug_selector(|| "titlebar-terminal".to_owned())
             .when(
                 state.right_pane == RightPane::Terminal && terminal_toggle_enabled,
                 |s| {
@@ -390,7 +392,20 @@ pub(super) fn render_titlebar(
                 div()
                     .debug_selector(|| "titlebar-toggle-terminal".to_owned())
                     .child(terminal_toggle_button),
-            )
+            );
+
+        div()
+            .w(right_width)
+            .h(titlebar_height)
+            .flex_shrink_0()
+            .flex()
+            .items_center()
+            .border_b_1()
+            .border_color(theme.title_bar_border)
+            .bg(theme.title_bar)
+            .debug_selector(|| "titlebar-terminal".to_owned())
+            .child(divider)
+            .child(content)
     };
 
     div()

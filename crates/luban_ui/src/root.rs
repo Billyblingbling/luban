@@ -3584,7 +3584,7 @@ mod tests {
         state.main_pane = MainPane::Workspace(workspace_id);
         state.right_pane = RightPane::Terminal;
 
-        let (_view, window_cx) = cx.add_window_view(|_window, cx| {
+        let (view, window_cx) = cx.add_window_view(|_window, cx| {
             let mut view = LubanRootView::with_state(services, state, cx);
             view.terminal_enabled = true;
             view.workspace_terminal_errors
@@ -3598,6 +3598,38 @@ mod tests {
         assert!(
             window_cx.debug_bounds("titlebar-terminal").is_some(),
             "expected terminal header to be rendered in titlebar"
+        );
+        assert!(
+            window_cx
+                .debug_bounds("titlebar-terminal-divider")
+                .is_some(),
+            "expected divider to be rendered when terminal is visible"
+        );
+        let divider = window_cx
+            .debug_bounds("titlebar-terminal-divider")
+            .expect("missing divider bounds");
+        assert!(
+            divider.size.width >= px(0.9),
+            "expected divider to be visible: {divider:?}"
+        );
+
+        window_cx.update(|_, app| {
+            view.update(app, |view, cx| {
+                view.dispatch(Action::ToggleTerminalPane, cx);
+            });
+        });
+        for _ in 0..3 {
+            window_cx.run_until_parked();
+            window_cx.refresh().unwrap();
+        }
+        let right_pane = view.read_with(window_cx, |v, _| v.debug_state().right_pane);
+        assert_eq!(right_pane, RightPane::None);
+        let divider = window_cx
+            .debug_bounds("titlebar-terminal-divider")
+            .expect("missing divider bounds after collapse");
+        assert!(
+            divider.size.width <= px(0.1),
+            "expected divider to be hidden when terminal is collapsed: {divider:?}"
         );
     }
 
