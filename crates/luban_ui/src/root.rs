@@ -1712,35 +1712,43 @@ fn render_sidebar(
         .child(
             div()
                 .h(px(44.0))
-                .px_4()
-                .flex()
-                .items_center()
-                .justify_between()
                 .border_b_1()
                 .border_color(theme.sidebar_border)
-                .debug_selector(|| "sidebar-workspaces-header".to_owned())
+                .debug_selector(|| "sidebar-dashboard-header".to_owned())
                 .child(
                     div()
+                        .h_full()
+                        .mx_3()
                         .flex()
                         .items_center()
-                        .gap_2()
+                        .child(div().flex_1())
                         .child(
-                            Icon::new(IconName::GalleryVerticalEnd)
-                                .with_size(Size::Small)
-                                .text_color(theme.muted_foreground),
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_2()
+                                .debug_selector(|| "sidebar-dashboard-title".to_owned())
+                                .child(
+                                    Icon::new(IconName::GalleryVerticalEnd)
+                                        .with_size(Size::Small)
+                                        .text_color(theme.muted_foreground),
+                                )
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .font_semibold()
+                                        .text_color(theme.muted_foreground)
+                                        .child("Dashboard"),
+                                ),
                         )
                         .child(
                             div()
-                                .text_sm()
-                                .font_semibold()
-                                .text_color(theme.muted_foreground)
-                                .child("Workspaces"),
+                                .flex_1()
+                                .flex()
+                                .justify_end()
+                                .debug_selector(|| "add-project".to_owned())
+                                .child(add_project_button),
                         ),
-                )
-                .child(
-                    div()
-                        .debug_selector(|| "add-project".to_owned())
-                        .child(add_project_button),
                 ),
         )
         .child(
@@ -5873,6 +5881,63 @@ mod tests {
             "workspace icon should be vertically centered: icon={:?} row={:?}",
             icon,
             row
+        );
+    }
+
+    #[gpui::test]
+    async fn sidebar_dashboard_title_is_centered_and_add_button_aligns_with_project_actions(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::ToggleProjectExpanded { project_id });
+
+        let (_view, window_cx) =
+            cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+        window_cx.simulate_resize(size(px(420.0), px(360.0)));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        let header = window_cx
+            .debug_bounds("sidebar-dashboard-header")
+            .expect("missing sidebar header");
+        let title = window_cx
+            .debug_bounds("sidebar-dashboard-title")
+            .expect("missing sidebar dashboard title");
+        let center_dx = (title.center().x - header.center().x).abs();
+        assert!(
+            center_dx <= px(2.0),
+            "dashboard title should be centered: title={:?} header={:?}",
+            title,
+            header
+        );
+
+        let project_header = window_cx
+            .debug_bounds("project-header-0")
+            .expect("missing project header");
+        window_cx.simulate_mouse_move(project_header.center(), None, Modifiers::none());
+        window_cx.refresh().unwrap();
+
+        let add_project = window_cx
+            .debug_bounds("add-project")
+            .expect("missing add project button");
+        let project_settings = window_cx
+            .debug_bounds("project-settings-0")
+            .expect("missing project settings button");
+
+        let right_dx = (add_project.right() - project_settings.right()).abs();
+        assert!(
+            right_dx <= px(2.0),
+            "add project button should align with project actions: add={:?} settings={:?}",
+            add_project,
+            project_settings
         );
     }
 
