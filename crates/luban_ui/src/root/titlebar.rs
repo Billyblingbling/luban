@@ -119,6 +119,7 @@ pub(super) fn render_titlebar(
             Button::new("add-project")
                 .ghost()
                 .compact()
+                .debug_selector(|| "add-project-button".to_owned())
                 .icon(Icon::new(IconName::Plus).text_color(theme.muted_foreground))
                 .tooltip("Add project")
                 .on_click(move |_, _window, app| {
@@ -191,10 +192,11 @@ pub(super) fn render_titlebar(
             .items_center()
             .bg(theme.sidebar)
             .text_color(theme.sidebar_foreground)
-            .border_r_1()
-            .border_color(theme.sidebar_border)
             .border_b_1()
             .border_color(theme.sidebar_border)
+            .when(!is_dashboard_selected, |s| {
+                s.border_r_1().border_color(theme.sidebar_border)
+            })
             .debug_selector(|| "titlebar-sidebar".to_owned())
             .child(
                 div()
@@ -259,8 +261,7 @@ pub(super) fn render_titlebar(
                             .flex_1()
                             .flex()
                             .justify_end()
-                            .debug_selector(|| "add-project".to_owned())
-                            .child(add_project_button()),
+                            .when(!is_dashboard_selected, |s| s.child(add_project_button())),
                     ),
             )
             .into_any_element()

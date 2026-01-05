@@ -4952,8 +4952,8 @@ mod tests {
         );
 
         assert!(
-            window_cx.debug_bounds("add-project").is_some(),
-            "dashboard should render add project button"
+            window_cx.debug_bounds("add-project-button").is_none(),
+            "dashboard should not render add project button"
         );
         assert!(
             window_cx.debug_bounds("titlebar-dashboard-label").is_some(),
