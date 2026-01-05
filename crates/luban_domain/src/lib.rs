@@ -9,6 +9,11 @@ pub use adapters::{
     CreatedWorkspace, ProjectWorkspaceService, PullRequestInfo, PullRequestState,
     RunAgentTurnRequest,
 };
+mod dashboard;
+pub use dashboard::{
+    DashboardCardModel, DashboardPreviewMessage, DashboardPreviewModel, DashboardStage,
+    dashboard_cards, dashboard_preview,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct ProjectId(u64);

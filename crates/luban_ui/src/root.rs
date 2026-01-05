@@ -15,16 +15,17 @@ use gpui_component::{
     text::{TextView, TextViewStyle},
 };
 use luban_domain::{
-    Action, AppState, CodexThreadEvent, CodexThreadItem, Effect, MainPane, OperationStatus,
-    ProjectId, ProjectWorkspaceService, PullRequestInfo, RightPane, RunAgentTurnRequest,
-    WorkspaceId, WorkspaceStatus,
+    Action, AppState, CodexThreadEvent, CodexThreadItem, DashboardCardModel,
+    DashboardPreviewMessage, DashboardPreviewModel, DashboardStage, Effect, MainPane,
+    OperationStatus, ProjectId, ProjectWorkspaceService, PullRequestInfo, RightPane,
+    RunAgentTurnRequest, WorkspaceId, WorkspaceStatus, dashboard_cards, dashboard_preview,
 };
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
     sync::Arc,
     sync::atomic::{AtomicBool, Ordering},
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime},
 };
 
 use crate::selectable_text::SelectablePlainText;
@@ -2282,42 +2283,7 @@ impl LubanRootView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = cx.theme();
-        let mut cards: Vec<DashboardCardModel> = Vec::new();
-
-        for (project_index, project) in self.state.projects.iter().enumerate() {
-            for workspace in &project.workspaces {
-                if workspace.status != WorkspaceStatus::Active {
-                    continue;
-                }
-                if workspace.worktree_path == project.path {
-                    continue;
-                }
-
-                let pr_info = self
-                    .workspace_pull_request_numbers
-                    .get(&workspace.id)
-                    .copied()
-                    .flatten();
-                let stage = dashboard_stage_for_workspace(&self.state, project, workspace, pr_info);
-                let sort_key = dashboard_sort_key(workspace.last_activity_at);
-                let snippet = self
-                    .state
-                    .workspace_conversation(workspace.id)
-                    .and_then(|c| dashboard_latest_message_snippet(&c.entries));
-
-                cards.push(DashboardCardModel {
-                    project_index,
-                    project_name: project.name.clone(),
-                    workspace_name: workspace.workspace_name.clone(),
-                    branch_name: workspace.branch_name.clone(),
-                    workspace_id: workspace.id,
-                    stage,
-                    pr_info,
-                    sort_key,
-                    snippet,
-                });
-            }
-        }
+        let cards = dashboard_cards(&self.state, &self.workspace_pull_request_numbers);
 
         let board = if cards.is_empty() {
             div()
@@ -2363,7 +2329,7 @@ impl LubanRootView {
                     .get(&workspace_id)
                     .copied()
                     .flatten();
-                dashboard_preview_model(&self.state, workspace_id, pr_info).map(|model| {
+                dashboard_preview(&self.state, workspace_id, pr_info).map(|model| {
                     render_dashboard_preview(model, &view_handle, theme).into_any_element()
                 })
             });
@@ -3015,212 +2981,6 @@ fn main_pane_title(state: &AppState, pane: MainPane) -> String {
             .map(|w| w.workspace_name.clone())
             .unwrap_or_else(|| "Workspace".to_owned()),
     }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum DashboardStage {
-    Start,
-    Running,
-    Pending,
-    Reviewing,
-    Finished,
-}
-
-impl DashboardStage {
-    const ALL: [DashboardStage; 5] = [
-        DashboardStage::Start,
-        DashboardStage::Running,
-        DashboardStage::Pending,
-        DashboardStage::Reviewing,
-        DashboardStage::Finished,
-    ];
-
-    fn title(self) -> &'static str {
-        match self {
-            DashboardStage::Start => "Start",
-            DashboardStage::Running => "Running",
-            DashboardStage::Pending => "Pending",
-            DashboardStage::Reviewing => "Reviewing",
-            DashboardStage::Finished => "Finished",
-        }
-    }
-
-    fn debug_id(self) -> &'static str {
-        match self {
-            DashboardStage::Start => "start",
-            DashboardStage::Running => "running",
-            DashboardStage::Pending => "pending",
-            DashboardStage::Reviewing => "reviewing",
-            DashboardStage::Finished => "finished",
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-struct DashboardCardModel {
-    project_index: usize,
-    project_name: String,
-    workspace_name: String,
-    branch_name: String,
-    workspace_id: WorkspaceId,
-    stage: DashboardStage,
-    pr_info: Option<PullRequestInfo>,
-    sort_key: u64,
-    snippet: Option<String>,
-}
-
-#[derive(Clone, Debug)]
-enum DashboardPreviewMessage {
-    User(String),
-    Agent(String),
-}
-
-#[derive(Clone, Debug)]
-struct DashboardPreviewModel {
-    workspace_id: WorkspaceId,
-    workspace_name: String,
-    project_name: String,
-    stage: DashboardStage,
-    pr_info: Option<PullRequestInfo>,
-    messages: Vec<DashboardPreviewMessage>,
-}
-
-fn dashboard_sort_key(when: Option<SystemTime>) -> u64 {
-    when.and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
-fn dashboard_stage_for_workspace(
-    state: &AppState,
-    project: &luban_domain::Project,
-    workspace: &luban_domain::Workspace,
-    pr_info: Option<PullRequestInfo>,
-) -> DashboardStage {
-    if workspace.worktree_path == project.path {
-        return DashboardStage::Start;
-    }
-
-    let conversation = state.workspace_conversation(workspace.id);
-    let run_status = conversation
-        .map(|c| c.run_status)
-        .unwrap_or(OperationStatus::Idle);
-    if run_status == OperationStatus::Running {
-        return DashboardStage::Running;
-    }
-
-    let pending = conversation
-        .map(|c| !c.pending_prompts.is_empty() || c.queue_paused)
-        .unwrap_or(false);
-    if pending {
-        return DashboardStage::Pending;
-    }
-
-    if let Some(pr_info) = pr_info {
-        if pr_info.state.is_finished() {
-            return DashboardStage::Finished;
-        }
-        return DashboardStage::Reviewing;
-    }
-
-    DashboardStage::Start
-}
-
-fn dashboard_latest_message_snippet(entries: &[luban_domain::ConversationEntry]) -> Option<String> {
-    for entry in entries.iter().rev() {
-        match entry {
-            luban_domain::ConversationEntry::UserMessage { text } => {
-                return dashboard_normalize_snippet(text);
-            }
-            luban_domain::ConversationEntry::CodexItem { item } => match item.as_ref() {
-                CodexThreadItem::AgentMessage { text, .. } => {
-                    return dashboard_normalize_snippet(text);
-                }
-                _ => continue,
-            },
-            _ => continue,
-        }
-    }
-    None
-}
-
-fn dashboard_normalize_snippet(input: &str) -> Option<String> {
-    let text = input.split_whitespace().collect::<Vec<_>>().join(" ");
-    if text.is_empty() {
-        return None;
-    }
-    let limit = 120usize;
-    let out = if text.chars().count() > limit {
-        let clipped: String = text.chars().take(limit).collect();
-        format!("{clipped}…")
-    } else {
-        text
-    };
-    Some(out)
-}
-
-fn dashboard_preview_model(
-    state: &AppState,
-    workspace_id: WorkspaceId,
-    pr_info: Option<PullRequestInfo>,
-) -> Option<DashboardPreviewModel> {
-    let mut project_name = None;
-    let mut workspace = None;
-    let mut stage = None;
-
-    for project in &state.projects {
-        if let Some(found) = project
-            .workspaces
-            .iter()
-            .find(|w| w.status == WorkspaceStatus::Active && w.id == workspace_id)
-        {
-            if found.worktree_path == project.path {
-                return None;
-            }
-            project_name = Some(project.name.clone());
-            workspace = Some(found.clone());
-            stage = Some(dashboard_stage_for_workspace(
-                state, project, found, pr_info,
-            ));
-            break;
-        }
-    }
-
-    let project_name = project_name?;
-    let workspace = workspace?;
-    let stage = stage?;
-    let conversation = state.workspace_conversation(workspace_id);
-
-    let mut messages: Vec<DashboardPreviewMessage> = Vec::new();
-    if let Some(conversation) = conversation {
-        for entry in conversation.entries.iter().rev() {
-            match entry {
-                luban_domain::ConversationEntry::UserMessage { text } => {
-                    messages.push(DashboardPreviewMessage::User(text.clone()));
-                }
-                luban_domain::ConversationEntry::CodexItem { item } => {
-                    if let CodexThreadItem::AgentMessage { text, .. } = item.as_ref() {
-                        messages.push(DashboardPreviewMessage::Agent(text.clone()));
-                    }
-                }
-                _ => {}
-            }
-
-            if messages.len() >= 10 {
-                break;
-            }
-        }
-        messages.reverse();
-    }
-
-    Some(DashboardPreviewModel {
-        workspace_id,
-        workspace_name: workspace.workspace_name,
-        project_name,
-        stage,
-        pr_info,
-        messages,
-    })
 }
 
 fn render_dashboard_column(
