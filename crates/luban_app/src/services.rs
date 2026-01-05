@@ -535,7 +535,11 @@ impl GitWorkspaceService {
         if let Some(model) = model {
             command.arg("--model").arg(model);
         }
-        let _ = model_reasoning_effort;
+        if let Some(effort) = model_reasoning_effort {
+            command
+                .arg("-c")
+                .arg(format!("model_reasoning_effort=\"{effort}\""));
+        }
 
         if let Some(thread_id) = thread_id {
             command.arg("resume").arg(thread_id).arg("-");
