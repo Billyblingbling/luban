@@ -52,7 +52,11 @@ impl LubanRootView {
             return None;
         }
         if let Some(terminal) = self.workspace_terminals.get(&workspace_id) {
-            return Some(terminal.view());
+            if terminal.is_closed() {
+                self.workspace_terminals.remove(&workspace_id);
+            } else {
+                return Some(terminal.view());
+            }
         }
 
         let (_, worktree_path) = workspace_context(&self.state, workspace_id)?;

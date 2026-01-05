@@ -83,14 +83,18 @@ where
     cmd.env("COLORTERM", "truecolor");
     cmd.env("TERM_PROGRAM", "luban");
 
+    let closed = std::sync::Arc::new(AtomicBool::new(false));
+
     let mut child = pty_pair
         .slave
         .spawn_command(cmd)
         .map_err(|e| format!("spawn pty command failed: {e}"))?;
 
     let killer = child.clone_killer();
+    let closed_for_wait = closed.clone();
     thread::spawn(move || {
         let _ = child.wait();
+        closed_for_wait.store(true, Ordering::Relaxed);
     });
 
     let mut pty_reader = master
@@ -112,6 +116,7 @@ where
         }
     });
 
+    let closed_for_reader = closed.clone();
     thread::spawn(move || {
         let mut buf = [0u8; 8192];
         loop {
@@ -124,6 +129,7 @@ where
                 break;
             }
         }
+        closed_for_reader.store(true, Ordering::Relaxed);
     });
 
     let session = TerminalSession::new(config).map_err(|e| format!("terminal init failed: {e}"))?;
@@ -136,6 +142,7 @@ where
     });
 
     let view_for_task = view.clone();
+    let closed_for_task = closed.clone();
     window
         .spawn(cx, async move |cx| {
             loop {
@@ -149,6 +156,11 @@ where
                 }
                 if batch.is_empty() {
                     if stdout_rx.is_closed() {
+                        closed_for_task.store(true, Ordering::Relaxed);
+                        cx.update(|_, cx| {
+                            view_for_task.update(cx, |_, cx| cx.notify());
+                        })
+                        .ok();
                         break;
                     }
                     continue;
@@ -168,7 +180,7 @@ where
         view,
         master,
         killer,
-        closed: std::sync::Arc::new(AtomicBool::new(false)),
+        closed,
     })
 }
 

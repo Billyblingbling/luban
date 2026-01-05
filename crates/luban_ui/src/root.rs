@@ -5618,6 +5618,88 @@ mod tests {
     }
 
     #[gpui::test]
+    async fn terminal_is_reinitialized_after_session_exits(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        if std::path::Path::new("/bin/bash").exists() {
+            unsafe {
+                std::env::set_var("SHELL", "/bin/bash");
+            }
+        }
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "abandon-about".to_owned(),
+            branch_name: "repo/branch".to_owned(),
+            worktree_path: PathBuf::from("/tmp"),
+        });
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
+        state.main_pane = MainPane::Workspace(workspace_id);
+        state.right_pane = RightPane::Terminal;
+
+        let (view, window_cx) = cx.add_window_view(|_window, cx| {
+            let mut view = LubanRootView::with_state(services, state, cx);
+            view.terminal_enabled = true;
+            view
+        });
+
+        window_cx.simulate_resize(size(px(1200.0), px(720.0)));
+        for _ in 0..12 {
+            window_cx.run_until_parked();
+            window_cx.refresh().unwrap();
+        }
+
+        let initial_closed = view.read_with(window_cx, |view, _| {
+            view.workspace_terminals
+                .get(&workspace_id)
+                .map(|t| t.is_closed())
+        });
+        assert_eq!(
+            initial_closed,
+            Some(false),
+            "expected a running terminal session for the workspace"
+        );
+
+        window_cx.update(|_, app| {
+            view.update(app, |view, cx| {
+                if let Some(terminal) = view.workspace_terminals.get_mut(&workspace_id) {
+                    terminal.kill();
+                }
+                cx.notify();
+            });
+        });
+
+        for _ in 0..24 {
+            window_cx.run_until_parked();
+            window_cx.refresh().unwrap();
+        }
+
+        let after_closed = view.read_with(window_cx, |view, _| {
+            view.workspace_terminals
+                .get(&workspace_id)
+                .map(|t| t.is_closed())
+        });
+        assert_eq!(
+            after_closed,
+            Some(false),
+            "expected terminal to be reinitialized after session exit"
+        );
+        assert!(
+            view.read_with(window_cx, |view, _| {
+                !view.workspace_terminal_errors.contains_key(&workspace_id)
+            }),
+            "expected terminal to reinitialize without errors"
+        );
+    }
+
+    #[gpui::test]
     async fn project_header_has_extra_spacing_before_main_workspace(cx: &mut gpui::TestAppContext) {
         cx.update(gpui_component::init);
 
