@@ -2566,13 +2566,6 @@ fn codex_item_is_summary_item(item: &CodexThreadItem) -> bool {
     ) || codex_item_is_tool_call(item)
 }
 
-fn codex_item_is_thinking(item: &CodexThreadItem) -> bool {
-    matches!(
-        item,
-        CodexThreadItem::Reasoning { .. } | CodexThreadItem::TodoList { .. }
-    )
-}
-
 fn find_summary_item_in_current_turn<'a>(
     entries: &'a [luban_domain::ConversationEntry],
     item_id: &str,
@@ -2715,8 +2708,13 @@ fn build_workspace_history_children(
                         continue;
                     }
 
-                    if codex_item_is_thinking(item) {
+                    if matches!(item, CodexThreadItem::Reasoning { .. }) {
                         turn.reasonings += 1;
+                        turn.summary_items.push(item);
+                        continue;
+                    }
+
+                    if matches!(item, CodexThreadItem::TodoList { .. }) {
                         turn.summary_items.push(item);
                         continue;
                     }
@@ -2776,7 +2774,7 @@ fn build_workspace_history_children(
                 if !codex_item_is_summary_item(item) {
                     continue;
                 }
-                if codex_item_is_thinking(item) {
+                if matches!(item, CodexThreadItem::Reasoning { .. }) {
                     turn.reasonings += 1;
                 }
                 if codex_item_is_tool_call(item) {
@@ -3626,19 +3624,6 @@ mod tests {
         assert_eq!(summary, "2 tool calls, 3 thinking");
         assert!(!summary.contains("message"));
         assert!(!summary.contains("reasoning"));
-    }
-
-    #[test]
-    fn todo_list_items_are_counted_as_thinking() {
-        let item = CodexThreadItem::TodoList {
-            id: "item_0".to_owned(),
-            items: vec![luban_domain::CodexTodoItem {
-                text: "Do the thing".to_owned(),
-                completed: false,
-            }],
-        };
-        assert!(codex_item_is_thinking(&item));
-        assert!(codex_item_is_summary_item(&item));
     }
 
     #[test]
