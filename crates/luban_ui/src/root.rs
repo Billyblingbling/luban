@@ -10,7 +10,7 @@ use gpui_component::{
     button::*,
     collapsible::Collapsible,
     input::{Input, InputEvent, InputState},
-    scroll::{Scrollbar, ScrollbarShow},
+    scroll::{ScrollableElement as _, Scrollbar, ScrollbarShow},
     spinner::Spinner,
     text::{TextView, TextViewStyle},
 };
@@ -23,7 +23,7 @@ use std::{
     path::PathBuf,
     sync::Arc,
     sync::atomic::{AtomicBool, Ordering},
-    time::{Duration, Instant, SystemTime},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use crate::selectable_text::SelectablePlainText;
@@ -86,6 +86,20 @@ pub struct RunAgentTurnRequest {
 pub struct PullRequestInfo {
     pub number: u64,
     pub is_draft: bool,
+    pub state: PullRequestState,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PullRequestState {
+    Open,
+    Closed,
+    Merged,
+}
+
+impl PullRequestState {
+    fn is_finished(self) -> bool {
+        matches!(self, Self::Closed | Self::Merged)
+    }
 }
 
 pub trait ProjectWorkspaceService: Send + Sync {
@@ -1547,6 +1561,8 @@ fn render_titlebar(
             })
     };
 
+    let is_dashboard_selected = state.main_pane == MainPane::Dashboard;
+
     let sidebar_titlebar = div()
         .w(sidebar_width)
         .h(titlebar_height)
@@ -1574,16 +1590,31 @@ fn render_titlebar(
                         .items_center()
                         .gap_2()
                         .debug_selector(|| "titlebar-dashboard-title".to_owned())
+                        .cursor_pointer()
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _, _, cx| {
+                                this.dispatch(Action::OpenDashboard, cx);
+                            }),
+                        )
                         .child(
                             Icon::new(IconName::GalleryVerticalEnd)
                                 .with_size(Size::Small)
-                                .text_color(theme.muted_foreground),
+                                .text_color(if is_dashboard_selected {
+                                    theme.sidebar_primary
+                                } else {
+                                    theme.muted_foreground
+                                }),
                         )
                         .child(
                             div()
                                 .text_sm()
                                 .font_semibold()
-                                .text_color(theme.muted_foreground)
+                                .text_color(if is_dashboard_selected {
+                                    theme.sidebar_primary
+                                } else {
+                                    theme.muted_foreground
+                                })
                                 .child("Dashboard"),
                         ),
                 )
@@ -1713,7 +1744,7 @@ struct TitlebarContext {
 fn titlebar_context(state: &AppState) -> TitlebarContext {
     let active_workspace = match state.main_pane {
         MainPane::Workspace(workspace_id) => state.workspace(workspace_id),
-        _ => None,
+        MainPane::Dashboard | MainPane::ProjectSettings(_) | MainPane::None => None,
     };
     let fallback_title = main_pane_title(state, state.main_pane);
 
@@ -2324,6 +2355,107 @@ impl LubanRootView {
         input_state
     }
 
+    fn render_dashboard(
+        &mut self,
+        view_handle: gpui::WeakEntity<LubanRootView>,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = cx.theme();
+        let mut cards: Vec<DashboardCardModel> = Vec::new();
+
+        for (project_index, project) in self.state.projects.iter().enumerate() {
+            for workspace in &project.workspaces {
+                if workspace.status != WorkspaceStatus::Active {
+                    continue;
+                }
+                if workspace.worktree_path == project.path {
+                    continue;
+                }
+
+                let pr_info = self
+                    .workspace_pull_request_numbers
+                    .get(&workspace.id)
+                    .copied()
+                    .flatten();
+                let stage = dashboard_stage_for_workspace(&self.state, project, workspace, pr_info);
+                let sort_key = dashboard_sort_key(workspace.last_activity_at);
+                let snippet = self
+                    .state
+                    .workspace_conversation(workspace.id)
+                    .and_then(|c| dashboard_latest_message_snippet(&c.entries));
+
+                cards.push(DashboardCardModel {
+                    project_index,
+                    project_name: project.name.clone(),
+                    workspace_name: workspace.workspace_name.clone(),
+                    branch_name: workspace.branch_name.clone(),
+                    workspace_id: workspace.id,
+                    stage,
+                    pr_info,
+                    sort_key,
+                    snippet,
+                });
+            }
+        }
+
+        let board = if cards.is_empty() {
+            div()
+                .flex_1()
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_color(theme.muted_foreground)
+                .child("No workspaces yet.")
+                .into_any_element()
+        } else {
+            let columns = DashboardStage::ALL
+                .iter()
+                .copied()
+                .map(|stage| {
+                    let mut stage_cards: Vec<DashboardCardModel> =
+                        cards.iter().filter(|c| c.stage == stage).cloned().collect();
+                    stage_cards.sort_by(|a, b| b.sort_key.cmp(&a.sort_key));
+                    render_dashboard_column(stage, stage_cards, &view_handle, theme)
+                })
+                .collect::<Vec<_>>();
+
+            min_width_zero(min_height_zero(
+                div()
+                    .flex_1()
+                    .relative()
+                    .debug_selector(|| "dashboard-board".to_owned())
+                    .p_4()
+                    .gap_3()
+                    .flex()
+                    .overflow_x_scrollbar()
+                    .children(columns),
+            ))
+            .into_any_element()
+        };
+
+        let preview = self
+            .state
+            .dashboard_preview_workspace_id
+            .and_then(|workspace_id| {
+                let pr_info = self
+                    .workspace_pull_request_numbers
+                    .get(&workspace_id)
+                    .copied()
+                    .flatten();
+                dashboard_preview_model(&self.state, workspace_id, pr_info).map(|model| {
+                    render_dashboard_preview(model, &view_handle, theme).into_any_element()
+                })
+            });
+
+        div()
+            .flex_1()
+            .relative()
+            .child(board)
+            .when_some(preview, |s, preview| s.child(preview))
+            .into_any_element()
+    }
+
     fn render_main(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let view_handle = cx.entity().downgrade();
 
@@ -2333,6 +2465,12 @@ impl LubanRootView {
                 self.last_chat_item_count = 0;
 
                 div().flex_1().into_any_element()
+            }
+            MainPane::Dashboard => {
+                self.last_chat_workspace_id = None;
+                self.last_chat_item_count = 0;
+
+                self.render_dashboard(view_handle, window, cx)
             }
             MainPane::ProjectSettings(project_id) => {
                 self.last_chat_workspace_id = None;
@@ -2947,6 +3085,7 @@ impl LubanRootView {
 fn main_pane_title(state: &AppState, pane: MainPane) -> String {
     match pane {
         MainPane::None => String::new(),
+        MainPane::Dashboard => "Dashboard".to_owned(),
         MainPane::ProjectSettings(project_id) => state
             .project(project_id)
             .map(|p| p.name.clone())
@@ -2956,6 +3095,511 @@ fn main_pane_title(state: &AppState, pane: MainPane) -> String {
             .map(|w| w.workspace_name.clone())
             .unwrap_or_else(|| "Workspace".to_owned()),
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DashboardStage {
+    Start,
+    Running,
+    Pending,
+    Reviewing,
+    Finished,
+}
+
+impl DashboardStage {
+    const ALL: [DashboardStage; 5] = [
+        DashboardStage::Start,
+        DashboardStage::Running,
+        DashboardStage::Pending,
+        DashboardStage::Reviewing,
+        DashboardStage::Finished,
+    ];
+
+    fn title(self) -> &'static str {
+        match self {
+            DashboardStage::Start => "Start",
+            DashboardStage::Running => "Running",
+            DashboardStage::Pending => "Pending",
+            DashboardStage::Reviewing => "Reviewing",
+            DashboardStage::Finished => "Finished",
+        }
+    }
+
+    fn debug_id(self) -> &'static str {
+        match self {
+            DashboardStage::Start => "start",
+            DashboardStage::Running => "running",
+            DashboardStage::Pending => "pending",
+            DashboardStage::Reviewing => "reviewing",
+            DashboardStage::Finished => "finished",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct DashboardCardModel {
+    project_index: usize,
+    project_name: String,
+    workspace_name: String,
+    branch_name: String,
+    workspace_id: WorkspaceId,
+    stage: DashboardStage,
+    pr_info: Option<PullRequestInfo>,
+    sort_key: u64,
+    snippet: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+enum DashboardPreviewMessage {
+    User(String),
+    Agent(String),
+}
+
+#[derive(Clone, Debug)]
+struct DashboardPreviewModel {
+    workspace_id: WorkspaceId,
+    workspace_name: String,
+    project_name: String,
+    stage: DashboardStage,
+    pr_info: Option<PullRequestInfo>,
+    messages: Vec<DashboardPreviewMessage>,
+}
+
+fn dashboard_sort_key(when: Option<SystemTime>) -> u64 {
+    when.and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+fn dashboard_stage_for_workspace(
+    state: &AppState,
+    project: &luban_domain::Project,
+    workspace: &luban_domain::Workspace,
+    pr_info: Option<PullRequestInfo>,
+) -> DashboardStage {
+    if workspace.worktree_path == project.path {
+        return DashboardStage::Start;
+    }
+
+    let conversation = state.workspace_conversation(workspace.id);
+    let run_status = conversation
+        .map(|c| c.run_status)
+        .unwrap_or(OperationStatus::Idle);
+    if run_status == OperationStatus::Running {
+        return DashboardStage::Running;
+    }
+
+    let pending = conversation
+        .map(|c| !c.pending_prompts.is_empty() || c.queue_paused)
+        .unwrap_or(false);
+    if pending {
+        return DashboardStage::Pending;
+    }
+
+    if let Some(pr_info) = pr_info {
+        if pr_info.state.is_finished() {
+            return DashboardStage::Finished;
+        }
+        return DashboardStage::Reviewing;
+    }
+
+    DashboardStage::Start
+}
+
+fn dashboard_latest_message_snippet(entries: &[luban_domain::ConversationEntry]) -> Option<String> {
+    for entry in entries.iter().rev() {
+        match entry {
+            luban_domain::ConversationEntry::UserMessage { text } => {
+                return dashboard_normalize_snippet(text);
+            }
+            luban_domain::ConversationEntry::CodexItem { item } => match item.as_ref() {
+                CodexThreadItem::AgentMessage { text, .. } => {
+                    return dashboard_normalize_snippet(text);
+                }
+                _ => continue,
+            },
+            _ => continue,
+        }
+    }
+    None
+}
+
+fn dashboard_normalize_snippet(input: &str) -> Option<String> {
+    let text = input.split_whitespace().collect::<Vec<_>>().join(" ");
+    if text.is_empty() {
+        return None;
+    }
+    let limit = 120usize;
+    let out = if text.chars().count() > limit {
+        let clipped: String = text.chars().take(limit).collect();
+        format!("{clipped}…")
+    } else {
+        text
+    };
+    Some(out)
+}
+
+fn dashboard_preview_model(
+    state: &AppState,
+    workspace_id: WorkspaceId,
+    pr_info: Option<PullRequestInfo>,
+) -> Option<DashboardPreviewModel> {
+    let mut project_name = None;
+    let mut workspace = None;
+    let mut stage = None;
+
+    for project in &state.projects {
+        if let Some(found) = project
+            .workspaces
+            .iter()
+            .find(|w| w.status == WorkspaceStatus::Active && w.id == workspace_id)
+        {
+            if found.worktree_path == project.path {
+                return None;
+            }
+            project_name = Some(project.name.clone());
+            workspace = Some(found.clone());
+            stage = Some(dashboard_stage_for_workspace(
+                state, project, found, pr_info,
+            ));
+            break;
+        }
+    }
+
+    let project_name = project_name?;
+    let workspace = workspace?;
+    let stage = stage?;
+    let conversation = state.workspace_conversation(workspace_id);
+
+    let mut messages: Vec<DashboardPreviewMessage> = Vec::new();
+    if let Some(conversation) = conversation {
+        for entry in conversation.entries.iter().rev() {
+            match entry {
+                luban_domain::ConversationEntry::UserMessage { text } => {
+                    messages.push(DashboardPreviewMessage::User(text.clone()));
+                }
+                luban_domain::ConversationEntry::CodexItem { item } => {
+                    if let CodexThreadItem::AgentMessage { text, .. } = item.as_ref() {
+                        messages.push(DashboardPreviewMessage::Agent(text.clone()));
+                    }
+                }
+                _ => {}
+            }
+
+            if messages.len() >= 10 {
+                break;
+            }
+        }
+        messages.reverse();
+    }
+
+    Some(DashboardPreviewModel {
+        workspace_id,
+        workspace_name: workspace.workspace_name,
+        project_name,
+        stage,
+        pr_info,
+        messages,
+    })
+}
+
+fn render_dashboard_column(
+    stage: DashboardStage,
+    cards: Vec<DashboardCardModel>,
+    view_handle: &gpui::WeakEntity<LubanRootView>,
+    theme: &gpui_component::Theme,
+) -> AnyElement {
+    let header = div()
+        .h(px(36.0))
+        .px_3()
+        .flex()
+        .items_center()
+        .justify_between()
+        .border_b_1()
+        .border_color(theme.border)
+        .child(div().text_sm().font_semibold().child(stage.title()))
+        .child(
+            div()
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .child(format!("{}", cards.len())),
+        );
+
+    let body = min_height_zero(
+        div()
+            .flex_1()
+            .overflow_y_scrollbar()
+            .p_2()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .children(
+                cards
+                    .into_iter()
+                    .map(|card| render_dashboard_card(card, view_handle, theme)),
+            ),
+    );
+
+    div()
+        .flex_1()
+        .min_w(px(180.0))
+        .flex()
+        .flex_col()
+        .rounded_lg()
+        .border_1()
+        .border_color(theme.border)
+        .bg(theme.secondary)
+        .debug_selector(move || format!("dashboard-column-{}", stage.debug_id()))
+        .child(header)
+        .child(body)
+        .into_any_element()
+}
+
+fn render_dashboard_card(
+    card: DashboardCardModel,
+    view_handle: &gpui::WeakEntity<LubanRootView>,
+    theme: &gpui_component::Theme,
+) -> AnyElement {
+    let DashboardCardModel {
+        project_index,
+        project_name,
+        workspace_name,
+        branch_name,
+        workspace_id,
+        pr_info,
+        snippet,
+        ..
+    } = card;
+    let pr_label = pr_info.map(|info| format!("#{}", info.number));
+    let snippet = snippet.unwrap_or_else(|| "—".to_owned());
+    let debug_selector = format!("dashboard-card-{project_index}-{workspace_name}");
+
+    div()
+        .p_3()
+        .rounded_md()
+        .border_1()
+        .border_color(theme.border)
+        .bg(theme.background)
+        .hover(move |s| s.bg(theme.list_hover))
+        .cursor_pointer()
+        .debug_selector(move || debug_selector.clone())
+        .on_mouse_down(MouseButton::Left, {
+            let view_handle = view_handle.clone();
+            move |_, _window, app| {
+                let _ = view_handle.update(app, |view, cx| {
+                    view.dispatch(Action::DashboardPreviewOpened { workspace_id }, cx);
+                });
+            }
+        })
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .child(
+                    div()
+                        .text_sm()
+                        .font_semibold()
+                        .truncate()
+                        .child(workspace_name),
+                )
+                .when_some(pr_label, |s, label| {
+                    s.child(
+                        div()
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child(label),
+                    )
+                }),
+        )
+        .child(
+            div()
+                .mt_1()
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .truncate()
+                .child(branch_name),
+        )
+        .child(
+            div()
+                .mt_2()
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .truncate()
+                .child(snippet),
+        )
+        .child(
+            div()
+                .mt_2()
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .truncate()
+                .child(project_name),
+        )
+        .into_any_element()
+}
+
+fn render_dashboard_preview(
+    model: DashboardPreviewModel,
+    view_handle: &gpui::WeakEntity<LubanRootView>,
+    theme: &gpui_component::Theme,
+) -> impl IntoElement {
+    let workspace_id = model.workspace_id;
+    let stage_label = model.stage.title();
+    let project_line = match model.pr_info {
+        Some(pr) => format!("{} · {} · #{}", model.project_name, stage_label, pr.number),
+        None => format!("{} · {}", model.project_name, stage_label),
+    };
+
+    let open_task_button = {
+        let view_handle = view_handle.clone();
+        Button::new("dashboard-preview-open-task")
+            .outline()
+            .compact()
+            .label("View")
+            .tooltip("Open task view")
+            .on_click(move |_, _, app| {
+                let _ = view_handle.update(app, |view, cx| {
+                    view.dispatch(Action::OpenWorkspace { workspace_id }, cx);
+                });
+            })
+    };
+
+    let open_in_zed_button = {
+        let view_handle = view_handle.clone();
+        Button::new("dashboard-preview-open-zed")
+            .outline()
+            .compact()
+            .icon(IconName::ExternalLink)
+            .label("Open in Zed")
+            .tooltip("Open in Zed")
+            .on_click(move |_, _, app| {
+                let _ = view_handle.update(app, |view, cx| {
+                    view.dispatch(Action::OpenWorkspaceInIde { workspace_id }, cx);
+                });
+            })
+    };
+
+    let close_button = {
+        let view_handle = view_handle.clone();
+        Button::new("dashboard-preview-close")
+            .ghost()
+            .compact()
+            .icon(IconName::Close)
+            .tooltip("Close preview")
+            .on_click(move |_, _, app| {
+                let _ = view_handle.update(app, |view, cx| {
+                    view.dispatch(Action::DashboardPreviewClosed, cx);
+                });
+            })
+    };
+
+    let messages = div()
+        .flex_1()
+        .overflow_y_scrollbar()
+        .p_3()
+        .flex()
+        .flex_col()
+        .gap_3()
+        .children(model.messages.iter().enumerate().map(|(idx, msg)| {
+            let id_prefix = format!("dashboard-preview-message-{idx}");
+            match msg {
+                DashboardPreviewMessage::User(text) => div()
+                    .flex()
+                    .justify_end()
+                    .child(
+                        div()
+                            .max_w(px(320.0))
+                            .px_3()
+                            .py_2()
+                            .rounded_md()
+                            .bg(theme.accent)
+                            .child(chat_message_view(&id_prefix, text, None, theme.foreground)),
+                    )
+                    .into_any_element(),
+                DashboardPreviewMessage::Agent(text) => div()
+                    .flex()
+                    .justify_start()
+                    .child(
+                        div()
+                            .max_w(px(320.0))
+                            .px_3()
+                            .py_2()
+                            .rounded_md()
+                            .bg(theme.secondary)
+                            .border_1()
+                            .border_color(theme.border)
+                            .child(chat_message_view(&id_prefix, text, None, theme.foreground)),
+                    )
+                    .into_any_element(),
+            }
+        }));
+
+    div()
+        .absolute()
+        .top(px(16.0))
+        .right(px(16.0))
+        .bottom(px(16.0))
+        .w(px(420.0))
+        .rounded_lg()
+        .border_1()
+        .border_color(theme.border)
+        .bg(theme.background)
+        .flex()
+        .flex_col()
+        .debug_selector(|| "dashboard-preview".to_owned())
+        .child(
+            div()
+                .h(px(44.0))
+                .px_3()
+                .flex()
+                .items_center()
+                .justify_between()
+                .border_b_1()
+                .border_color(theme.border)
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .min_w(px(0.0))
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_semibold()
+                                .truncate()
+                                .child(model.workspace_name),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .truncate()
+                                .child(project_line),
+                        ),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            div()
+                                .debug_selector(|| "dashboard-preview-open-task".to_owned())
+                                .child(open_task_button),
+                        )
+                        .child(
+                            div()
+                                .debug_selector(|| "dashboard-preview-open-zed".to_owned())
+                                .child(open_in_zed_button),
+                        )
+                        .child(
+                            div()
+                                .debug_selector(|| "dashboard-preview-close".to_owned())
+                                .child(close_button),
+                        ),
+                ),
+        )
+        .child(messages)
 }
 
 fn render_conversation_entry(
@@ -3062,7 +3706,7 @@ fn render_conversation_entry(
     }
 }
 
-fn min_width_zero(mut element: gpui::Div) -> gpui::Div {
+fn min_width_zero<E: gpui::Styled>(mut element: E) -> E {
     element.style().min_size.width = Some(px(0.0).into());
     element
 }
@@ -5958,6 +6602,85 @@ mod tests {
     }
 
     #[gpui::test]
+    async fn dashboard_renders_kanban_cards_and_preview(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::ToggleProjectExpanded { project_id });
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "w1".to_owned(),
+            branch_name: "repo/w1".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/w1"),
+        });
+        let w1 = workspace_id_by_name(&state, "w1");
+
+        state.apply(Action::ConversationLoaded {
+            workspace_id: w1,
+            snapshot: ConversationSnapshot {
+                thread_id: Some("thread-1".to_owned()),
+                entries: vec![
+                    ConversationEntry::UserMessage {
+                        text: "Hello".to_owned(),
+                    },
+                    ConversationEntry::CodexItem {
+                        item: Box::new(CodexThreadItem::AgentMessage {
+                            id: "item-1".to_owned(),
+                            text: "Hi from agent".to_owned(),
+                        }),
+                    },
+                ],
+            },
+        });
+
+        state.apply(Action::OpenDashboard);
+
+        let (view, window_cx) =
+            cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+        window_cx.simulate_resize(size(px(1200.0), px(720.0)));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        assert!(
+            window_cx.debug_bounds("dashboard-column-start").is_some(),
+            "expected start column to be rendered"
+        );
+        assert!(
+            window_cx.debug_bounds("dashboard-card-0-main").is_none(),
+            "main workspace should not be rendered in the dashboard"
+        );
+        let card_bounds = window_cx
+            .debug_bounds("dashboard-card-0-w1")
+            .expect("missing dashboard card for w1");
+
+        window_cx.simulate_click(card_bounds.center(), Modifiers::none());
+        window_cx.refresh().unwrap();
+
+        assert!(
+            window_cx.debug_bounds("dashboard-preview").is_some(),
+            "expected preview to be rendered after clicking a card"
+        );
+
+        let open_bounds = window_cx
+            .debug_bounds("dashboard-preview-open-task")
+            .expect("missing preview open button");
+        window_cx.simulate_click(open_bounds.center(), Modifiers::none());
+        window_cx.refresh().unwrap();
+
+        let selected = view.read_with(window_cx, |v, _| v.debug_state().main_pane);
+        assert!(
+            matches!(selected, MainPane::Workspace(id) if id == w1),
+            "expected task view to open when clicking preview open button"
+        );
+    }
+
+    #[gpui::test]
     async fn chat_column_remains_primary_when_terminal_is_visible(cx: &mut gpui::TestAppContext) {
         cx.update(gpui_component::init);
 
@@ -6992,6 +7715,7 @@ mod tests {
             Some(PullRequestInfo {
                 number: 123,
                 is_draft: false,
+                state: PullRequestState::Open,
             }),
         );
         pr_numbers.insert(PathBuf::from("/tmp/luban/worktrees/repo/w2"), None);

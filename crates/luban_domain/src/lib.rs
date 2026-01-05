@@ -13,6 +13,7 @@ pub struct WorkspaceId(u64);
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MainPane {
     None,
+    Dashboard,
     ProjectSettings(ProjectId),
     Workspace(WorkspaceId),
 }
@@ -301,6 +302,7 @@ pub struct AppState {
     pub sidebar_width: Option<u16>,
     pub terminal_pane_width: Option<u16>,
     pub conversations: HashMap<WorkspaceId, WorkspaceConversation>,
+    pub dashboard_preview_workspace_id: Option<WorkspaceId>,
     pub last_error: Option<String>,
 }
 
@@ -333,6 +335,12 @@ pub struct PersistedWorkspace {
 #[derive(Clone, Debug)]
 pub enum Action {
     AppStarted,
+
+    OpenDashboard,
+    DashboardPreviewOpened {
+        workspace_id: WorkspaceId,
+    },
+    DashboardPreviewClosed,
 
     AddProject {
         path: PathBuf,
@@ -480,6 +488,7 @@ impl AppState {
             sidebar_width: None,
             terminal_pane_width: None,
             conversations: HashMap::new(),
+            dashboard_preview_workspace_id: None,
             last_error: None,
         }
     }
@@ -514,6 +523,39 @@ impl AppState {
         match action {
             Action::AppStarted => vec![Effect::LoadAppState],
 
+            Action::OpenDashboard => {
+                self.main_pane = MainPane::Dashboard;
+                self.right_pane = RightPane::None;
+                self.dashboard_preview_workspace_id = None;
+
+                let mut effects = Vec::new();
+                for project in &self.projects {
+                    for workspace in &project.workspaces {
+                        if workspace.status != WorkspaceStatus::Active {
+                            continue;
+                        }
+                        if Self::workspace_is_main(project, workspace) {
+                            continue;
+                        }
+                        effects.push(Effect::LoadConversation {
+                            workspace_id: workspace.id,
+                        });
+                    }
+                }
+                effects
+            }
+            Action::DashboardPreviewOpened { workspace_id } => {
+                if self.workspace(workspace_id).is_none() {
+                    return Vec::new();
+                }
+                self.dashboard_preview_workspace_id = Some(workspace_id);
+                vec![Effect::LoadConversation { workspace_id }]
+            }
+            Action::DashboardPreviewClosed => {
+                self.dashboard_preview_workspace_id = None;
+                Vec::new()
+            }
+
             Action::AddProject { path } => {
                 let project_id = self.add_project(path);
                 self.insert_main_workspace(project_id);
@@ -528,6 +570,7 @@ impl AppState {
             Action::OpenProjectSettings { project_id } => {
                 self.main_pane = MainPane::ProjectSettings(project_id);
                 self.right_pane = RightPane::None;
+                self.dashboard_preview_workspace_id = None;
                 Vec::new()
             }
 
@@ -583,6 +626,7 @@ impl AppState {
             Action::OpenWorkspace { workspace_id } => {
                 self.main_pane = MainPane::Workspace(workspace_id);
                 self.right_pane = RightPane::Terminal;
+                self.dashboard_preview_workspace_id = None;
                 vec![Effect::LoadConversation { workspace_id }]
             }
             Action::OpenWorkspaceInIde { workspace_id } => {
@@ -631,6 +675,9 @@ impl AppState {
                 if matches!(self.main_pane, MainPane::Workspace(id) if id == workspace_id) {
                     self.main_pane = MainPane::None;
                     self.right_pane = RightPane::None;
+                }
+                if self.dashboard_preview_workspace_id == Some(workspace_id) {
+                    self.dashboard_preview_workspace_id = None;
                 }
                 vec![Effect::SaveAppState]
             }
@@ -1289,6 +1336,40 @@ mod tests {
             .find(|w| w.status == WorkspaceStatus::Active && w.worktree_path != project.path)
             .expect("missing non-main workspace")
             .id
+    }
+
+    #[test]
+    fn open_dashboard_loads_conversations_for_non_main_workspaces() {
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "w1".to_owned(),
+            branch_name: "repo/w1".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/w1"),
+        });
+
+        let main_id = main_workspace_id(&state);
+        let w1 = workspace_id_by_name(&state, "w1");
+
+        let effects = state.apply(Action::OpenDashboard);
+        assert_eq!(state.main_pane, MainPane::Dashboard);
+        assert_eq!(state.right_pane, RightPane::None);
+        assert_eq!(state.dashboard_preview_workspace_id, None);
+
+        assert!(
+            effects.iter().any(
+                |e| matches!(e, Effect::LoadConversation { workspace_id } if *workspace_id == w1)
+            ),
+            "expected dashboard to load non-main workspace conversation"
+        );
+        assert!(
+            !effects.iter().any(|e| matches!(e, Effect::LoadConversation { workspace_id } if *workspace_id == main_id)),
+            "dashboard should not load main workspace conversation"
+        );
     }
 
     #[test]

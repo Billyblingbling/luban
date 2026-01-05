@@ -16,7 +16,10 @@ use std::{
 };
 
 use crate::sqlite_store::SqliteStore;
-use luban_ui::{CreatedWorkspace, ProjectWorkspaceService, PullRequestInfo, RunAgentTurnRequest};
+use luban_ui::{
+    CreatedWorkspace, ProjectWorkspaceService, PullRequestInfo, PullRequestState,
+    RunAgentTurnRequest,
+};
 
 const SIDECAR_EVENT_PREFIX: &str = "__LUBAN_EVENT__ ";
 
@@ -1391,10 +1394,12 @@ impl ProjectWorkspaceService for GitWorkspaceService {
             number: u64,
             #[serde(default, rename = "isDraft")]
             is_draft: bool,
+            #[serde(default)]
+            state: String,
         }
 
         let output = Command::new("gh")
-            .args(["pr", "view", "--json", "number,isDraft"])
+            .args(["pr", "view", "--json", "number,isDraft,state"])
             .current_dir(worktree_path)
             .output();
 
@@ -1408,9 +1413,17 @@ impl ProjectWorkspaceService for GitWorkspaceService {
         let Ok(value) = serde_json::from_slice::<GhPullRequestView>(&output.stdout) else {
             return Ok(None);
         };
+
+        let state = match value.state.as_str() {
+            "OPEN" => PullRequestState::Open,
+            "CLOSED" => PullRequestState::Closed,
+            "MERGED" => PullRequestState::Merged,
+            _ => PullRequestState::Open,
+        };
         Ok(Some(PullRequestInfo {
             number: value.number,
             is_draft: value.is_draft,
+            state,
         }))
     }
 }
