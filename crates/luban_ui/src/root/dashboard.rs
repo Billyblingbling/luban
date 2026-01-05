@@ -77,7 +77,16 @@ impl LubanRootView {
                             });
                         }),
                 )
-                .child(div().w(px(420.0 + 32.0)).h_full().p_4().child(panel))
+                .child(
+                    div()
+                        .w(px(420.0))
+                        .h_full()
+                        .flex_shrink_0()
+                        .bg(theme.background)
+                        .border_l_1()
+                        .border_color(theme.border)
+                        .child(panel),
+                )
                 .into_any_element()
         });
 
@@ -329,10 +338,7 @@ fn render_dashboard_preview_panel(
 
     div()
         .h_full()
-        .w(px(420.0))
-        .rounded_lg()
-        .border_1()
-        .border_color(theme.border)
+        .w_full()
         .bg(theme.background)
         .flex()
         .flex_col()
