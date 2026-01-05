@@ -79,6 +79,10 @@ impl LubanRootView {
             div()
                 .absolute()
                 .inset_0()
+                .occlude()
+                .on_scroll_wheel(|_, _, app| {
+                    app.stop_propagation();
+                })
                 .flex()
                 .flex_row()
                 .child(
@@ -199,12 +203,25 @@ impl LubanRootView {
                 .into_any_element()
         });
 
-        div()
+        let container = div()
             .flex_1()
+            .w_full()
+            .h_full()
             .relative()
+            .debug_selector(|| "dashboard-root".to_owned())
             .child(board)
-            .when_some(preview_overlay, |s, overlay| s.child(overlay))
-            .into_any_element()
+            .when_some(preview_overlay, |s, overlay| s.child(overlay));
+        #[cfg(test)]
+        let container = {
+            let view_handle = view_handle.clone();
+            container.on_scroll_wheel(move |_, _, app| {
+                let _ = view_handle.update(app, |view, _cx| {
+                    view.dashboard_scroll_wheel_events =
+                        view.dashboard_scroll_wheel_events.saturating_add(1);
+                });
+            })
+        };
+        container.into_any_element()
     }
 
     fn render_dashboard_preview_panel(

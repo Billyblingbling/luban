@@ -149,6 +149,8 @@ pub struct LubanRootView {
     success_toast_generation: u64,
     #[cfg(test)]
     inspector_bounds: HashMap<&'static str, gpui::Bounds<Pixels>>,
+    #[cfg(test)]
+    dashboard_scroll_wheel_events: usize,
     _subscriptions: Vec<gpui::Subscription>,
 }
 
@@ -198,6 +200,8 @@ impl LubanRootView {
             success_toast_generation: 0,
             #[cfg(test)]
             inspector_bounds: HashMap::new(),
+            #[cfg(test)]
+            dashboard_scroll_wheel_events: 0,
             _subscriptions: Vec::new(),
         };
 
@@ -258,6 +262,8 @@ impl LubanRootView {
             success_toast_generation: 0,
             #[cfg(test)]
             inspector_bounds: HashMap::new(),
+            #[cfg(test)]
+            dashboard_scroll_wheel_events: 0,
             _subscriptions: Vec::new(),
         }
     }
@@ -270,6 +276,11 @@ impl LubanRootView {
     #[cfg(test)]
     pub fn debug_inspector_bounds(&self, key: &'static str) -> Option<gpui::Bounds<Pixels>> {
         self.inspector_bounds.get(key).copied()
+    }
+
+    #[cfg(test)]
+    pub fn debug_dashboard_scroll_wheel_events(&self) -> usize {
+        self.dashboard_scroll_wheel_events
     }
 
     #[cfg(test)]
@@ -3591,13 +3602,16 @@ fn workspace_agent_context(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{Modifiers, MouseButton, MouseDownEvent, point, px, size};
+    use gpui::{
+        Modifiers, MouseButton, MouseDownEvent, ScrollDelta, ScrollWheelEvent, point, px, size,
+    };
     use luban_domain::{
         ConversationEntry, ConversationSnapshot, CreatedWorkspace, PersistedAppState,
         PullRequestState,
     };
     use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn main_workspace_id(state: &AppState) -> WorkspaceId {
         let project = &state.projects[0];
@@ -3646,6 +3660,59 @@ mod tests {
         assert!(debug_layout::parse_enabled(Some(" TRUE ")));
         assert!(debug_layout::parse_enabled(Some("Yes")));
         assert!(debug_layout::parse_enabled(Some("ON")));
+    }
+
+    #[gpui::test]
+    async fn scroll_wheel_events_are_delivered(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let counter = Arc::new(AtomicUsize::new(0));
+
+        struct TestView {
+            counter: Arc<AtomicUsize>,
+        }
+
+        impl gpui::Render for TestView {
+            fn render(
+                &mut self,
+                _window: &mut Window,
+                _cx: &mut Context<Self>,
+            ) -> impl IntoElement {
+                let counter = self.counter.clone();
+                div()
+                    .flex_1()
+                    .w_full()
+                    .h_full()
+                    .on_scroll_wheel(move |_, _, _app| {
+                        counter.fetch_add(1, Ordering::SeqCst);
+                    })
+                    .child("scroll-target")
+            }
+        }
+
+        let (_view, window_cx) = cx.add_window_view(|_, _cx| TestView {
+            counter: counter.clone(),
+        });
+        window_cx.simulate_resize(size(px(200.0), px(200.0)));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        let position = point(px(100.0), px(100.0));
+        window_cx.simulate_mouse_move(position, None, Modifiers::none());
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+        window_cx.simulate_event(ScrollWheelEvent {
+            position,
+            delta: ScrollDelta::Pixels(point(px(0.0), px(30.0))),
+            ..Default::default()
+        });
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        assert!(
+            counter.load(Ordering::SeqCst) > 0,
+            "expected scroll wheel listener to fire at least once"
+        );
     }
 
     #[derive(Default)]
@@ -5983,6 +6050,89 @@ mod tests {
                 .dashboard_preview_workspace_id)
                 .is_none(),
             "expected preview to close after clicking titlebar"
+        );
+    }
+
+    #[gpui::test]
+    async fn dashboard_preview_blocks_kanban_scroll(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::ToggleProjectExpanded { project_id });
+        for i in 0..24 {
+            state.apply(Action::WorkspaceCreated {
+                project_id,
+                workspace_name: format!("w{i}"),
+                branch_name: format!("repo/w{i}"),
+                worktree_path: PathBuf::from(format!("/tmp/luban/worktrees/repo/w{i}")),
+            });
+        }
+        state.apply(Action::OpenDashboard);
+
+        let (view, window_cx) =
+            cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+        window_cx.simulate_resize(size(px(1200.0), px(720.0)));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        let root_bounds = window_cx
+            .debug_bounds("dashboard-root")
+            .expect("missing dashboard root");
+        window_cx.simulate_mouse_move(root_bounds.center(), None, Modifiers::none());
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+        let count_before =
+            view.read_with(window_cx, |v, _| v.debug_dashboard_scroll_wheel_events());
+        window_cx.simulate_event(ScrollWheelEvent {
+            position: root_bounds.center(),
+            delta: ScrollDelta::Pixels(point(px(0.0), px(200.0))),
+            ..Default::default()
+        });
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        let card_after_scroll =
+            view.read_with(window_cx, |v, _| v.debug_dashboard_scroll_wheel_events());
+        assert!(
+            card_after_scroll > count_before,
+            "expected scroll wheel event to reach kanban: before={count_before} after={card_after_scroll}",
+        );
+
+        view.update(window_cx, |view, cx| {
+            let workspace_id = workspace_id_by_name(&view.state, "w0");
+            view.dispatch(Action::DashboardPreviewOpened { workspace_id }, cx);
+        });
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        let count_before_overlay_scroll =
+            view.read_with(window_cx, |v, _| v.debug_dashboard_scroll_wheel_events());
+        let backdrop_bounds = window_cx
+            .debug_bounds("dashboard-preview-backdrop")
+            .expect("missing preview backdrop");
+
+        window_cx.simulate_mouse_move(backdrop_bounds.center(), None, Modifiers::none());
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+        window_cx.simulate_event(ScrollWheelEvent {
+            position: backdrop_bounds.center(),
+            delta: ScrollDelta::Pixels(point(px(0.0), px(200.0))),
+            ..Default::default()
+        });
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        let card_after_overlay_scroll =
+            view.read_with(window_cx, |v, _| v.debug_dashboard_scroll_wheel_events());
+        assert!(
+            card_after_overlay_scroll == count_before_overlay_scroll,
+            "expected kanban scroll to be disabled while preview is open: before={count_before_overlay_scroll} after={card_after_overlay_scroll}",
         );
     }
 
