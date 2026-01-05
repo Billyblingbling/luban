@@ -7,6 +7,8 @@ const GIT_BRANCH_SVG: &[u8] = include_bytes!("../assets/icons/git-branch.svg");
 const GIT_PULL_REQUEST_ARROW_SVG: &[u8] =
     include_bytes!("../assets/icons/git-pull-request-arrow.svg");
 const HOUSE_SVG: &[u8] = include_bytes!("../assets/icons/house.svg");
+const NOTEBOOK_TEXT_SVG: &[u8] = include_bytes!("../assets/icons/notebook-text.svg");
+const SQUARE_KANBAN_SVG: &[u8] = include_bytes!("../assets/icons/square-kanban.svg");
 const TIMER_SVG: &[u8] = include_bytes!("../assets/icons/timer.svg");
 const ZED_SVG: &[u8] = include_bytes!("../assets/icons/zed.svg");
 
@@ -35,6 +37,8 @@ impl AssetSource for AppAssets {
                 Ok(Some(Cow::Borrowed(GIT_PULL_REQUEST_ARROW_SVG)))
             }
             "icons/house.svg" => Ok(Some(Cow::Borrowed(HOUSE_SVG))),
+            "icons/notebook-text.svg" => Ok(Some(Cow::Borrowed(NOTEBOOK_TEXT_SVG))),
+            "icons/square-kanban.svg" => Ok(Some(Cow::Borrowed(SQUARE_KANBAN_SVG))),
             "icons/timer.svg" => Ok(Some(Cow::Borrowed(TIMER_SVG))),
             "icons/zed.svg" => Ok(Some(Cow::Borrowed(ZED_SVG))),
             _ => self.fallback.load(path),
@@ -55,6 +59,12 @@ impl AssetSource for AppAssets {
         }
         if "icons/house.svg".starts_with(path) {
             assets.push("icons/house.svg".into());
+        }
+        if "icons/notebook-text.svg".starts_with(path) {
+            assets.push("icons/notebook-text.svg".into());
+        }
+        if "icons/square-kanban.svg".starts_with(path) {
+            assets.push("icons/square-kanban.svg".into());
         }
         if "icons/timer.svg".starts_with(path) {
             assets.push("icons/timer.svg".into());
@@ -81,6 +91,8 @@ mod tests {
             "icons/house.svg",
             "icons/git-branch.svg",
             "icons/git-pull-request-arrow.svg",
+            "icons/notebook-text.svg",
+            "icons/square-kanban.svg",
         ] {
             let loaded = assets.load(path).expect("asset load should not fail");
             assert!(loaded.is_some(), "expected asset to exist: {path}");

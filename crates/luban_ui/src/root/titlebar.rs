@@ -168,16 +168,20 @@ pub(super) fn render_titlebar(
             .hidden()
             .into_any_element()
     } else {
-        let toggle_label = if is_dashboard_selected {
-            "Workspaces"
+        let (toggle_label, toggle_label_debug, toggle_icon_path) = if is_dashboard_selected {
+            (
+                "Workspace",
+                "titlebar-workspace-label",
+                "icons/notebook-text.svg",
+            )
         } else {
-            "Dashboard"
+            (
+                "Dashboard",
+                "titlebar-dashboard-label",
+                "icons/square-kanban.svg",
+            )
         };
-        let toggle_label_debug = if is_dashboard_selected {
-            "titlebar-workspaces-label"
-        } else {
-            "titlebar-dashboard-label"
-        };
+        let toggle_color = theme.muted_foreground;
 
         div()
             .w(sidebar_width)
@@ -231,24 +235,16 @@ pub(super) fn render_titlebar(
                                 }),
                             )
                             .child(
-                                Icon::new(IconName::GalleryVerticalEnd)
+                                Icon::new(Icon::empty().path(toggle_icon_path))
                                     .with_size(Size::Small)
-                                    .text_color(if is_dashboard_selected {
-                                        theme.sidebar_primary
-                                    } else {
-                                        theme.muted_foreground
-                                    }),
+                                    .text_color(toggle_color),
                             )
                             .child(
                                 div()
                                     .debug_selector(move || toggle_label_debug.to_owned())
                                     .text_sm()
                                     .font_semibold()
-                                    .text_color(if is_dashboard_selected {
-                                        theme.sidebar_primary
-                                    } else {
-                                        theme.muted_foreground
-                                    })
+                                    .text_color(toggle_color)
                                     .child(toggle_label),
                             ),
                     )
