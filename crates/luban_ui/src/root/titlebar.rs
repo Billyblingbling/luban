@@ -7,6 +7,41 @@ pub(super) fn render_titlebar(
     right_pane_width: gpui::Pixels,
     terminal_enabled: bool,
 ) -> AnyElement {
+    fn workspace_to_return_to(view: &LubanRootView) -> Option<WorkspaceId> {
+        let last_active = view
+            .last_workspace_before_dashboard
+            .and_then(|workspace_id| {
+                view.state
+                    .workspace(workspace_id)
+                    .filter(|w| w.status == WorkspaceStatus::Active)
+                    .map(|_| workspace_id)
+            });
+        if last_active.is_some() {
+            return last_active;
+        }
+
+        for project in &view.state.projects {
+            for workspace in &project.workspaces {
+                if workspace.status != WorkspaceStatus::Active {
+                    continue;
+                }
+                if workspace.worktree_path == project.path {
+                    return Some(workspace.id);
+                }
+            }
+        }
+
+        for project in &view.state.projects {
+            for workspace in &project.workspaces {
+                if workspace.status == WorkspaceStatus::Active {
+                    return Some(workspace.id);
+                }
+            }
+        }
+
+        None
+    }
+
     fn handle_titlebar_double_click(window: &Window) {
         #[cfg(test)]
         {
@@ -124,13 +159,24 @@ pub(super) fn render_titlebar(
 
     let is_dashboard_selected = state.main_pane == MainPane::Dashboard;
 
-    let sidebar_titlebar = if is_dashboard_selected || sidebar_width <= px(0.0) {
+    let sidebar_titlebar = if sidebar_width <= px(0.0) {
         div()
             .w(px(0.0))
             .h(titlebar_height)
             .hidden()
             .into_any_element()
     } else {
+        let toggle_label = if is_dashboard_selected {
+            "Workspaces"
+        } else {
+            "Dashboard"
+        };
+        let toggle_label_debug = if is_dashboard_selected {
+            "titlebar-workspaces-label"
+        } else {
+            "titlebar-dashboard-label"
+        };
+
         div()
             .w(sidebar_width)
             .h(titlebar_height)
@@ -162,7 +208,16 @@ pub(super) fn render_titlebar(
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(|this, _, _, cx| {
-                                    this.dispatch(Action::OpenDashboard, cx);
+                                    if this.state.main_pane == MainPane::Dashboard {
+                                        if let Some(workspace_id) = workspace_to_return_to(this) {
+                                            this.dispatch(
+                                                Action::OpenWorkspace { workspace_id },
+                                                cx,
+                                            );
+                                        }
+                                    } else {
+                                        this.dispatch(Action::OpenDashboard, cx);
+                                    }
                                 }),
                             )
                             .child(
@@ -176,6 +231,7 @@ pub(super) fn render_titlebar(
                             )
                             .child(
                                 div()
+                                    .debug_selector(move || toggle_label_debug.to_owned())
                                     .text_sm()
                                     .font_semibold()
                                     .text_color(if is_dashboard_selected {
@@ -183,7 +239,7 @@ pub(super) fn render_titlebar(
                                     } else {
                                         theme.muted_foreground
                                     })
-                                    .child("Dashboard"),
+                                    .child(toggle_label),
                             ),
                     )
                     .child(
@@ -211,25 +267,6 @@ pub(super) fn render_titlebar(
         )
         .child(div().text_sm().child(branch_label));
 
-    let dashboard_indicator = div()
-        .flex()
-        .items_center()
-        .gap_2()
-        .debug_selector(|| "titlebar-dashboard-title".to_owned())
-        .cursor_pointer()
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|this, _, _, cx| {
-                this.dispatch(Action::OpenDashboard, cx);
-            }),
-        )
-        .child(
-            Icon::new(IconName::GalleryVerticalEnd)
-                .with_size(Size::Small)
-                .text_color(theme.muted_foreground),
-        )
-        .child(div().text_sm().font_semibold().child("Dashboard"));
-
     let titlebar_zoom_area = div()
         .flex_1()
         .h(titlebar_height)
@@ -245,7 +282,6 @@ pub(super) fn render_titlebar(
         .child(branch_indicator);
 
     let main_titlebar = if is_dashboard_selected {
-        let control_width = px(44.0);
         div()
             .flex_1()
             .h(titlebar_height)
@@ -262,24 +298,7 @@ pub(super) fn render_titlebar(
                 }
                 handle_titlebar_double_click(window);
             })
-            .child(div().w(control_width).flex_shrink_0())
-            .child(
-                div()
-                    .flex_1()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(dashboard_indicator),
-            )
-            .child(
-                div()
-                    .w(control_width)
-                    .flex_shrink_0()
-                    .flex()
-                    .justify_end()
-                    .debug_selector(|| "add-project".to_owned())
-                    .child(add_project_button()),
-            )
+            .child(div().flex_1())
             .into_any_element()
     } else {
         div()

@@ -86,6 +86,7 @@ pub struct LubanRootView {
     debug_layout_enabled: bool,
     debug_scrollbar_enabled: bool,
     sidebar_width_preview: Option<Pixels>,
+    last_sidebar_width: Pixels,
     sidebar_resize: Option<SidebarResizeState>,
     terminal_pane_width_preview: Option<Pixels>,
     terminal_pane_resize: Option<TerminalPaneResizeState>,
@@ -113,6 +114,7 @@ pub struct LubanRootView {
     projects_scroll_handle: gpui::ScrollHandle,
     last_chat_workspace_id: Option<WorkspaceId>,
     last_chat_item_count: usize,
+    last_workspace_before_dashboard: Option<WorkspaceId>,
     _subscriptions: Vec<gpui::Subscription>,
 }
 
@@ -126,6 +128,7 @@ impl LubanRootView {
             debug_layout_enabled: debug_layout::enabled_from_env(),
             debug_scrollbar_enabled: debug_scrollbar::enabled_from_env(),
             sidebar_width_preview: None,
+            last_sidebar_width: px(300.0),
             sidebar_resize: None,
             terminal_pane_width_preview: None,
             terminal_pane_resize: None,
@@ -153,6 +156,7 @@ impl LubanRootView {
             projects_scroll_handle: gpui::ScrollHandle::new(),
             last_chat_workspace_id: None,
             last_chat_item_count: 0,
+            last_workspace_before_dashboard: None,
             _subscriptions: Vec::new(),
         };
 
@@ -167,6 +171,10 @@ impl LubanRootView {
         _cx: &mut Context<Self>,
     ) -> Self {
         Self {
+            last_sidebar_width: state
+                .sidebar_width
+                .map(|v| px(v as f32))
+                .unwrap_or(px(300.0)),
             state,
             services,
             terminal_enabled: false,
@@ -201,6 +209,7 @@ impl LubanRootView {
             projects_scroll_handle: gpui::ScrollHandle::new(),
             last_chat_workspace_id: None,
             last_chat_item_count: 0,
+            last_workspace_before_dashboard: None,
             _subscriptions: Vec::new(),
         }
     }
@@ -216,6 +225,20 @@ impl LubanRootView {
     }
 
     fn dispatch(&mut self, action: Action, cx: &mut Context<Self>) {
+        match &action {
+            Action::OpenDashboard => {
+                if let MainPane::Workspace(workspace_id) = self.state.main_pane {
+                    self.last_workspace_before_dashboard = Some(workspace_id);
+                } else if self.last_chat_workspace_id.is_some() {
+                    self.last_workspace_before_dashboard = self.last_chat_workspace_id;
+                }
+            }
+            Action::OpenWorkspace { workspace_id } => {
+                self.last_workspace_before_dashboard = Some(*workspace_id);
+            }
+            _ => {}
+        }
+
         if let Action::WorkspaceArchived { workspace_id } = &action {
             self.workspace_terminal_errors.remove(workspace_id);
             if let Some(mut terminal) = self.workspace_terminals.remove(workspace_id) {
@@ -223,6 +246,9 @@ impl LubanRootView {
             }
             self.workspace_pull_request_numbers.remove(workspace_id);
             self.workspace_pull_request_inflight.remove(workspace_id);
+            if self.last_workspace_before_dashboard == Some(*workspace_id) {
+                self.last_workspace_before_dashboard = None;
+            }
         }
 
         let start_timer_workspace = match &action {
@@ -791,15 +817,22 @@ impl gpui::Render for LubanRootView {
         let transparent = theme.transparent;
         let muted = theme.muted;
         let is_dashboard = self.state.main_pane == MainPane::Dashboard;
-        let sidebar_width = if is_dashboard {
-            px(0.0)
+        let viewport_width = window.viewport_size().width;
+        let sidebar_width = self.sidebar_width(window);
+        if !is_dashboard {
+            self.last_sidebar_width = sidebar_width;
+        }
+        let sidebar_width_for_titlebar = if is_dashboard {
+            let absolute_max = viewport_width - px(SIDEBAR_RESIZER_WIDTH);
+            self.last_sidebar_width.min(absolute_max).max(px(0.0))
         } else {
-            self.sidebar_width(window)
+            sidebar_width
         };
+        let sidebar_width_for_layout = if is_dashboard { px(0.0) } else { sidebar_width };
         let right_pane_width = if is_dashboard {
             px(0.0)
         } else {
-            self.right_pane_width(window, sidebar_width)
+            self.right_pane_width(window, sidebar_width_for_layout)
         };
         let should_render_right_pane = self.terminal_enabled
             && !is_dashboard
@@ -817,7 +850,7 @@ impl gpui::Render for LubanRootView {
                     .child(render_sidebar(
                         cx,
                         &self.state,
-                        sidebar_width,
+                        sidebar_width_for_layout,
                         &self.workspace_pull_request_numbers,
                         &self.projects_scroll_handle,
                         self.debug_scrollbar_enabled,
@@ -836,7 +869,7 @@ impl gpui::Render for LubanRootView {
                                 let view_handle = view_handle.clone();
                                 move |_, _offset, window, app| {
                                     let start_mouse_x = window.mouse_position().x;
-                                    let start_width = sidebar_width;
+                                    let start_width = sidebar_width_for_layout;
                                     let _ = view_handle.update(app, |view, cx| {
                                         view.sidebar_resize = Some(SidebarResizeState {
                                             start_mouse_x,
@@ -979,7 +1012,7 @@ impl gpui::Render for LubanRootView {
             .child(render_titlebar(
                 cx,
                 &self.state,
-                sidebar_width,
+                sidebar_width_for_titlebar,
                 right_pane_width,
                 self.terminal_enabled,
             ))
@@ -4761,15 +4794,15 @@ mod tests {
         );
 
         let titlebar = window_cx
-            .debug_bounds("titlebar-main")
-            .expect("missing main titlebar");
+            .debug_bounds("titlebar-sidebar")
+            .expect("missing sidebar titlebar");
         let title = window_cx
             .debug_bounds("titlebar-dashboard-title")
-            .expect("missing dashboard title");
+            .expect("missing dashboard toggle");
         let center_dx = (title.center().x - titlebar.center().x).abs();
         assert!(
             center_dx <= px(2.0),
-            "dashboard title should be centered: title={:?} titlebar={:?}",
+            "dashboard toggle should be centered in sidebar titlebar: title={:?} titlebar={:?}",
             title,
             titlebar
         );
@@ -4777,6 +4810,12 @@ mod tests {
         assert!(
             window_cx.debug_bounds("add-project").is_some(),
             "dashboard should render add project button"
+        );
+        assert!(
+            window_cx
+                .debug_bounds("titlebar-workspaces-label")
+                .is_some(),
+            "dashboard toggle label should switch to workspaces"
         );
 
         let start = window_cx
@@ -4805,6 +4844,87 @@ mod tests {
             "dashboard cards should stack vertically within a column: w1={:?} w2={:?}",
             w1,
             w2
+        );
+    }
+
+    #[gpui::test]
+    async fn dashboard_toggle_returns_to_workspace_without_moving(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "w1".to_owned(),
+            branch_name: "repo/w1".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/w1"),
+        });
+        let w1 = workspace_id_by_name(&state, "w1");
+        state.apply(Action::OpenWorkspace { workspace_id: w1 });
+
+        let (view, window_cx) =
+            cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+        window_cx.simulate_resize(size(px(980.0), px(640.0)));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        let last_workspace = view.read_with(window_cx, |v, _| v.last_chat_workspace_id);
+        assert_eq!(
+            last_workspace,
+            Some(w1),
+            "expected last chat workspace to be set after rendering a workspace"
+        );
+
+        let initial_toggle = window_cx
+            .debug_bounds("titlebar-dashboard-title")
+            .expect("missing dashboard toggle");
+        let initial_center_x = initial_toggle.center().x;
+
+        window_cx.simulate_click(initial_toggle.center(), Modifiers::none());
+        window_cx.refresh().unwrap();
+
+        let selected = view.read_with(window_cx, |v, _| v.debug_state().main_pane);
+        assert!(
+            matches!(selected, MainPane::Dashboard),
+            "expected dashboard to open after clicking the toggle"
+        );
+
+        let last_workspace = view.read_with(window_cx, |v, _| v.last_workspace_before_dashboard);
+        assert_eq!(
+            last_workspace,
+            Some(w1),
+            "expected the dashboard toggle to remember the previous workspace"
+        );
+
+        let dashboard_toggle = window_cx
+            .debug_bounds("titlebar-dashboard-title")
+            .expect("missing dashboard toggle on dashboard");
+        let dashboard_center_x = dashboard_toggle.center().x;
+        assert!(
+            (dashboard_center_x - initial_center_x).abs() <= px(2.0),
+            "toggle should not move when entering dashboard: before={:?} after={:?}",
+            initial_toggle,
+            dashboard_toggle
+        );
+        assert!(
+            window_cx
+                .debug_bounds("titlebar-workspaces-label")
+                .is_some(),
+            "expected toggle label to switch to workspaces on dashboard"
+        );
+
+        window_cx.simulate_click(dashboard_toggle.center(), Modifiers::none());
+        window_cx.refresh().unwrap();
+
+        let selected = view.read_with(window_cx, |v, _| v.debug_state().main_pane);
+        assert!(
+            matches!(selected, MainPane::Workspace(id) if id == w1),
+            "expected workspace view to return after clicking the toggle on dashboard"
         );
     }
 
