@@ -3744,7 +3744,7 @@ mod tests {
     }
 
     #[gpui::test]
-    async fn titlebar_uses_branch_symbol_instead_of_github_icon(cx: &mut gpui::TestAppContext) {
+    async fn titlebar_workspace_title_does_not_render_prefix_icon(cx: &mut gpui::TestAppContext) {
         cx.update(gpui_component::init);
 
         let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
@@ -3770,8 +3770,14 @@ mod tests {
         window_cx.refresh().unwrap();
 
         assert!(
-            window_cx.debug_bounds("titlebar-branch-symbol").is_some(),
-            "expected branch symbol to be rendered in titlebar"
+            window_cx.debug_bounds("titlebar-branch-symbol").is_none(),
+            "expected titlebar to avoid rendering a prefix icon"
+        );
+        assert!(
+            window_cx
+                .debug_bounds("titlebar-branch-indicator")
+                .is_some(),
+            "expected titlebar workspace title to remain rendered"
         );
     }
 

@@ -10,6 +10,7 @@ const HOUSE_SVG: &[u8] = include_bytes!("../assets/icons/house.svg");
 const NOTEBOOK_TEXT_SVG: &[u8] = include_bytes!("../assets/icons/notebook-text.svg");
 const SQUARE_KANBAN_SVG: &[u8] = include_bytes!("../assets/icons/square-kanban.svg");
 const TIMER_SVG: &[u8] = include_bytes!("../assets/icons/timer.svg");
+const USER_PEN_SVG: &[u8] = include_bytes!("../assets/icons/user-pen.svg");
 const ZED_SVG: &[u8] = include_bytes!("../assets/icons/zed.svg");
 
 pub struct AppAssets {
@@ -40,6 +41,7 @@ impl AssetSource for AppAssets {
             "icons/notebook-text.svg" => Ok(Some(Cow::Borrowed(NOTEBOOK_TEXT_SVG))),
             "icons/square-kanban.svg" => Ok(Some(Cow::Borrowed(SQUARE_KANBAN_SVG))),
             "icons/timer.svg" => Ok(Some(Cow::Borrowed(TIMER_SVG))),
+            "icons/user-pen.svg" => Ok(Some(Cow::Borrowed(USER_PEN_SVG))),
             "icons/zed.svg" => Ok(Some(Cow::Borrowed(ZED_SVG))),
             _ => self.fallback.load(path),
         }
@@ -69,6 +71,9 @@ impl AssetSource for AppAssets {
         if "icons/timer.svg".starts_with(path) {
             assets.push("icons/timer.svg".into());
         }
+        if "icons/user-pen.svg".starts_with(path) {
+            assets.push("icons/user-pen.svg".into());
+        }
         if "icons/zed.svg".starts_with(path) {
             assets.push("icons/zed.svg".into());
         }
@@ -93,6 +98,7 @@ mod tests {
             "icons/git-pull-request-arrow.svg",
             "icons/notebook-text.svg",
             "icons/square-kanban.svg",
+            "icons/user-pen.svg",
         ] {
             let loaded = assets.load(path).expect("asset load should not fail");
             assert!(loaded.is_some(), "expected asset to exist: {path}");

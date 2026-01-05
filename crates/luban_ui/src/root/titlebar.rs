@@ -112,7 +112,7 @@ pub(super) fn render_titlebar(
         Button::new("workspace-open-in-zed")
             .outline()
             .compact()
-            .icon(IconName::ExternalLink)
+            .icon(Icon::new(Icon::empty().path("icons/user-pen.svg")))
             .label("Open")
             .tooltip("Open in Zed")
             .on_click(move |_, _, app| {
@@ -281,15 +281,7 @@ pub(super) fn render_titlebar(
     let branch_indicator = div()
         .flex()
         .items_center()
-        .gap_2()
         .debug_selector(|| "titlebar-branch-indicator".to_owned())
-        .child(
-            div()
-                .debug_selector(|| "titlebar-branch-symbol".to_owned())
-                .text_sm()
-                .text_color(theme.muted_foreground)
-                .child("⎇"),
-        )
         .child(div().text_sm().child(branch_label));
 
     let titlebar_zoom_area = div()
@@ -297,6 +289,7 @@ pub(super) fn render_titlebar(
         .h(titlebar_height)
         .flex()
         .items_center()
+        .gap_3()
         .debug_selector(|| "titlebar-zoom-area".to_owned())
         .on_mouse_down(MouseButton::Left, move |event, window, _| {
             if event.click_count != 2 {
