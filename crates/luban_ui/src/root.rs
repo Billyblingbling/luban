@@ -5008,6 +5008,108 @@ mod tests {
     }
 
     #[gpui::test]
+    async fn dashboard_preview_closes_when_clicking_outside(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::ToggleProjectExpanded { project_id });
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "w1".to_owned(),
+            branch_name: "repo/w1".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/w1"),
+        });
+        let w1 = workspace_id_by_name(&state, "w1");
+        state.apply(Action::ConversationLoaded {
+            workspace_id: w1,
+            snapshot: ConversationSnapshot {
+                thread_id: Some("thread-1".to_owned()),
+                entries: vec![ConversationEntry::UserMessage {
+                    text: "Hello".to_owned(),
+                }],
+            },
+        });
+        state.apply(Action::OpenDashboard);
+
+        let (view, window_cx) =
+            cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+        window_cx.simulate_resize(size(px(1200.0), px(720.0)));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        let card_bounds = window_cx
+            .debug_bounds("dashboard-card-0-w1")
+            .expect("missing dashboard card for w1");
+        window_cx.simulate_click(card_bounds.center(), Modifiers::none());
+        window_cx.refresh().unwrap();
+
+        assert!(
+            window_cx.debug_bounds("dashboard-preview").is_some(),
+            "expected preview to be rendered after clicking a card"
+        );
+        assert!(
+            view.read_with(window_cx, |v, _| v
+                .debug_state()
+                .dashboard_preview_workspace_id)
+                .is_some(),
+            "expected selected preview workspace to be set"
+        );
+
+        let backdrop_bounds = window_cx
+            .debug_bounds("dashboard-preview-backdrop")
+            .expect("missing preview backdrop");
+        window_cx.simulate_event(MouseDownEvent {
+            position: backdrop_bounds.center(),
+            modifiers: Modifiers::none(),
+            button: MouseButton::Left,
+            click_count: 1,
+            first_mouse: false,
+        });
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        let preview_state_after_backdrop = view.read_with(window_cx, |v, _| {
+            v.debug_state().dashboard_preview_workspace_id
+        });
+        assert!(
+            preview_state_after_backdrop.is_none(),
+            "expected preview workspace to clear after closing: backdrop={backdrop_bounds:?} state={preview_state_after_backdrop:?}"
+        );
+
+        window_cx.simulate_click(card_bounds.center(), Modifiers::none());
+        window_cx.refresh().unwrap();
+
+        assert!(
+            view.read_with(window_cx, |v, _| v
+                .debug_state()
+                .dashboard_preview_workspace_id)
+                .is_some(),
+            "expected preview to be re-openable after closing"
+        );
+
+        let titlebar_bounds = window_cx
+            .debug_bounds("titlebar-main")
+            .expect("missing titlebar main segment");
+        window_cx.simulate_click(titlebar_bounds.center(), Modifiers::none());
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        assert!(
+            view.read_with(window_cx, |v, _| v
+                .debug_state()
+                .dashboard_preview_workspace_id)
+                .is_none(),
+            "expected preview to close after clicking titlebar"
+        );
+    }
+
+    #[gpui::test]
     async fn chat_column_remains_primary_when_terminal_is_visible(cx: &mut gpui::TestAppContext) {
         cx.update(gpui_component::init);
 

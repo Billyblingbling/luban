@@ -158,6 +158,8 @@ pub(super) fn render_titlebar(
     };
 
     let is_dashboard_selected = state.main_pane == MainPane::Dashboard;
+    let dashboard_preview_open =
+        is_dashboard_selected && state.dashboard_preview_workspace_id.is_some();
 
     let sidebar_titlebar = if sidebar_width <= px(0.0) {
         div()
@@ -197,7 +199,15 @@ pub(super) fn render_titlebar(
                     .w_full()
                     .flex()
                     .items_center()
-                    .child(div().flex_1())
+                    .child(div().flex_1().when(dashboard_preview_open, |s| {
+                        let view_handle = view_handle.clone();
+                        s.cursor_pointer()
+                            .on_mouse_down(MouseButton::Left, move |_, _, app| {
+                                let _ = view_handle.update(app, |view, cx| {
+                                    view.dispatch(Action::DashboardPreviewClosed, cx);
+                                });
+                            })
+                    }))
                     .child(
                         div()
                             .flex()
@@ -282,6 +292,7 @@ pub(super) fn render_titlebar(
         .child(branch_indicator);
 
     let main_titlebar = if is_dashboard_selected {
+        let view_handle = view_handle.clone();
         div()
             .flex_1()
             .h(titlebar_height)
@@ -292,11 +303,16 @@ pub(super) fn render_titlebar(
             .border_color(theme.title_bar_border)
             .bg(theme.title_bar)
             .debug_selector(|| "titlebar-main".to_owned())
-            .on_mouse_down(MouseButton::Left, move |event, window, _| {
-                if event.click_count != 2 {
+            .on_mouse_down(MouseButton::Left, move |event, window, app| {
+                if event.click_count == 2 {
+                    handle_titlebar_double_click(window);
                     return;
                 }
-                handle_titlebar_double_click(window);
+                if dashboard_preview_open {
+                    let _ = view_handle.update(app, |view, cx| {
+                        view.dispatch(Action::DashboardPreviewClosed, cx);
+                    });
+                }
             })
             .child(div().flex_1())
             .into_any_element()

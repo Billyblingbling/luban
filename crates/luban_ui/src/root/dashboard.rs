@@ -9,6 +9,7 @@ impl LubanRootView {
     ) -> AnyElement {
         let theme = cx.theme();
         let cards = dashboard_cards(&self.state, &self.workspace_pull_request_numbers);
+        let preview_open = self.state.dashboard_preview_workspace_id.is_some();
 
         let board = if cards.is_empty() {
             div()
@@ -27,7 +28,7 @@ impl LubanRootView {
                     let mut stage_cards: Vec<DashboardCardModel> =
                         cards.iter().filter(|c| c.stage == stage).cloned().collect();
                     stage_cards.sort_by(|a, b| b.sort_key.cmp(&a.sort_key));
-                    render_dashboard_column(stage, stage_cards, &view_handle, theme)
+                    render_dashboard_column(stage, stage_cards, &view_handle, theme, preview_open)
                 })
                 .collect::<Vec<_>>();
 
@@ -43,7 +44,7 @@ impl LubanRootView {
             .into_any_element()
         };
 
-        let preview = self
+        let preview_panel = self
             .state
             .dashboard_preview_workspace_id
             .and_then(|workspace_id| {
@@ -53,15 +54,38 @@ impl LubanRootView {
                     .copied()
                     .flatten();
                 dashboard_preview(&self.state, workspace_id, pr_info).map(|model| {
-                    render_dashboard_preview(model, &view_handle, theme).into_any_element()
+                    render_dashboard_preview_panel(model, &view_handle, theme).into_any_element()
                 })
             });
+
+        let preview_overlay = preview_panel.map(|panel| {
+            let view_handle = view_handle.clone();
+            div()
+                .absolute()
+                .inset_0()
+                .flex()
+                .flex_row()
+                .child(
+                    div()
+                        .flex_1()
+                        .cursor_pointer()
+                        .bg(gpui::rgba(0x00000010))
+                        .debug_selector(|| "dashboard-preview-backdrop".to_owned())
+                        .on_mouse_down(MouseButton::Left, move |_, _, app| {
+                            let _ = view_handle.update(app, |view, cx| {
+                                view.dispatch(Action::DashboardPreviewClosed, cx);
+                            });
+                        }),
+                )
+                .child(div().w(px(420.0 + 32.0)).h_full().p_4().child(panel))
+                .into_any_element()
+        });
 
         div()
             .flex_1()
             .relative()
             .child(board)
-            .when_some(preview, |s, preview| s.child(preview))
+            .when_some(preview_overlay, |s, overlay| s.child(overlay))
             .into_any_element()
     }
 }
@@ -71,6 +95,7 @@ fn render_dashboard_column(
     cards: Vec<DashboardCardModel>,
     view_handle: &gpui::WeakEntity<LubanRootView>,
     theme: &gpui_component::Theme,
+    preview_open: bool,
 ) -> AnyElement {
     let header = div()
         .h(px(36.0))
@@ -99,7 +124,7 @@ fn render_dashboard_column(
             .children(
                 cards
                     .into_iter()
-                    .map(|card| render_dashboard_card(card, view_handle, theme)),
+                    .map(|card| render_dashboard_card(card, view_handle, theme, preview_open)),
             ),
     );
 
@@ -123,6 +148,7 @@ fn render_dashboard_card(
     card: DashboardCardModel,
     view_handle: &gpui::WeakEntity<LubanRootView>,
     theme: &gpui_component::Theme,
+    preview_open: bool,
 ) -> AnyElement {
     let DashboardCardModel {
         project_index,
@@ -144,16 +170,18 @@ fn render_dashboard_card(
         .border_1()
         .border_color(theme.border)
         .bg(theme.background)
-        .hover(move |s| s.bg(theme.list_hover))
-        .cursor_pointer()
         .debug_selector(move || debug_selector.clone())
-        .on_mouse_down(MouseButton::Left, {
-            let view_handle = view_handle.clone();
-            move |_, _window, app| {
-                let _ = view_handle.update(app, |view, cx| {
-                    view.dispatch(Action::DashboardPreviewOpened { workspace_id }, cx);
-                });
-            }
+        .when(!preview_open, move |s| {
+            s.hover(move |s| s.bg(theme.list_hover))
+                .cursor_pointer()
+                .on_mouse_down(MouseButton::Left, {
+                    let view_handle = view_handle.clone();
+                    move |_, _window, app| {
+                        let _ = view_handle.update(app, |view, cx| {
+                            view.dispatch(Action::DashboardPreviewOpened { workspace_id }, cx);
+                        });
+                    }
+                })
         })
         .child(
             div()
@@ -203,7 +231,7 @@ fn render_dashboard_card(
         .into_any_element()
 }
 
-fn render_dashboard_preview(
+fn render_dashboard_preview_panel(
     model: DashboardPreviewModel,
     view_handle: &gpui::WeakEntity<LubanRootView>,
     theme: &gpui_component::Theme,
@@ -300,10 +328,7 @@ fn render_dashboard_preview(
         }));
 
     div()
-        .absolute()
-        .top(px(16.0))
-        .right(px(16.0))
-        .bottom(px(16.0))
+        .h_full()
         .w(px(420.0))
         .rounded_lg()
         .border_1()
