@@ -18,11 +18,10 @@ use gpui_component::{
 };
 use luban_domain::{
     Action, AgentRunConfig, AppState, CodexThreadEvent, CodexThreadItem, DashboardCardModel,
-    DashboardPreviewMessage, DashboardPreviewModel, DashboardStage, Effect, MainPane,
-    OperationStatus, ProjectId, ProjectWorkspaceService, PullRequestInfo, RightPane,
-    RunAgentTurnRequest, ThinkingEffort, WorkspaceId, WorkspaceStatus, agent_model_label,
-    agent_models, dashboard_cards, dashboard_preview, default_agent_model_id,
-    default_thinking_effort, thinking_effort_supported,
+    DashboardPreviewModel, DashboardStage, Effect, MainPane, OperationStatus, ProjectId,
+    ProjectWorkspaceService, PullRequestInfo, RightPane, RunAgentTurnRequest, ThinkingEffort,
+    WorkspaceId, WorkspaceStatus, agent_model_label, agent_models, dashboard_cards,
+    dashboard_preview, default_agent_model_id, default_thinking_effort, thinking_effort_supported,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -46,6 +45,7 @@ use titlebar::render_titlebar;
 
 const TERMINAL_PANE_RESIZER_WIDTH: f32 = 6.0;
 const SIDEBAR_RESIZER_WIDTH: f32 = 6.0;
+const DASHBOARD_PREVIEW_RESIZER_WIDTH: f32 = 6.0;
 const RIGHT_PANE_CONTENT_PADDING: f32 = 8.0;
 const TITLEBAR_HEIGHT: f32 = 44.0;
 
@@ -88,6 +88,23 @@ impl gpui::Render for SidebarResizeGhost {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+struct DashboardPreviewResizeState {
+    start_mouse_x: Pixels,
+    start_width: Pixels,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct DashboardPreviewResizeDrag;
+
+struct DashboardPreviewResizeGhost;
+
+impl gpui::Render for DashboardPreviewResizeGhost {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        div().w(px(0.0)).h(px(0.0)).hidden()
+    }
+}
+
 pub struct LubanRootView {
     state: AppState,
     services: Arc<dyn ProjectWorkspaceService>,
@@ -100,6 +117,9 @@ pub struct LubanRootView {
     sidebar_resize: Option<SidebarResizeState>,
     terminal_pane_width_preview: Option<Pixels>,
     terminal_pane_resize: Option<TerminalPaneResizeState>,
+    dashboard_preview_width_preview: Option<Pixels>,
+    dashboard_preview_resize: Option<DashboardPreviewResizeState>,
+    last_dashboard_preview_width: Pixels,
     #[cfg(test)]
     last_terminal_grid_size: Option<(u16, u16)>,
     workspace_terminals: HashMap<WorkspaceId, WorkspaceTerminal>,
@@ -144,6 +164,9 @@ impl LubanRootView {
             sidebar_resize: None,
             terminal_pane_width_preview: None,
             terminal_pane_resize: None,
+            dashboard_preview_width_preview: None,
+            dashboard_preview_resize: None,
+            last_dashboard_preview_width: px(420.0),
             #[cfg(test)]
             last_terminal_grid_size: None,
             workspace_terminals: HashMap::new(),
@@ -199,6 +222,9 @@ impl LubanRootView {
             sidebar_resize: None,
             terminal_pane_width_preview: None,
             terminal_pane_resize: None,
+            dashboard_preview_width_preview: None,
+            dashboard_preview_resize: None,
+            last_dashboard_preview_width: px(420.0),
             #[cfg(test)]
             last_terminal_grid_size: None,
             workspace_terminals: HashMap::new(),
@@ -1327,6 +1353,40 @@ impl LubanRootView {
         let width = f32::from(clamped).round().max(0.0) as u16;
         self.dispatch(Action::TerminalPaneWidthChanged { width }, cx);
     }
+
+    fn dashboard_preview_width(&self, window: &Window) -> Pixels {
+        let viewport_width = window.viewport_size().width;
+        let desired = self
+            .dashboard_preview_width_preview
+            .unwrap_or(self.last_dashboard_preview_width);
+        self.clamp_dashboard_preview_width(desired, viewport_width)
+    }
+
+    fn clamp_dashboard_preview_width(&self, desired: Pixels, viewport_width: Pixels) -> Pixels {
+        let divider_width = px(DASHBOARD_PREVIEW_RESIZER_WIDTH);
+        if viewport_width <= divider_width + px(1.0) {
+            return px(0.0);
+        }
+
+        let min_width = px(320.0);
+        let max_width = px(900.0);
+        let absolute_max = viewport_width - divider_width;
+        let max_allowed = max_width.min(absolute_max);
+        let min_allowed = min_width.min(max_allowed);
+        desired.clamp(min_allowed, max_allowed)
+    }
+
+    fn finish_dashboard_preview_resize(&mut self, viewport_width: Pixels, cx: &mut Context<Self>) {
+        self.dashboard_preview_resize = None;
+
+        let Some(preview) = self.dashboard_preview_width_preview.take() else {
+            return;
+        };
+
+        let clamped = self.clamp_dashboard_preview_width(preview, viewport_width);
+        self.last_dashboard_preview_width = px(f32::from(clamped).round().max(0.0));
+        cx.notify();
+    }
 }
 
 impl LubanRootView {
@@ -1341,8 +1401,10 @@ impl LubanRootView {
                 div().flex_1().into_any_element()
             }
             MainPane::Dashboard => {
-                self.last_chat_workspace_id = None;
-                self.last_chat_item_count = 0;
+                if self.state.dashboard_preview_workspace_id.is_none() {
+                    self.last_chat_workspace_id = None;
+                    self.last_chat_item_count = 0;
+                }
 
                 self.render_dashboard(view_handle, window, cx)
             }
@@ -5518,6 +5580,10 @@ mod tests {
             window_cx.debug_bounds("dashboard-preview").is_some(),
             "expected preview to be rendered after clicking a card"
         );
+        assert!(
+            window_cx.debug_bounds("workspace-chat-composer").is_some(),
+            "expected the preview panel to render an editable chat composer"
+        );
 
         let open_bounds = window_cx
             .debug_bounds("dashboard-preview-open-task")
@@ -5530,6 +5596,142 @@ mod tests {
             matches!(selected, MainPane::Workspace(id) if id == w1),
             "expected task view to open when clicking preview open button"
         );
+    }
+
+    #[gpui::test]
+    async fn dashboard_preview_panel_can_be_resized(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::ToggleProjectExpanded { project_id });
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "w1".to_owned(),
+            branch_name: "repo/w1".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/w1"),
+        });
+        let w1 = workspace_id_by_name(&state, "w1");
+        state.apply(Action::ConversationLoaded {
+            workspace_id: w1,
+            snapshot: ConversationSnapshot {
+                thread_id: Some("thread-1".to_owned()),
+                entries: vec![ConversationEntry::UserMessage {
+                    text: "Hello".to_owned(),
+                }],
+            },
+        });
+        state.apply(Action::OpenDashboard);
+
+        let (_view, window_cx) =
+            cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+        window_cx.simulate_resize(size(px(1200.0), px(720.0)));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        let card_bounds = window_cx
+            .debug_bounds("dashboard-card-0-w1")
+            .expect("missing dashboard card for w1");
+        window_cx.simulate_click(card_bounds.center(), Modifiers::none());
+        window_cx.refresh().unwrap();
+
+        let panel_before = window_cx
+            .debug_bounds("dashboard-preview-panel")
+            .expect("missing preview panel");
+        let resizer_bounds = window_cx
+            .debug_bounds("dashboard-preview-resizer")
+            .expect("missing preview resizer");
+
+        let start = resizer_bounds.center();
+        let mid = point(start.x - px(24.0), start.y);
+        let end = point(start.x - px(120.0), start.y);
+
+        window_cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::none());
+        window_cx.simulate_mouse_move(mid, Some(MouseButton::Left), Modifiers::none());
+        window_cx.simulate_mouse_move(end, Some(MouseButton::Left), Modifiers::none());
+        window_cx.simulate_mouse_up(end, MouseButton::Left, Modifiers::none());
+        for _ in 0..3 {
+            window_cx.run_until_parked();
+            window_cx.refresh().unwrap();
+        }
+
+        let panel_after = window_cx
+            .debug_bounds("dashboard-preview-panel")
+            .expect("missing preview panel after resize");
+        assert!(
+            panel_after.size.width > panel_before.size.width + px(40.0),
+            "expected preview panel width to increase after dragging resizer: before={:?} after={:?}",
+            panel_before.size,
+            panel_after.size
+        );
+    }
+
+    #[gpui::test]
+    async fn dashboard_preview_updates_chat_draft(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::ToggleProjectExpanded { project_id });
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "w1".to_owned(),
+            branch_name: "repo/w1".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/w1"),
+        });
+        let w1 = workspace_id_by_name(&state, "w1");
+        state.apply(Action::ConversationLoaded {
+            workspace_id: w1,
+            snapshot: ConversationSnapshot {
+                thread_id: Some("thread-1".to_owned()),
+                entries: vec![ConversationEntry::UserMessage {
+                    text: "Hello".to_owned(),
+                }],
+            },
+        });
+        state.apply(Action::OpenDashboard);
+
+        let (view, window_cx) =
+            cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+        window_cx.simulate_resize(size(px(1200.0), px(720.0)));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        let card_bounds = window_cx
+            .debug_bounds("dashboard-card-0-w1")
+            .expect("missing dashboard card for w1");
+        window_cx.simulate_click(card_bounds.center(), Modifiers::none());
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        let draft_text = "Draft from dashboard preview".to_owned();
+        window_cx.update(|window, app| {
+            view.update(app, |view, cx| {
+                let input = view.ensure_chat_input(window, cx);
+                input.update(cx, |state, cx| {
+                    state.set_value(&draft_text, window, cx);
+                });
+            });
+        });
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        let saved = view.read_with(window_cx, |view, _| {
+            view.debug_state()
+                .workspace_conversation(w1)
+                .map(|c| c.draft.clone())
+        });
+        assert_eq!(saved.as_deref(), Some(draft_text.as_str()));
     }
 
     #[gpui::test]

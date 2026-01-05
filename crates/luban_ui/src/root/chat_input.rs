@@ -20,7 +20,12 @@ impl LubanRootView {
             let input_state = input_state.clone();
             move |this: &mut LubanRootView, _, ev: &InputEvent, window, cx| match ev {
                 InputEvent::Change => {
-                    if let MainPane::Workspace(workspace_id) = this.state.main_pane {
+                    let workspace_id = match this.state.main_pane {
+                        MainPane::Workspace(workspace_id) => Some(workspace_id),
+                        MainPane::Dashboard => this.state.dashboard_preview_workspace_id,
+                        _ => None,
+                    };
+                    if let Some(workspace_id) = workspace_id {
                         let text = input_state.read(cx).value().to_owned();
                         let existing = this
                             .state
@@ -44,7 +49,12 @@ impl LubanRootView {
                     if text.is_empty() {
                         return;
                     }
-                    let MainPane::Workspace(workspace_id) = this.state.main_pane else {
+                    let workspace_id = match this.state.main_pane {
+                        MainPane::Workspace(workspace_id) => Some(workspace_id),
+                        MainPane::Dashboard => this.state.dashboard_preview_workspace_id,
+                        _ => None,
+                    };
+                    let Some(workspace_id) = workspace_id else {
                         return;
                     };
                     input_state.update(cx, |state, cx| state.set_value("", window, cx));
