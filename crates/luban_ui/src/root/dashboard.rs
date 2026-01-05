@@ -99,6 +99,16 @@ impl LubanRootView {
     }
 }
 
+fn stage_indicator_color(stage: DashboardStage, theme: &gpui_component::Theme) -> gpui::Hsla {
+    match stage {
+        DashboardStage::Start => theme.muted_foreground,
+        DashboardStage::Running => theme.primary,
+        DashboardStage::Pending => theme.warning_foreground,
+        DashboardStage::Reviewing => theme.info_foreground,
+        DashboardStage::Finished => theme.success_foreground,
+    }
+}
+
 fn render_dashboard_column(
     stage: DashboardStage,
     cards: Vec<DashboardCardModel>,
@@ -106,17 +116,34 @@ fn render_dashboard_column(
     theme: &gpui_component::Theme,
     preview_open: bool,
 ) -> AnyElement {
+    let indicator = div()
+        .w(px(10.0))
+        .h(px(10.0))
+        .rounded_full()
+        .border_1()
+        .border_color(theme.border)
+        .bg(stage_indicator_color(stage, theme));
+
     let header = div()
-        .h(px(36.0))
+        .h(px(44.0))
         .px_3()
         .flex()
         .items_center()
         .justify_between()
-        .border_b_1()
-        .border_color(theme.border)
-        .child(div().text_sm().font_semibold().child(stage.title()))
         .child(
             div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(indicator)
+                .child(div().text_sm().font_semibold().child(stage.title())),
+        )
+        .child(
+            div()
+                .px_2()
+                .py_1()
+                .rounded_md()
+                .bg(theme.muted)
                 .text_xs()
                 .text_color(theme.muted_foreground)
                 .child(format!("{}", cards.len())),
@@ -126,10 +153,10 @@ fn render_dashboard_column(
         div()
             .flex_1()
             .overflow_y_scrollbar()
-            .p_2()
+            .p_3()
             .flex()
             .flex_col()
-            .gap_2()
+            .gap_3()
             .children(
                 cards
                     .into_iter()
@@ -138,17 +165,15 @@ fn render_dashboard_column(
     );
 
     div()
-        .w(px(260.0))
+        .w(px(320.0))
         .h_full()
         .flex_shrink_0()
         .flex()
         .flex_col()
-        .rounded_lg()
-        .border_1()
-        .border_color(theme.border)
+        .rounded_xl()
         .bg(theme.secondary)
         .debug_selector(move || format!("dashboard-column-{}", stage.debug_id()))
-        .child(header)
+        .child(div().px_3().pt_3().child(header))
         .child(body)
         .into_any_element()
 }
@@ -174,23 +199,27 @@ fn render_dashboard_card(
     let debug_selector = format!("dashboard-card-{project_index}-{workspace_name}");
 
     div()
-        .p_3()
-        .rounded_md()
+        .px_3()
+        .py_3()
+        .rounded_lg()
         .border_1()
         .border_color(theme.border)
         .bg(theme.background)
         .debug_selector(move || debug_selector.clone())
         .when(!preview_open, move |s| {
-            s.hover(move |s| s.bg(theme.list_hover))
-                .cursor_pointer()
-                .on_mouse_down(MouseButton::Left, {
-                    let view_handle = view_handle.clone();
-                    move |_, _window, app| {
-                        let _ = view_handle.update(app, |view, cx| {
-                            view.dispatch(Action::DashboardPreviewOpened { workspace_id }, cx);
-                        });
-                    }
-                })
+            s.hover(move |s| {
+                s.bg(theme.list_hover)
+                    .border_color(theme.scrollbar_thumb_hover)
+            })
+            .cursor_pointer()
+            .on_mouse_down(MouseButton::Left, {
+                let view_handle = view_handle.clone();
+                move |_, _window, app| {
+                    let _ = view_handle.update(app, |view, cx| {
+                        view.dispatch(Action::DashboardPreviewOpened { workspace_id }, cx);
+                    });
+                }
+            })
         })
         .child(
             div()
@@ -199,14 +228,18 @@ fn render_dashboard_card(
                 .justify_between()
                 .child(
                     div()
-                        .text_sm()
-                        .font_semibold()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
                         .truncate()
-                        .child(workspace_name),
+                        .child(branch_name),
                 )
                 .when_some(pr_label, |s, label| {
                     s.child(
                         div()
+                            .px_2()
+                            .py_1()
+                            .rounded_md()
+                            .bg(theme.muted)
                             .text_xs()
                             .text_color(theme.muted_foreground)
                             .child(label),
@@ -215,27 +248,28 @@ fn render_dashboard_card(
         )
         .child(
             div()
-                .mt_1()
-                .text_xs()
-                .text_color(theme.muted_foreground)
+                .mt_2()
+                .text_sm()
+                .font_semibold()
                 .truncate()
-                .child(branch_name),
+                .child(workspace_name),
         )
         .child(
             div()
-                .mt_2()
+                .mt_3()
                 .text_xs()
                 .text_color(theme.muted_foreground)
                 .truncate()
                 .child(snippet),
         )
         .child(
-            div()
-                .mt_2()
-                .text_xs()
-                .text_color(theme.muted_foreground)
-                .truncate()
-                .child(project_name),
+            div().mt_3().flex().items_center().justify_between().child(
+                div()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .truncate()
+                    .child(project_name),
+            ),
         )
         .into_any_element()
 }
