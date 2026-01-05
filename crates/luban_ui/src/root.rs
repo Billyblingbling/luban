@@ -11,15 +11,18 @@ use gpui_component::{
     button::*,
     collapsible::Collapsible,
     input::{Input, InputEvent, InputState},
+    popover::Popover,
     scroll::{ScrollableElement as _, Scrollbar, ScrollbarShow},
     spinner::Spinner,
     text::{TextView, TextViewStyle},
 };
 use luban_domain::{
-    Action, AppState, CodexThreadEvent, CodexThreadItem, DashboardCardModel,
+    Action, AgentRunConfig, AppState, CodexThreadEvent, CodexThreadItem, DashboardCardModel,
     DashboardPreviewMessage, DashboardPreviewModel, DashboardStage, Effect, MainPane,
     OperationStatus, ProjectId, ProjectWorkspaceService, PullRequestInfo, RightPane,
-    RunAgentTurnRequest, WorkspaceId, WorkspaceStatus, dashboard_cards, dashboard_preview,
+    RunAgentTurnRequest, ThinkingEffort, WorkspaceId, WorkspaceStatus, agent_model_label,
+    agent_models, dashboard_cards, dashboard_preview, default_agent_model_id,
+    default_thinking_effort, thinking_effort_supported,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -463,9 +466,11 @@ impl LubanRootView {
             Effect::LoadConversation { workspace_id } => {
                 self.run_load_conversation(workspace_id, cx)
             }
-            Effect::RunAgentTurn { workspace_id, text } => {
-                self.run_agent_turn(workspace_id, text, cx)
-            }
+            Effect::RunAgentTurn {
+                workspace_id,
+                text,
+                run_config,
+            } => self.run_agent_turn(workspace_id, text, run_config, cx),
             Effect::CancelAgentTurn { workspace_id } => {
                 self.bump_turn_generation(workspace_id);
                 if let Some(flag) = self.turn_cancel_flags.get(&workspace_id) {
@@ -771,7 +776,13 @@ impl LubanRootView {
         .detach();
     }
 
-    fn run_agent_turn(&mut self, workspace_id: WorkspaceId, text: String, cx: &mut Context<Self>) {
+    fn run_agent_turn(
+        &mut self,
+        workspace_id: WorkspaceId,
+        text: String,
+        run_config: AgentRunConfig,
+        cx: &mut Context<Self>,
+    ) {
         let Some(agent_context) = workspace_agent_context(&self.state, workspace_id) else {
             self.dispatch(Action::AgentTurnFinished { workspace_id }, cx);
             return;
@@ -792,6 +803,8 @@ impl LubanRootView {
             worktree_path: agent_context.worktree_path,
             thread_id,
             prompt: text,
+            model: Some(run_config.model_id),
+            model_reasoning_effort: Some(run_config.thinking_effort.as_str().to_owned()),
         };
         let services = self.services.clone();
 
@@ -1389,11 +1402,17 @@ impl LubanRootView {
                 let run_status = conversation
                     .map(|c| c.run_status)
                     .unwrap_or(OperationStatus::Idle);
-                let queued_prompts: Vec<String> = conversation
+                let queued_prompts: Vec<luban_domain::QueuedPrompt> = conversation
                     .map(|c| c.pending_prompts.iter().cloned().collect())
                     .unwrap_or_default();
                 let queue_paused = conversation.map(|c| c.queue_paused).unwrap_or(false);
                 let _thread_id = conversation.and_then(|c| c.thread_id.as_deref());
+                let model_id = conversation
+                    .map(|c| c.agent_model_id.clone())
+                    .unwrap_or_else(|| default_agent_model_id().to_owned());
+                let thinking_effort = conversation
+                    .map(|c| c.thinking_effort)
+                    .unwrap_or(default_thinking_effort());
 
                 let is_running = run_status == OperationStatus::Running;
                 let workspace_changed = self.last_chat_workspace_id != Some(workspace_id);
@@ -1693,11 +1712,11 @@ impl LubanRootView {
                         );
 
                     let content = div().pt_2().px_2().flex().flex_col().gap_1().children(
-                        queued_prompts.iter().enumerate().map(|(idx, text)| {
+                        queued_prompts.iter().enumerate().map(|(idx, queued)| {
                             let view_handle_for_edit = view_handle.clone();
                             let view_handle_for_remove = view_handle.clone();
                             let input_state = input_state.clone();
-                            let text = text.clone();
+                            let text = queued.text.clone();
                             div()
                                 .h(px(28.0))
                                 .w_full()
@@ -1801,86 +1820,252 @@ impl LubanRootView {
                                         div()
                                             .w_full()
                                             .flex()
-                                            .items_end()
+                                            .flex_col()
                                             .gap_2()
                                             .child(
-                                                div().flex_1().child(
-                                                    Input::new(&input_state)
-                                                        .appearance(false)
-                                                        .with_size(Size::Large),
-                                                ),
-                                            )
-                                            .child(
                                                 div()
-                                                    .debug_selector(|| {
-                                                        "chat-send-message".to_owned()
-                                                    })
-                                                    .child({
-                                                        let view_handle = view_handle.clone();
-                                                        let input_state = input_state.clone();
-                                                        let draft = draft.clone();
-                                                        Button::new("chat-send-message")
-                                                            .primary()
-                                                            .compact()
-                                                            .disabled(send_disabled)
-                                                            .icon(Icon::new(IconName::ArrowUp))
-                                                            .tooltip(if is_running {
-                                                                "Queue"
-                                                            } else {
-                                                                "Send"
-                                                            })
-                                                            .on_click(move |_, window, app| {
-                                                                if draft.trim().is_empty() {
-                                                                    return;
-                                                                }
-
-                                                                input_state.update(
-                                                                    app,
-                                                                    |state, cx| {
-                                                                        state.set_value(
-                                                                            "", window, cx,
-                                                                        );
-                                                                    },
-                                                                );
-
-                                                                let _ = view_handle.update(
-                                                                    app,
-                                                                    |view, cx| {
-                                                                        view.dispatch(
-                                                                        Action::SendAgentMessage {
-                                                                            workspace_id,
-                                                                            text: draft.clone(),
-                                                                        },
-                                                                        cx,
-                                                                    );
-                                                                    },
-                                                                );
-                                                            })
-                                                            .into_any_element()
-                                                    }),
+                                                    .w_full()
+                                                    .child(
+                                                        Input::new(&input_state)
+                                                            .appearance(false)
+                                                            .with_size(Size::Large),
+                                                    ),
                                             )
-                                            .when(is_running, |s| {
+                                            .child({
                                                 let view_handle = view_handle.clone();
-                                                s.child(
-                                                    Button::new("chat-cancel-turn")
-                                                        .danger()
-                                                        .compact()
-                                                        .icon(Icon::new(IconName::CircleX))
-                                                        .tooltip("Cancel")
-                                                        .on_click(move |_, _, app| {
-                                                            let _ = view_handle.update(
-                                                                app,
-                                                                |view, cx| {
-                                                                    view.dispatch(
-                                                                        Action::CancelAgentTurn {
-                                                                            workspace_id,
-                                                                        },
-                                                                        cx,
-                                                                    );
-                                                                },
-                                                            );
-                                                        }),
-                                                )
+                                                let current_model_id = model_id.clone();
+                                                let current_thinking_effort = thinking_effort;
+                                                let model_label = agent_model_label(&current_model_id)
+                                                    .unwrap_or(current_model_id.as_str())
+                                                    .to_owned();
+
+                                                let model_selector = Popover::new("chat-model-popover")
+                                                    .appearance(true)
+                                                    .anchor(gpui::Corner::TopLeft)
+                                                    .trigger(
+                                                        Button::new("chat-model-selector")
+                                                            .outline()
+                                                            .compact()
+                                                            .with_size(Size::Small)
+                                                            .icon(Icon::new(IconName::Bot))
+                                                            .label(model_label),
+                                                    )
+                                                    .content({
+                                                        let view_handle = view_handle.clone();
+                                                        let current_model_id = current_model_id.clone();
+                                                        move |_popover_state, _window, cx| {
+                                                            let theme = cx.theme();
+                                                            let popover_handle = cx.entity();
+                                                            let items = agent_models().iter().map(|spec| {
+                                                                let selected = spec.id == current_model_id;
+                                                                let view_handle = view_handle.clone();
+                                                                let model_id = spec.id.to_owned();
+                                                                let popover_handle = popover_handle.clone();
+                                                                div()
+                                                                    .h(px(32.0))
+                                                                    .w_full()
+                                                                    .px_2()
+                                                                    .rounded_md()
+                                                                    .flex()
+                                                                    .items_center()
+                                                                    .justify_between()
+                                                                    .cursor_pointer()
+                                                                    .hover(move |s| s.bg(theme.list_hover))
+                                                                    .on_mouse_down(MouseButton::Left, move |_, window, app| {
+                                                                        let _ = view_handle.update(app, |view, cx| {
+                                                                            view.dispatch(
+                                                                                Action::ChatModelChanged {
+                                                                                    workspace_id,
+                                                                                    model_id: model_id.clone(),
+                                                                                },
+                                                                                cx,
+                                                                            );
+                                                                        });
+                                                                        popover_handle.update(app, |state, cx| {
+                                                                            state.dismiss(window, cx);
+                                                                        });
+                                                                    })
+                                                                    .child(div().child(spec.label))
+                                                                    .when(selected, |s| {
+                                                                        s.child(
+                                                                            Icon::new(IconName::Check)
+                                                                                .with_size(Size::Small)
+                                                                                .text_color(theme.muted_foreground),
+                                                                        )
+                                                                    })
+                                                                    .into_any_element()
+                                                            });
+
+                                                            div()
+                                                                .w(px(260.0))
+                                                                .p_2()
+                                                                .flex()
+                                                                .flex_col()
+                                                                .gap_1()
+                                                                .children(items)
+                                                                .into_any_element()
+                                                        }
+                                                    });
+
+                                                let effort_selector = Popover::new("chat-thinking-effort-popover")
+                                                    .appearance(true)
+                                                    .anchor(gpui::Corner::TopLeft)
+                                                    .trigger({
+                                                        let label = current_thinking_effort.label();
+                                                        Button::new("chat-thinking-effort-selector")
+                                                            .outline()
+                                                            .compact()
+                                                            .with_size(Size::Small)
+                                                            .icon(Icon::new(Icon::empty().path("icons/brain.svg")))
+                                                            .label(label)
+                                                    })
+                                                    .content({
+                                                        let view_handle = view_handle.clone();
+                                                        let current_model_id = current_model_id.clone();
+                                                        move |_popover_state, _window, cx| {
+                                                            let theme = cx.theme();
+                                                            let popover_handle = cx.entity();
+                                                            let items = ThinkingEffort::ALL.into_iter().map(|effort| {
+                                                                let selected = effort == current_thinking_effort;
+                                                                let enabled = thinking_effort_supported(&current_model_id, effort);
+                                                                let view_handle = view_handle.clone();
+                                                                let popover_handle = popover_handle.clone();
+                                                                div()
+                                                                    .h(px(32.0))
+                                                                    .w_full()
+                                                                    .px_2()
+                                                                    .rounded_md()
+                                                                    .flex()
+                                                                    .items_center()
+                                                                    .justify_between()
+                                                                    .when(enabled, |s| {
+                                                                        s.cursor_pointer()
+                                                                            .hover(move |s| s.bg(theme.list_hover))
+                                                                            .on_mouse_down(MouseButton::Left, move |_, window, app| {
+                                                                                let _ = view_handle.update(app, |view, cx| {
+                                                                                    view.dispatch(
+                                                                                        Action::ThinkingEffortChanged {
+                                                                                            workspace_id,
+                                                                                            thinking_effort: effort,
+                                                                                        },
+                                                                                        cx,
+                                                                                    );
+                                                                                });
+                                                                                popover_handle.update(app, |state, cx| {
+                                                                                    state.dismiss(window, cx);
+                                                                                });
+                                                                            })
+                                                                    })
+                                                                    .when(!enabled, |s| s.text_color(theme.muted_foreground))
+                                                                    .child(div().child(effort.label()))
+                                                                    .when(selected, |s| {
+                                                                        s.child(
+                                                                            Icon::new(IconName::Check)
+                                                                                .with_size(Size::Small)
+                                                                                .text_color(theme.muted_foreground),
+                                                                        )
+                                                                    })
+                                                                    .into_any_element()
+                                                            });
+
+                                                            div()
+                                                                .w(px(220.0))
+                                                                .p_2()
+                                                                .flex()
+                                                                .flex_col()
+                                                                .gap_1()
+                                                                .children(items)
+                                                                .into_any_element()
+                                                        }
+                                                    });
+
+                                                let send_controls = div()
+                                                    .flex()
+                                                    .items_center()
+                                                    .gap_2()
+                                                    .child(
+                                                        div()
+                                                            .debug_selector(|| "chat-send-message".to_owned())
+                                                            .child({
+                                                                let view_handle = view_handle.clone();
+                                                                let input_state = input_state.clone();
+                                                                let draft = draft.clone();
+                                                                Button::new("chat-send-message")
+                                                                    .primary()
+                                                                    .compact()
+                                                                    .disabled(send_disabled)
+                                                                    .icon(Icon::new(IconName::ArrowUp))
+                                                                    .tooltip(if is_running { "Queue" } else { "Send" })
+                                                                    .on_click(move |_, window, app| {
+                                                                        if draft.trim().is_empty() {
+                                                                            return;
+                                                                        }
+
+                                                                        input_state.update(app, |state, cx| {
+                                                                            state.set_value("", window, cx);
+                                                                        });
+
+                                                                        let _ = view_handle.update(app, |view, cx| {
+                                                                            view.dispatch(
+                                                                                Action::SendAgentMessage {
+                                                                                    workspace_id,
+                                                                                    text: draft.clone(),
+                                                                                },
+                                                                                cx,
+                                                                            );
+                                                                        });
+                                                                    })
+                                                                    .into_any_element()
+                                                            }),
+                                                    )
+                                                    .when(is_running, |s| {
+                                                        let view_handle = view_handle.clone();
+                                                        s.child(
+                                                            Button::new("chat-cancel-turn")
+                                                                .danger()
+                                                                .compact()
+                                                                .icon(Icon::new(IconName::CircleX))
+                                                                .tooltip("Cancel")
+                                                                .on_click(move |_, _, app| {
+                                                                    let _ = view_handle.update(app, |view, cx| {
+                                                                        view.dispatch(
+                                                                            Action::CancelAgentTurn { workspace_id },
+                                                                            cx,
+                                                                        );
+                                                                    });
+                                                                }),
+                                                        )
+                                                    });
+
+                                                div()
+                                                    .w_full()
+                                                    .flex()
+                                                    .items_center()
+                                                    .justify_between()
+                                                    .child(
+                                                        div()
+                                                            .flex()
+                                                            .items_center()
+                                                            .gap_2()
+                                                            .child(
+                                                                div()
+                                                                    .debug_selector(|| {
+                                                                        "chat-model-selector"
+                                                                            .to_owned()
+                                                                    })
+                                                                    .child(model_selector),
+                                                            )
+                                                            .child(
+                                                                div()
+                                                                    .debug_selector(|| {
+                                                                        "chat-thinking-effort-selector"
+                                                                            .to_owned()
+                                                                    })
+                                                                    .child(effort_selector),
+                                                            ),
+                                                    )
+                                                    .child(send_controls)
+                                                    .into_any_element()
                                             }),
                                     ),
                             ),
@@ -4687,6 +4872,49 @@ mod tests {
         window_cx
             .debug_bounds("chat-send-message")
             .expect("missing chat composer send button");
+    }
+
+    #[gpui::test]
+    async fn chat_composer_renders_model_and_effort_selectors(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "abandon-about".to_owned(),
+            branch_name: "luban/abandon-about".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+        });
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
+        state.main_pane = MainPane::Workspace(workspace_id);
+        state.apply(Action::ConversationLoaded {
+            workspace_id,
+            snapshot: ConversationSnapshot {
+                thread_id: Some("thread-1".to_owned()),
+                entries: vec![ConversationEntry::UserMessage {
+                    text: "Test".to_owned(),
+                }],
+            },
+        });
+
+        let (_view, window_cx) =
+            cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+        window_cx.simulate_resize(size(px(720.0), px(400.0)));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        window_cx
+            .debug_bounds("chat-model-selector")
+            .expect("missing chat model selector");
+        window_cx
+            .debug_bounds("chat-thinking-effort-selector")
+            .expect("missing chat thinking effort selector");
     }
 
     #[gpui::test]

@@ -9,6 +9,11 @@ pub use adapters::{
     CreatedWorkspace, ProjectWorkspaceService, PullRequestInfo, PullRequestState,
     RunAgentTurnRequest,
 };
+mod agent_settings;
+pub use agent_settings::{
+    AgentModelSpec, ThinkingEffort, agent_model_label, agent_models, default_agent_model_id,
+    default_thinking_effort, normalize_thinking_effort, thinking_effort_supported,
+};
 mod dashboard;
 pub use dashboard::{
     DashboardCardModel, DashboardPreviewMessage, DashboardPreviewModel, DashboardStage,
@@ -272,12 +277,26 @@ pub struct ConversationSnapshot {
 pub struct WorkspaceConversation {
     pub thread_id: Option<String>,
     pub draft: String,
+    pub agent_model_id: String,
+    pub thinking_effort: ThinkingEffort,
     pub entries: Vec<ConversationEntry>,
     pub run_status: OperationStatus,
     pub in_progress_items: BTreeMap<String, CodexThreadItem>,
     pub in_progress_order: VecDeque<String>,
-    pub pending_prompts: VecDeque<String>,
+    pub pending_prompts: VecDeque<QueuedPrompt>,
     pub queue_paused: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AgentRunConfig {
+    pub model_id: String,
+    pub thinking_effort: ThinkingEffort,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct QueuedPrompt {
+    pub text: String,
+    pub run_config: AgentRunConfig,
 }
 
 #[derive(Clone, Debug)]
@@ -414,6 +433,14 @@ pub enum Action {
         workspace_id: WorkspaceId,
         text: String,
     },
+    ChatModelChanged {
+        workspace_id: WorkspaceId,
+        model_id: String,
+    },
+    ThinkingEffortChanged {
+        workspace_id: WorkspaceId,
+        thinking_effort: ThinkingEffort,
+    },
     ChatDraftChanged {
         workspace_id: WorkspaceId,
         text: String,
@@ -488,6 +515,7 @@ pub enum Effect {
     RunAgentTurn {
         workspace_id: WorkspaceId,
         text: String,
+        run_config: AgentRunConfig,
     },
     CancelAgentTurn {
         workspace_id: WorkspaceId,
@@ -621,6 +649,8 @@ impl AppState {
                     WorkspaceConversation {
                         thread_id: None,
                         draft: String::new(),
+                        agent_model_id: default_agent_model_id().to_owned(),
+                        thinking_effort: default_thinking_effort(),
                         entries: Vec::new(),
                         run_status: OperationStatus::Idle,
                         in_progress_items: BTreeMap::new(),
@@ -757,6 +787,8 @@ impl AppState {
                     WorkspaceConversation {
                         thread_id: snapshot.thread_id,
                         draft: String::new(),
+                        agent_model_id: default_agent_model_id().to_owned(),
+                        thinking_effort: default_thinking_effort(),
                         entries: snapshot.entries,
                         run_status: OperationStatus::Idle,
                         in_progress_items: BTreeMap::new(),
@@ -779,6 +811,8 @@ impl AppState {
                     WorkspaceConversation {
                         thread_id: None,
                         draft: String::new(),
+                        agent_model_id: default_agent_model_id().to_owned(),
+                        thinking_effort: default_thinking_effort(),
                         entries: Vec::new(),
                         run_status: OperationStatus::Idle,
                         in_progress_items: BTreeMap::new(),
@@ -789,8 +823,15 @@ impl AppState {
                 });
                 conversation.draft.clear();
 
+                let run_config = AgentRunConfig {
+                    model_id: conversation.agent_model_id.clone(),
+                    thinking_effort: conversation.thinking_effort,
+                };
+
                 if conversation.run_status == OperationStatus::Running {
-                    conversation.pending_prompts.push_back(text);
+                    conversation
+                        .pending_prompts
+                        .push_back(QueuedPrompt { text, run_config });
                     return Vec::new();
                 }
 
@@ -801,7 +842,11 @@ impl AppState {
                     conversation.run_status = OperationStatus::Running;
                     conversation.in_progress_items.clear();
                     conversation.in_progress_order.clear();
-                    return vec![Effect::RunAgentTurn { workspace_id, text }];
+                    return vec![Effect::RunAgentTurn {
+                        workspace_id,
+                        text,
+                        run_config,
+                    }];
                 }
 
                 if conversation.pending_prompts.is_empty() {
@@ -812,19 +857,75 @@ impl AppState {
                     conversation.run_status = OperationStatus::Running;
                     conversation.in_progress_items.clear();
                     conversation.in_progress_order.clear();
-                    return vec![Effect::RunAgentTurn { workspace_id, text }];
+                    return vec![Effect::RunAgentTurn {
+                        workspace_id,
+                        text,
+                        run_config,
+                    }];
                 }
 
-                conversation.pending_prompts.push_back(text);
+                conversation
+                    .pending_prompts
+                    .push_back(QueuedPrompt { text, run_config });
                 start_next_queued_prompt(conversation, workspace_id)
                     .into_iter()
                     .collect()
+            }
+            Action::ChatModelChanged {
+                workspace_id,
+                model_id,
+            } => {
+                let conversation = self.conversations.entry(workspace_id).or_insert_with(|| {
+                    WorkspaceConversation {
+                        thread_id: None,
+                        draft: String::new(),
+                        agent_model_id: default_agent_model_id().to_owned(),
+                        thinking_effort: default_thinking_effort(),
+                        entries: Vec::new(),
+                        run_status: OperationStatus::Idle,
+                        in_progress_items: BTreeMap::new(),
+                        in_progress_order: VecDeque::new(),
+                        pending_prompts: VecDeque::new(),
+                        queue_paused: false,
+                    }
+                });
+
+                conversation.agent_model_id = model_id.clone();
+                conversation.thinking_effort =
+                    normalize_thinking_effort(&model_id, conversation.thinking_effort);
+                Vec::new()
+            }
+            Action::ThinkingEffortChanged {
+                workspace_id,
+                thinking_effort,
+            } => {
+                let conversation = self.conversations.entry(workspace_id).or_insert_with(|| {
+                    WorkspaceConversation {
+                        thread_id: None,
+                        draft: String::new(),
+                        agent_model_id: default_agent_model_id().to_owned(),
+                        thinking_effort: default_thinking_effort(),
+                        entries: Vec::new(),
+                        run_status: OperationStatus::Idle,
+                        in_progress_items: BTreeMap::new(),
+                        in_progress_order: VecDeque::new(),
+                        pending_prompts: VecDeque::new(),
+                        queue_paused: false,
+                    }
+                });
+
+                if thinking_effort_supported(&conversation.agent_model_id, thinking_effort) {
+                    conversation.thinking_effort = thinking_effort;
+                }
+                Vec::new()
             }
             Action::ChatDraftChanged { workspace_id, text } => {
                 let conversation = self.conversations.entry(workspace_id).or_insert_with(|| {
                     WorkspaceConversation {
                         thread_id: None,
                         draft: String::new(),
+                        agent_model_id: default_agent_model_id().to_owned(),
+                        thinking_effort: default_thinking_effort(),
                         entries: Vec::new(),
                         run_status: OperationStatus::Idle,
                         in_progress_items: BTreeMap::new(),
@@ -870,6 +971,8 @@ impl AppState {
                     WorkspaceConversation {
                         thread_id: None,
                         draft: String::new(),
+                        agent_model_id: default_agent_model_id().to_owned(),
+                        thinking_effort: default_thinking_effort(),
                         entries: Vec::new(),
                         run_status: OperationStatus::Idle,
                         in_progress_items: BTreeMap::new(),
@@ -1363,15 +1466,19 @@ fn start_next_queued_prompt(
         return None;
     }
 
-    let text = conversation.pending_prompts.pop_front()?;
+    let queued = conversation.pending_prompts.pop_front()?;
 
-    conversation
-        .entries
-        .push(ConversationEntry::UserMessage { text: text.clone() });
+    conversation.entries.push(ConversationEntry::UserMessage {
+        text: queued.text.clone(),
+    });
     conversation.run_status = OperationStatus::Running;
     conversation.in_progress_items.clear();
     conversation.in_progress_order.clear();
-    Some(Effect::RunAgentTurn { workspace_id, text })
+    Some(Effect::RunAgentTurn {
+        workspace_id,
+        text: queued.text,
+        run_config: queued.run_config,
+    })
 }
 
 #[cfg(test)]
@@ -1990,7 +2097,17 @@ mod tests {
             text: "Hello".to_owned(),
         });
         assert_eq!(effects.len(), 1);
-        assert!(matches!(effects[0], Effect::RunAgentTurn { .. }));
+        assert!(matches!(
+            &effects[0],
+            Effect::RunAgentTurn {
+                workspace_id: wid,
+                text,
+                run_config
+            } if *wid == workspace_id
+                && text == "Hello"
+                && run_config.model_id == default_agent_model_id()
+                && run_config.thinking_effort == default_thinking_effort()
+        ));
 
         let conversation = state.workspace_conversation(workspace_id).unwrap();
         assert_eq!(conversation.run_status, OperationStatus::Running);
@@ -2112,7 +2229,7 @@ mod tests {
         let conversation = state.workspace_conversation(workspace_id).unwrap();
         assert_eq!(conversation.entries.len(), 1);
         assert_eq!(conversation.pending_prompts.len(), 1);
-        assert_eq!(conversation.pending_prompts[0], "Second");
+        assert_eq!(conversation.pending_prompts[0].text, "Second");
         assert_eq!(conversation.run_status, OperationStatus::Running);
     }
 
@@ -2145,8 +2262,12 @@ mod tests {
             &effects[0],
             Effect::RunAgentTurn {
                 workspace_id: wid,
-                text
-            } if *wid == workspace_id && text == "Second"
+                text,
+                run_config
+            } if *wid == workspace_id
+                && text == "Second"
+                && run_config.model_id == default_agent_model_id()
+                && run_config.thinking_effort == default_thinking_effort()
         ));
 
         let conversation = state.workspace_conversation(workspace_id).unwrap();
@@ -2197,8 +2318,12 @@ mod tests {
             &effects[0],
             Effect::RunAgentTurn {
                 workspace_id: wid,
-                text
-            } if *wid == workspace_id && text == "Second"
+                text,
+                run_config
+            } if *wid == workspace_id
+                && text == "Second"
+                && run_config.model_id == default_agent_model_id()
+                && run_config.thinking_effort == default_thinking_effort()
         ));
     }
 

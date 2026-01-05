@@ -35,6 +35,8 @@ pub struct RunAgentTurnRequest {
     pub worktree_path: PathBuf,
     pub thread_id: Option<String>,
     pub prompt: String,
+    pub model: Option<String>,
+    pub model_reasoning_effort: Option<String>,
 }
 
 pub trait ProjectWorkspaceService: Send + Sync {

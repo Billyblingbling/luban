@@ -557,22 +557,30 @@ impl GitWorkspaceService {
 
     fn run_codex_turn_streamed_via_sidecar(
         &self,
-        thread_id: Option<String>,
-        worktree_path: &Path,
-        prompt: &str,
+        params: SidecarTurnParams,
         cancel: Arc<AtomicBool>,
         mut on_event: impl FnMut(CodexThreadEvent) -> anyhow::Result<()>,
     ) -> anyhow::Result<()> {
         self.ensure_sidecar_installed()?;
 
         let script = self.sidecar_bundled_script_path();
+        let SidecarTurnParams {
+            thread_id,
+            worktree_path,
+            prompt,
+            model,
+            model_reasoning_effort,
+        } = params;
         let request = SidecarTurnRequest {
             thread_id,
             working_directory: worktree_path
+                .as_path()
                 .to_str()
                 .ok_or_else(|| anyhow!("invalid worktree path"))?
                 .to_owned(),
-            prompt: prompt.to_owned(),
+            prompt,
+            model,
+            model_reasoning_effort,
             sandbox_mode: "danger-full-access".to_owned(),
             approval_policy: "never".to_owned(),
             network_access_enabled: true,
@@ -1147,6 +1155,8 @@ impl ProjectWorkspaceService for GitWorkspaceService {
             worktree_path,
             thread_id,
             prompt,
+            model,
+            model_reasoning_effort,
         } = request;
 
         let turn_started_at = Instant::now();
@@ -1188,9 +1198,13 @@ impl ProjectWorkspaceService for GitWorkspaceService {
             let duration_appended_for_events = duration_appended.clone();
 
             self.run_codex_turn_streamed_via_sidecar(
-                resolved_thread_id,
-                &worktree_path,
-                &prompt,
+                SidecarTurnParams {
+                    thread_id: resolved_thread_id,
+                    worktree_path: worktree_path.clone(),
+                    prompt: prompt.clone(),
+                    model: model.clone(),
+                    model_reasoning_effort: model_reasoning_effort.clone(),
+                },
                 cancel.clone(),
                 |event| {
                     let mut events_to_process = Vec::with_capacity(1);
@@ -1440,9 +1454,20 @@ struct SidecarTurnRequest {
     thread_id: Option<String>,
     working_directory: String,
     prompt: String,
+    model: Option<String>,
+    model_reasoning_effort: Option<String>,
     sandbox_mode: String,
     approval_policy: String,
     network_access_enabled: bool,
     web_search_enabled: bool,
     skip_git_repo_check: bool,
+}
+
+#[derive(Clone, Debug)]
+struct SidecarTurnParams {
+    thread_id: Option<String>,
+    worktree_path: PathBuf,
+    prompt: String,
+    model: Option<String>,
+    model_reasoning_effort: Option<String>,
 }
