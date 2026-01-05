@@ -1,7 +1,9 @@
 use anyhow::{Context as _, anyhow};
 use bip39::Language;
 use luban_domain::{
-    CodexThreadEvent, CodexThreadItem, ConversationEntry, ConversationSnapshot, PersistedAppState,
+    CodexThreadEvent, CodexThreadItem, ConversationEntry, ConversationSnapshot, CreatedWorkspace,
+    PersistedAppState, ProjectWorkspaceService, PullRequestInfo, PullRequestState,
+    RunAgentTurnRequest,
 };
 use rand::{Rng as _, rngs::OsRng};
 use std::{
@@ -16,10 +18,6 @@ use std::{
 };
 
 use crate::sqlite_store::SqliteStore;
-use luban_ui::{
-    CreatedWorkspace, ProjectWorkspaceService, PullRequestInfo, PullRequestState,
-    RunAgentTurnRequest,
-};
 
 const SIDECAR_EVENT_PREFIX: &str = "__LUBAN_EVENT__ ";
 

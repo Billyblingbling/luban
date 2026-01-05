@@ -4,6 +4,12 @@ use std::{
     path::PathBuf,
 };
 
+mod adapters;
+pub use adapters::{
+    CreatedWorkspace, ProjectWorkspaceService, PullRequestInfo, PullRequestState,
+    RunAgentTurnRequest,
+};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct ProjectId(u64);
 

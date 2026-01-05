@@ -15,8 +15,9 @@ use gpui_component::{
     text::{TextView, TextViewStyle},
 };
 use luban_domain::{
-    Action, AppState, CodexThreadEvent, CodexThreadItem, ConversationSnapshot, Effect, MainPane,
-    OperationStatus, PersistedAppState, ProjectId, RightPane, WorkspaceId, WorkspaceStatus,
+    Action, AppState, CodexThreadEvent, CodexThreadItem, Effect, MainPane, OperationStatus,
+    ProjectId, ProjectWorkspaceService, PullRequestInfo, RightPane, RunAgentTurnRequest,
+    WorkspaceId, WorkspaceStatus,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -28,12 +29,6 @@ use std::{
 
 use crate::selectable_text::SelectablePlainText;
 use crate::terminal_panel::{WorkspaceTerminal, spawn_workspace_terminal, terminal_cell_metrics};
-
-pub struct CreatedWorkspace {
-    pub workspace_name: String,
-    pub branch_name: String,
-    pub worktree_path: PathBuf,
-}
 
 const TERMINAL_PANE_RESIZER_WIDTH: f32 = 6.0;
 const SIDEBAR_RESIZER_WIDTH: f32 = 6.0;
@@ -71,81 +66,6 @@ impl gpui::Render for SidebarResizeGhost {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         div().w(px(0.0)).h(px(0.0)).hidden()
     }
-}
-
-#[derive(Clone, Debug)]
-pub struct RunAgentTurnRequest {
-    pub project_slug: String,
-    pub workspace_name: String,
-    pub worktree_path: PathBuf,
-    pub thread_id: Option<String>,
-    pub prompt: String,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct PullRequestInfo {
-    pub number: u64,
-    pub is_draft: bool,
-    pub state: PullRequestState,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum PullRequestState {
-    Open,
-    Closed,
-    Merged,
-}
-
-impl PullRequestState {
-    fn is_finished(self) -> bool {
-        matches!(self, Self::Closed | Self::Merged)
-    }
-}
-
-pub trait ProjectWorkspaceService: Send + Sync {
-    fn load_app_state(&self) -> Result<PersistedAppState, String>;
-
-    fn save_app_state(&self, snapshot: PersistedAppState) -> Result<(), String>;
-
-    fn create_workspace(
-        &self,
-        project_path: PathBuf,
-        project_slug: String,
-    ) -> Result<CreatedWorkspace, String>;
-
-    fn open_workspace_in_ide(&self, worktree_path: PathBuf) -> Result<(), String>;
-
-    fn archive_workspace(
-        &self,
-        project_path: PathBuf,
-        worktree_path: PathBuf,
-    ) -> Result<(), String>;
-
-    fn ensure_conversation(
-        &self,
-        project_slug: String,
-        workspace_name: String,
-    ) -> Result<(), String>;
-
-    fn load_conversation(
-        &self,
-        project_slug: String,
-        workspace_name: String,
-    ) -> Result<ConversationSnapshot, String>;
-
-    fn run_agent_turn_streamed(
-        &self,
-        request: RunAgentTurnRequest,
-        cancel: Arc<AtomicBool>,
-        on_event: Arc<dyn Fn(CodexThreadEvent) + Send + Sync>,
-    ) -> Result<(), String>;
-
-    fn gh_is_authorized(&self) -> Result<bool, String>;
-
-    fn gh_pull_request_info(
-        &self,
-        worktree_path: PathBuf,
-    ) -> Result<Option<PullRequestInfo>, String>;
 }
 
 pub struct LubanRootView {
@@ -4950,7 +4870,10 @@ fn workspace_agent_context(
 mod tests {
     use super::*;
     use gpui::{Modifiers, MouseButton, MouseDownEvent, point, px, size};
-    use luban_domain::ConversationEntry;
+    use luban_domain::{
+        ConversationEntry, ConversationSnapshot, CreatedWorkspace, PersistedAppState,
+        PullRequestState,
+    };
     use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
 

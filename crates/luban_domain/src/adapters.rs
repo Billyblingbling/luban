@@ -1,0 +1,84 @@
+use crate::{CodexThreadEvent, ConversationSnapshot, PersistedAppState};
+use std::{path::PathBuf, sync::Arc, sync::atomic::AtomicBool};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PullRequestState {
+    Open,
+    Closed,
+    Merged,
+}
+
+impl PullRequestState {
+    pub fn is_finished(self) -> bool {
+        matches!(self, Self::Closed | Self::Merged)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PullRequestInfo {
+    pub number: u64,
+    pub is_draft: bool,
+    pub state: PullRequestState,
+}
+
+#[derive(Clone, Debug)]
+pub struct CreatedWorkspace {
+    pub workspace_name: String,
+    pub branch_name: String,
+    pub worktree_path: PathBuf,
+}
+
+#[derive(Clone, Debug)]
+pub struct RunAgentTurnRequest {
+    pub project_slug: String,
+    pub workspace_name: String,
+    pub worktree_path: PathBuf,
+    pub thread_id: Option<String>,
+    pub prompt: String,
+}
+
+pub trait ProjectWorkspaceService: Send + Sync {
+    fn load_app_state(&self) -> Result<PersistedAppState, String>;
+
+    fn save_app_state(&self, snapshot: PersistedAppState) -> Result<(), String>;
+
+    fn create_workspace(
+        &self,
+        project_path: PathBuf,
+        project_slug: String,
+    ) -> Result<CreatedWorkspace, String>;
+
+    fn open_workspace_in_ide(&self, worktree_path: PathBuf) -> Result<(), String>;
+
+    fn archive_workspace(
+        &self,
+        project_path: PathBuf,
+        worktree_path: PathBuf,
+    ) -> Result<(), String>;
+
+    fn ensure_conversation(
+        &self,
+        project_slug: String,
+        workspace_name: String,
+    ) -> Result<(), String>;
+
+    fn load_conversation(
+        &self,
+        project_slug: String,
+        workspace_name: String,
+    ) -> Result<ConversationSnapshot, String>;
+
+    fn run_agent_turn_streamed(
+        &self,
+        request: RunAgentTurnRequest,
+        cancel: Arc<AtomicBool>,
+        on_event: Arc<dyn Fn(CodexThreadEvent) + Send + Sync>,
+    ) -> Result<(), String>;
+
+    fn gh_is_authorized(&self) -> Result<bool, String>;
+
+    fn gh_pull_request_info(
+        &self,
+        worktree_path: PathBuf,
+    ) -> Result<Option<PullRequestInfo>, String>;
+}
