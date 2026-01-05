@@ -4956,8 +4956,8 @@ mod tests {
             "dashboard should render add project button"
         );
         assert!(
-            window_cx.debug_bounds("titlebar-workspace-label").is_some(),
-            "dashboard toggle label should switch to workspaces"
+            window_cx.debug_bounds("titlebar-dashboard-label").is_some(),
+            "dashboard toggle label should switch to dashboard"
         );
 
         let start = window_cx
@@ -5054,8 +5054,8 @@ mod tests {
             dashboard_toggle
         );
         assert!(
-            window_cx.debug_bounds("titlebar-workspace-label").is_some(),
-            "expected toggle label to switch to workspaces on dashboard"
+            window_cx.debug_bounds("titlebar-dashboard-label").is_some(),
+            "expected toggle label to switch to dashboard on dashboard"
         );
 
         window_cx.simulate_click(dashboard_toggle.center(), Modifiers::none());

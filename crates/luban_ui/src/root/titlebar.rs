@@ -170,15 +170,15 @@ pub(super) fn render_titlebar(
     } else {
         let (toggle_label, toggle_label_debug, toggle_icon_path) = if is_dashboard_selected {
             (
-                "Workspace",
-                "titlebar-workspace-label",
-                "icons/notebook-text.svg",
-            )
-        } else {
-            (
                 "Dashboard",
                 "titlebar-dashboard-label",
                 "icons/square-kanban.svg",
+            )
+        } else {
+            (
+                "Workspace",
+                "titlebar-workspace-label",
+                "icons/notebook-text.svg",
             )
         };
         let toggle_color = theme.muted_foreground;
@@ -217,8 +217,14 @@ pub(super) fn render_titlebar(
                             .flex()
                             .items_center()
                             .gap_2()
+                            .px_2()
+                            .py_1()
+                            .rounded_md()
+                            .border_1()
+                            .border_color(theme.sidebar_border)
                             .debug_selector(|| "titlebar-dashboard-title".to_owned())
                             .cursor_pointer()
+                            .hover(move |s| s.bg(theme.sidebar_accent))
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(|this, _, _, cx| {
