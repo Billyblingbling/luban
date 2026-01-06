@@ -62,6 +62,8 @@ The tab strip is rendered inside the chat pane:
 - `+` creates a new thread, appends a tab at the end, and activates it.
 - A `v` dropdown button opens the Threads menu (all threads in this workspace).
 - Activating a thread does not reorder the tab strip. Users reorder tabs by dragging.
+- The tab strip does not horizontally scroll. Tabs compress to fit; use the dropdown to access any
+  thread when tabs become too narrow.
 - Tabs show:
   - Title (derived from thread title)
   - Dirty indicator when the thread has a non-empty draft or draft attachments
