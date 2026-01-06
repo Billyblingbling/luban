@@ -2,6 +2,17 @@
 
 This document constrains and guides how AI agents (and human contributors) should work in this repository. The goals are: predictable behavior, regressibility, reviewability, and maintainability. If this document conflicts with existing repository conventions, the repository conventions take precedence, and this document should be updated in the PR/change accordingly.
 
+## 0. Quick start (read this first)
+- Default branch: `main`.
+- Prefer `just` recipes over ad-hoc `cargo` commands:
+  - `just -l` (discover workflows)
+  - `just fmt && just lint && just test` (full local verification)
+  - `just test-fast` (domain-only tests)
+  - `just run` / `just run release`
+  - `just build` / `just build release`
+- Keep changes small and reviewable. For functional changes, add or update tests.
+- After finishing a task, run the relevant checks, then commit and push.
+
 ## 1. Project context and goals (first-screen context for agents)
 - Tech stack: Rust + gpui (native UI framework)
 - All engineering commands are managed via `justfile` (prefer `just` over invoking `cargo` directly)
@@ -31,6 +42,17 @@ This document constrains and guides how AI agents (and human contributors) shoul
   - scope of impact (which modules, and whether compatibility is affected)
   - how to verify (commands + manual steps)
   - which tests were added/updated
+
+## 2.4 Repository map (where things live)
+- `crates/luban_domain/`: pure state + reducers (`AppState`, `Action`, `Effect`), deterministic logic, most regressions should be captured here.
+- `crates/luban_ui/`: GPUI views. Prefer thin rendering + event forwarding; avoid IO; keep expensive work off the UI thread.
+  - Most UI integration tests live in `crates/luban_ui/src/root.rs` under `#[gpui::test]`.
+  - Prefer `debug_selector` strings that are stable and descriptive; tests should use `debug_bounds(...)`.
+- `crates/luban_app/`: app wiring, side effects, adapters, persistence.
+  - SQLite persistence: `crates/luban_app/src/sqlite_store.rs` + migrations under `crates/luban_app/migrations/`.
+- `tools/`: helper tooling (including the sidecar).
+- `docs/`: design notes and decisions. Add/update docs for non-trivial UX or architecture changes.
+- `.context/` (gitignored): local scratchpad for collaboration between agents.
 
 ## 3. Architecture constraints (strong constraints)
 Goal: UI is replaceable, logic is testable, and IO is isolated.
@@ -95,6 +117,16 @@ When writing or using commands, choose by intent (names may differ; follow the r
 - `just ci`: simulate the full CI flow (optional)
 
 > If a `justfile` already provides similar commands with different names, do not force new naming. Align this document to the existing naming instead.
+
+## 5.4 GPUI UI testing tips (for stable tests)
+- Prefer `debug_selector(|| "...".to_owned())` on key elements. Avoid selectors derived from transient values.
+- For bounds/layout assertions, use `window_cx.debug_bounds("selector")` and compare with tolerances.
+- When you need to assert resizing/dragging behavior, follow existing patterns in `crates/luban_ui/src/root.rs` tests:
+  - `simulate_mouse_down` → `simulate_mouse_move` → `simulate_mouse_up`
+  - `run_until_parked` + `refresh()` between steps
+- For scrollable lists, prefer the existing pattern:
+  - container: `.overflow_y_scroll().track_scroll(&handle)`
+  - overlay scrollbar: `Scrollbar::vertical(&handle).scrollbar_show(ScrollbarShow::Always)` with a stable selector.
 
 ## 6. Error handling and logging (debuggability requirements)
 - User-visible errors:
