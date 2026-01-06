@@ -419,7 +419,9 @@ fn chat_composer_attachments_row(
             .items_center()
             .flex_wrap()
             .gap_3()
-            .px_3()
+            .px_4()
+            .pt_2()
+            .pb_1()
             .children(items)
             .into_any_element(),
     )
@@ -2585,12 +2587,13 @@ impl LubanRootView {
 	                                                ),
 	                                                |s, row| s.child(row),
 	                                            )
-		                                            .child(
+	                                            .child(
 		                                                div()
 		                                                    .w_full()
+		                                                    .debug_selector(|| "chat-composer-input".to_owned())
 		                                                    .child(
 		                                                        Input::new(&input_state)
-		                                                            .px_3()
+		                                                            .px_4()
 		                                                            .appearance(false)
 		                                                            .with_size(Size::Large),
 		                                                    ),
@@ -2804,7 +2807,7 @@ impl LubanRootView {
 	                                                div()
 	                                                    .w_full()
 	                                                    .flex()
-	                                                    .px_3()
+	                                                    .px_4()
 	                                                    .items_center()
 	                                                    .justify_between()
 	                                                    .child(
@@ -5953,7 +5956,7 @@ mod tests {
         let left_inset = model_bounds.left() - surface_bounds.left();
         let right_inset = surface_bounds.right() - send_bounds.right();
         assert!(
-            left_inset >= px(14.0) && left_inset <= px(22.0),
+            left_inset >= px(18.0) && left_inset <= px(28.0),
             "unexpected chat composer inset: left={left_inset:?} surface={surface_bounds:?} model={model_bounds:?}",
         );
         let inset_diff = if left_inset > right_inset {
@@ -6037,9 +6040,12 @@ mod tests {
         let surface = window_cx
             .debug_bounds("chat-composer-surface")
             .expect("missing chat composer surface");
-        window_cx
+        let attachments_row = window_cx
             .debug_bounds("chat-composer-attachments-row")
             .expect("missing chat composer attachments row");
+        let input = window_cx
+            .debug_bounds("chat-composer-input")
+            .expect("missing chat composer input");
         let first = window_cx
             .debug_bounds("chat-composer-attachment-2")
             .expect("missing first attachment item");
@@ -6054,6 +6060,24 @@ mod tests {
         assert!(
             first.left() < second.left(),
             "expected attachments to render in anchor order: first={first:?} second={second:?}"
+        );
+
+        let top_inset = first.top() - surface.top();
+        assert!(
+            top_inset >= px(8.0),
+            "expected attachment thumbnails to be inset from surface top: inset={top_inset:?} surface={surface:?} first={first:?}",
+        );
+
+        let gap_to_input = input.top() - first.bottom();
+        assert!(
+            gap_to_input >= px(10.0),
+            "expected visible spacing between attachment thumbnails and input: gap={gap_to_input:?} first={first:?} input={input:?}",
+        );
+
+        let row_to_input_gap = input.top() - attachments_row.bottom();
+        assert!(
+            row_to_input_gap >= px(6.0),
+            "expected attachment row to be separated from input: gap={row_to_input_gap:?} row={attachments_row:?} input={input:?}",
         );
     }
 

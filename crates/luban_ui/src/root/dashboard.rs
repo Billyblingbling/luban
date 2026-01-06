@@ -1004,12 +1004,15 @@ impl LubanRootView {
                                         |s, row| s.child(row),
                                     )
                                     .child(
-                                        div().w_full().child(
-                                            Input::new(&input_state)
-                                                .px_3()
-                                                .appearance(false)
-                                                .with_size(Size::Large),
-                                        ),
+                                        div()
+                                            .w_full()
+                                            .debug_selector(|| "chat-composer-input".to_owned())
+                                            .child(
+                                                Input::new(&input_state)
+                                                    .px_4()
+                                                    .appearance(false)
+                                                    .with_size(Size::Large),
+                                            ),
                                     )
                                     .child({
                                         let view_handle = view_handle.clone();
@@ -1221,14 +1224,14 @@ impl LubanRootView {
                                                 )
                                             });
 
-                                        div()
-                                            .w_full()
-                                            .flex()
-                                            .px_3()
-                                            .items_center()
-                                            .justify_between()
-                                            .child(
-                                                div()
+	                                        div()
+	                                            .w_full()
+	                                            .flex()
+	                                            .px_4()
+	                                            .items_center()
+	                                            .justify_between()
+	                                            .child(
+	                                                div()
                                                     .flex()
                                                     .items_center()
                                                     .gap_2()
