@@ -2082,6 +2082,7 @@ impl LubanRootView {
                 .h(px(36.0))
                 .flex_1()
                 .min_w(px(56.0))
+                .max_w(px(240.0))
                 .px_3()
                 .flex()
                 .items_center()
@@ -6039,6 +6040,42 @@ mod tests {
         assert!(
             !tabs.archived_tabs.contains(&archived_thread),
             "expected restored tab to be removed from archived tabs"
+        );
+    }
+
+    #[gpui::test]
+    async fn workspace_thread_tabs_do_not_expand_to_fill_strip(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "abandon-about".to_owned(),
+            branch_name: "luban/abandon-about".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+        });
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
+        state.apply(Action::OpenWorkspace { workspace_id });
+        state.apply(Action::CreateWorkspaceThread { workspace_id });
+
+        let (_view, window_cx) =
+            cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+        window_cx.simulate_resize(size(px(1200.0), px(320.0)));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        let tab = window_cx
+            .debug_bounds("workspace-thread-tab-0")
+            .expect("missing first thread tab");
+        assert!(
+            tab.size.width <= px(242.0),
+            "expected tab width to be capped instead of filling the strip: {tab:?}"
         );
     }
 
