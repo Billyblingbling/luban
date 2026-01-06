@@ -438,7 +438,8 @@ impl LubanRootView {
 
         let theme = cx.theme();
 
-        let draft = input_state.read(cx).value().trim().to_owned();
+        let draft_raw = input_state.read(cx).value().to_owned();
+        let draft = draft_raw.trim().to_owned();
         let pending_context_imports = self
             .pending_context_imports
             .get(&workspace_id)
@@ -921,6 +922,10 @@ impl LubanRootView {
                                                 .appearance(false)
                                                 .with_size(Size::Large),
                                         ),
+                                    )
+                                    .when_some(
+                                        chat_composer_context_preview(&draft_raw, theme),
+                                        |s, preview| s.child(preview),
                                     )
                                     .child({
                                         let view_handle = view_handle.clone();

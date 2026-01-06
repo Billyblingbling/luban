@@ -1,8 +1,8 @@
 use gpui::point;
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, Context, CursorStyle, ElementId, FileDropEvent, IntoElement,
-    MouseButton, Pixels, PromptButton, PromptLevel, SharedString, Window, div, px, rems,
+    AnyElement, Context, CursorStyle, ElementId, FileDropEvent, IntoElement, MouseButton, Pixels,
+    PromptButton, PromptLevel, SharedString, Window, div, px, rems,
 };
 use gpui_component::input::RopeExt as _;
 use gpui_component::{
@@ -1800,7 +1800,8 @@ impl LubanRootView {
 
                 let theme = cx.theme();
 
-                let draft = input_state.read(cx).value().trim().to_owned();
+                let draft_raw = input_state.read(cx).value().to_owned();
+                let draft = draft_raw.trim().to_owned();
                 let pending_context_imports = self
                     .pending_context_imports
                     .get(&workspace_id)
@@ -2293,7 +2294,7 @@ impl LubanRootView {
                                             .flex()
                                             .flex_col()
                                             .gap_2()
-                                            .child(
+	                                            .child(
 	                                                div()
 	                                                    .w_full()
 	                                                    .child(
@@ -2302,8 +2303,12 @@ impl LubanRootView {
 	                                                            .appearance(false)
 	                                                            .with_size(Size::Large),
 	                                                    ),
-                                            )
-                                            .child({
+	                                            )
+	                                            .when_some(
+	                                                chat_composer_context_preview(&draft_raw, theme),
+	                                                |s, preview| s.child(preview),
+	                                            )
+	                                            .child({
                                                 let view_handle = view_handle.clone();
                                                 let current_model_id = model_id.clone();
                                                 let current_thinking_effort = thinking_effort;
@@ -2833,6 +2838,107 @@ fn user_message_view_with_context_tokens(
         .gap_2()
         .children(children)
         .into_any_element()
+}
+
+fn chat_composer_context_preview(text: &str, theme: &gpui_component::Theme) -> Option<AnyElement> {
+    let tokens = luban_domain::find_context_tokens(text);
+    if tokens.is_empty() {
+        return None;
+    }
+
+    let children = tokens
+        .into_iter()
+        .enumerate()
+        .map(|(index, token)| {
+            let debug_id = format!("chat-composer-context-item-{index}");
+            let is_pending = token.path.to_string_lossy().starts_with("pending-");
+
+            let element = if is_pending {
+                div()
+                    .px_2()
+                    .py_1()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(theme.border)
+                    .bg(theme.muted)
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(Spinner::new().with_size(Size::Small))
+                    .child("Importing...")
+                    .into_any_element()
+            } else {
+                match token.kind {
+                    luban_domain::ContextTokenKind::Image => {
+                        let border_color = theme.border;
+                        let muted = theme.muted;
+                        let muted_foreground = theme.muted_foreground;
+
+                        gpui::img(token.path)
+                            .w(px(56.0))
+                            .h(px(56.0))
+                            .rounded_md()
+                            .border_1()
+                            .border_color(border_color)
+                            .object_fit(gpui::ObjectFit::Cover)
+                            .with_loading(|| {
+                                Spinner::new().with_size(Size::Small).into_any_element()
+                            })
+                            .with_fallback(move || {
+                                div()
+                                    .w(px(56.0))
+                                    .h(px(56.0))
+                                    .rounded_md()
+                                    .border_1()
+                                    .border_color(border_color)
+                                    .bg(muted)
+                                    .text_color(muted_foreground)
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .child("Missing")
+                                    .into_any_element()
+                            })
+                            .into_any_element()
+                    }
+                    luban_domain::ContextTokenKind::Text | luban_domain::ContextTokenKind::File => {
+                        let filename = token
+                            .path
+                            .file_name()
+                            .map(|s| s.to_string_lossy().to_string())
+                            .unwrap_or_else(|| "attachment".to_owned());
+                        div()
+                            .px_2()
+                            .py_1()
+                            .rounded_md()
+                            .border_1()
+                            .border_color(theme.border)
+                            .bg(theme.muted)
+                            .text_color(theme.muted_foreground)
+                            .child(filename)
+                            .into_any_element()
+                    }
+                }
+            };
+
+            div()
+                .debug_selector(move || debug_id.clone())
+                .child(element)
+                .into_any_element()
+        })
+        .collect::<Vec<_>>();
+
+    Some(
+        div()
+            .debug_selector(|| "chat-composer-context-row".to_owned())
+            .w_full()
+            .flex()
+            .flex_wrap()
+            .gap_2()
+            .px_3()
+            .children(children)
+            .into_any_element(),
+    )
 }
 
 fn min_width_zero<E: gpui::Styled>(mut element: E) -> E {
@@ -5672,6 +5778,66 @@ mod tests {
         assert!(
             inset_diff <= px(4.0),
             "expected symmetric insets: left={left_inset:?} right={right_inset:?} diff={inset_diff:?}",
+        );
+    }
+
+    #[gpui::test]
+    async fn chat_composer_renders_context_preview_items_in_order(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "abandon-about".to_owned(),
+            branch_name: "luban/abandon-about".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+        });
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
+        state.main_pane = MainPane::Workspace(workspace_id);
+        state.apply(Action::ConversationLoaded {
+            workspace_id,
+            snapshot: ConversationSnapshot {
+                thread_id: Some("thread-1".to_owned()),
+                entries: vec![ConversationEntry::UserMessage {
+                    text: "Test".to_owned(),
+                }],
+            },
+        });
+
+        let image_token = context_token("image", "/tmp/missing.png");
+        let text_token = context_token("text", "/tmp/missing.txt");
+        let draft = format!("Hello\n{image_token}\nWorld\n{text_token}");
+        state.apply(Action::ChatDraftChanged {
+            workspace_id,
+            text: draft,
+        });
+
+        let (_view, window_cx) = cx.add_window_view(|window, cx| {
+            let view = cx.new(|cx| LubanRootView::with_state(services, state, cx));
+            gpui_component::Root::new(view, window, cx)
+        });
+        window_cx.simulate_resize(size(px(720.0), px(420.0)));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        window_cx
+            .debug_bounds("chat-composer-context-row")
+            .expect("missing chat composer context preview row");
+        let first = window_cx
+            .debug_bounds("chat-composer-context-item-0")
+            .expect("missing first context preview item");
+        let second = window_cx
+            .debug_bounds("chat-composer-context-item-1")
+            .expect("missing second context preview item");
+        assert!(
+            first.left() < second.left(),
+            "expected preview items to render in token order: first={first:?} second={second:?}"
         );
     }
 
