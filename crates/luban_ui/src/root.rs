@@ -605,6 +605,23 @@ impl gpui::Render for DashboardPreviewResizeGhost {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+struct WorkspaceThreadTabReorderState {
+    workspace_id: WorkspaceId,
+    thread_id: WorkspaceThreadId,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct WorkspaceThreadTabReorderDrag;
+
+struct WorkspaceThreadTabReorderGhost;
+
+impl gpui::Render for WorkspaceThreadTabReorderGhost {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        div().w(px(0.0)).h(px(0.0)).hidden()
+    }
+}
+
 pub struct LubanRootView {
     state: AppState,
     services: Arc<dyn ProjectWorkspaceService>,
@@ -645,6 +662,8 @@ pub struct LubanRootView {
     last_chat_workspace_id: Option<WorkspaceThreadKey>,
     last_chat_item_count: usize,
     last_workspace_before_dashboard: Option<WorkspaceId>,
+    workspace_thread_tab_bounds: HashMap<WorkspaceThreadKey, gpui::Bounds<Pixels>>,
+    workspace_thread_tab_reorder: Option<WorkspaceThreadTabReorderState>,
     success_toast_message: Option<String>,
     success_toast_generation: u64,
     pending_context_imports: HashMap<WorkspaceThreadKey, usize>,
@@ -697,6 +716,8 @@ impl LubanRootView {
             last_chat_workspace_id: None,
             last_chat_item_count: 0,
             last_workspace_before_dashboard: None,
+            workspace_thread_tab_bounds: HashMap::new(),
+            workspace_thread_tab_reorder: None,
             success_toast_message: None,
             success_toast_generation: 0,
             pending_context_imports: HashMap::new(),
@@ -760,6 +781,8 @@ impl LubanRootView {
             last_chat_workspace_id: None,
             last_chat_item_count: 0,
             last_workspace_before_dashboard: None,
+            workspace_thread_tab_bounds: HashMap::new(),
+            workspace_thread_tab_reorder: None,
             success_toast_message: None,
             success_toast_generation: 0,
             pending_context_imports: HashMap::new(),
@@ -1761,7 +1784,6 @@ impl LubanRootView {
         let open_tabs = tabs.open_tabs.clone();
         let allow_close = open_tabs.len() > 1;
 
-        let overflow_needed = known_threads.len() > open_tabs.len();
         let view_handle_for_overflow = view_handle.clone();
         let overflow_entries = known_threads
             .iter()
@@ -1775,16 +1797,16 @@ impl LubanRootView {
             })
             .collect::<Vec<_>>();
 
-        let overflow = Popover::new("workspace-thread-tabs-overflow")
+        let overflow = Popover::new("workspace-thread-tabs-menu")
             .appearance(true)
             .anchor(gpui::Corner::TopLeft)
             .trigger(
-                Button::new("workspace-thread-tabs-overflow-trigger")
+                Button::new("workspace-thread-tabs-menu-trigger")
                     .ghost()
                     .compact()
                     .with_size(Size::Small)
-                    .icon(Icon::new(IconName::Ellipsis))
-                    .debug_selector(|| "workspace-thread-tabs-overflow-trigger".to_owned()),
+                    .icon(Icon::new(IconName::ChevronDown))
+                    .debug_selector(|| "workspace-thread-tabs-menu-trigger".to_owned()),
             )
             .content(move |_popover_state, _window, cx| {
                 let theme = cx.theme();
@@ -1859,6 +1881,8 @@ impl LubanRootView {
 
             let view_handle_activate = view_handle.clone();
             let view_handle_close = view_handle.clone();
+            let view_handle_reorder = view_handle.clone();
+            let view_handle_bounds = view_handle.clone();
             let button_id = format!("workspace-thread-tab-{idx}");
             let close_id = format!("workspace-thread-tab-close-{idx}");
 
@@ -1866,7 +1890,8 @@ impl LubanRootView {
                 .id(button_id.clone())
                 .debug_selector(move || button_id.clone())
                 .h(px(28.0))
-                .max_w(px(240.0))
+                .w(px(220.0))
+                .min_w(px(92.0))
                 .px_2()
                 .rounded_md()
                 .flex()
@@ -1878,9 +1903,43 @@ impl LubanRootView {
                 } else {
                     theme.transparent
                 })
+                .text_color(if is_active {
+                    theme.foreground
+                } else {
+                    theme.muted_foreground
+                })
                 .hover({
                     let hover_bg = theme.secondary_hover;
                     move |s| s.bg(hover_bg)
+                })
+                .on_prepaint(move |bounds, _window, app| {
+                    let _ = view_handle_bounds.update(app, |view, _cx| {
+                        view.workspace_thread_tab_bounds
+                            .insert((workspace_id, thread_id), bounds);
+                    });
+                })
+                .on_drag(WorkspaceThreadTabReorderDrag, {
+                    let view_handle = view_handle_reorder.clone();
+                    move |_, _offset, _window, app| {
+                        let _ = view_handle.update(app, |view, cx| {
+                            view.workspace_thread_tab_reorder =
+                                Some(WorkspaceThreadTabReorderState {
+                                    workspace_id,
+                                    thread_id,
+                                });
+                            cx.notify();
+                        });
+                        app.new(|_| WorkspaceThreadTabReorderGhost)
+                    }
+                })
+                .on_drag_move::<WorkspaceThreadTabReorderDrag>({
+                    let view_handle = view_handle_reorder.clone();
+                    move |event, _window, app| {
+                        let mouse_x = event.event.position.x;
+                        let _ = view_handle.update(app, |view, cx| {
+                            view.update_workspace_thread_tab_reorder(mouse_x, cx);
+                        });
+                    }
                 })
                 .on_mouse_down(MouseButton::Left, move |_, _, app| {
                     let _ = view_handle_activate.update(app, |view, cx| {
@@ -1893,6 +1952,11 @@ impl LubanRootView {
                         );
                     });
                 })
+                .child(
+                    Icon::new(Icon::empty().path("icons/message-square.svg"))
+                        .with_size(Size::Small)
+                        .text_color(theme.muted_foreground),
+                )
                 .when(running, |s| {
                     s.child(Spinner::new().with_size(Size::XSmall).into_any_element())
                 })
@@ -1905,7 +1969,7 @@ impl LubanRootView {
                             .bg(theme.muted_foreground),
                     )
                 })
-                .child(div().flex_1().truncate().child(title))
+                .child(div().flex_1().min_w(px(0.0)).truncate().child(title))
                 .when(allow_close, |s| {
                     s.child(
                         Button::new(close_id.clone())
@@ -1955,9 +2019,31 @@ impl LubanRootView {
             .border_b_1()
             .border_color(theme.border)
             .bg(theme.background)
-            .children(tab_children)
+            .on_mouse_up(MouseButton::Left, {
+                let view_handle = view_handle.clone();
+                move |_, _window, app| {
+                    let _ = view_handle.update(app, |view, cx| {
+                        view.finish_workspace_thread_tab_reorder(cx);
+                    });
+                }
+            })
+            .on_mouse_up_out(MouseButton::Left, {
+                let view_handle = view_handle.clone();
+                move |_, _window, app| {
+                    let _ = view_handle.update(app, |view, cx| {
+                        view.finish_workspace_thread_tab_reorder(cx);
+                    });
+                }
+            })
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .overflow_x_scrollbar()
+                    .child(div().flex().items_center().gap_1().children(tab_children)),
+            )
             .child(new_tab)
-            .when(overflow_needed, |s| s.child(overflow))
+            .child(overflow)
             .into_any_element()
     }
 }
@@ -2371,6 +2457,48 @@ impl LubanRootView {
         let clamped = self.clamp_dashboard_preview_width(preview, viewport_width);
         self.last_dashboard_preview_width = px(f32::from(clamped).round().max(0.0));
         cx.notify();
+    }
+
+    fn update_workspace_thread_tab_reorder(&mut self, mouse_x: Pixels, cx: &mut Context<Self>) {
+        let Some(state) = self.workspace_thread_tab_reorder else {
+            return;
+        };
+        let Some(tabs) = self.state.workspace_tabs(state.workspace_id) else {
+            return;
+        };
+        if tabs.open_tabs.len() <= 1 {
+            return;
+        }
+
+        let mut to_index = tabs.open_tabs.len().saturating_sub(1);
+        for (idx, thread_id) in tabs.open_tabs.iter().enumerate() {
+            let Some(bounds) = self
+                .workspace_thread_tab_bounds
+                .get(&(state.workspace_id, *thread_id))
+                .copied()
+            else {
+                return;
+            };
+            if mouse_x < bounds.center().x {
+                to_index = idx;
+                break;
+            }
+        }
+
+        self.dispatch(
+            Action::ReorderWorkspaceThreadTab {
+                workspace_id: state.workspace_id,
+                thread_id: state.thread_id,
+                to_index,
+            },
+            cx,
+        );
+    }
+
+    fn finish_workspace_thread_tab_reorder(&mut self, cx: &mut Context<Self>) {
+        if self.workspace_thread_tab_reorder.take().is_some() {
+            self.dispatch(Action::SaveAppState, cx);
+        }
     }
 }
 
@@ -5580,7 +5708,7 @@ mod tests {
     }
 
     #[gpui::test]
-    async fn workspace_thread_tabs_render_max_three_and_overflow(cx: &mut gpui::TestAppContext) {
+    async fn workspace_thread_tabs_render_all_open_tabs_and_menu(cx: &mut gpui::TestAppContext) {
         cx.update(gpui_component::init);
 
         let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
@@ -5615,12 +5743,12 @@ mod tests {
         assert!(window_cx.debug_bounds("workspace-thread-tab-0").is_some());
         assert!(window_cx.debug_bounds("workspace-thread-tab-1").is_some());
         assert!(window_cx.debug_bounds("workspace-thread-tab-2").is_some());
-        assert!(window_cx.debug_bounds("workspace-thread-tab-3").is_none());
+        assert!(window_cx.debug_bounds("workspace-thread-tab-3").is_some());
         assert!(
             window_cx
-                .debug_bounds("workspace-thread-tabs-overflow-trigger")
+                .debug_bounds("workspace-thread-tabs-menu-trigger")
                 .is_some(),
-            "missing overflow trigger"
+            "missing thread menu trigger"
         );
         assert!(window_cx.debug_bounds("workspace-thread-tab-new").is_some());
     }

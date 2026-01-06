@@ -58,11 +58,10 @@ The tab strip is rendered inside the chat pane:
 
 ### Tab strip rules
 
-- At most 3 tabs are visible.
-- `+` creates a new thread and opens it as the active tab.
-- `…` opens the Threads menu (all threads in this workspace).
-- When opening a thread while already at 3 visible tabs, the least-recently-active tab is removed
-  from `open_tabs` (not deleted) and remains accessible from the menu.
+- Tabs are shown in a stable, user-defined order.
+- `+` creates a new thread, appends a tab at the end, and activates it.
+- A `v` dropdown button opens the Threads menu (all threads in this workspace).
+- Activating a thread does not reorder the tab strip. Users reorder tabs by dragging.
 - Tabs show:
   - Title (derived from thread title)
   - Dirty indicator when the thread has a non-empty draft or draft attachments

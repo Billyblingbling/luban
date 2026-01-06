@@ -555,7 +555,7 @@ impl SqliteDatabase {
             workspace_next_thread_id.insert(workspace_id, thread_id);
         }
 
-        let mut workspace_open_tabs_indexed: HashMap<u64, Vec<(u8, u64)>> = HashMap::new();
+        let mut workspace_open_tabs_indexed: HashMap<u64, Vec<(u32, u64)>> = HashMap::new();
         let mut stmt = self
             .conn
             .prepare("SELECT key, value FROM app_settings WHERE key LIKE 'workspace_open_tab_%'")?;
@@ -577,7 +577,7 @@ impl SqliteDatabase {
             if parts.next().is_some() {
                 continue;
             }
-            let Ok(index) = index_str.parse::<u8>() else {
+            let Ok(index) = index_str.parse::<u32>() else {
                 continue;
             };
             let Ok(workspace_id) = workspace_id_str.parse::<u64>() else {

@@ -319,38 +319,38 @@ pub struct WorkspaceConversation {
 pub struct WorkspaceTabs {
     pub open_tabs: Vec<WorkspaceThreadId>,
     pub active_tab: WorkspaceThreadId,
-    pub lru: VecDeque<WorkspaceThreadId>,
     pub next_thread_id: u64,
 }
 
 impl WorkspaceTabs {
-    pub const MAX_VISIBLE_TABS: usize = 3;
-
     pub fn new_with_initial(thread_id: WorkspaceThreadId) -> Self {
         Self {
             open_tabs: vec![thread_id],
             active_tab: thread_id,
-            lru: VecDeque::from([thread_id]),
             next_thread_id: thread_id.0 + 1,
         }
     }
 
     pub fn activate(&mut self, thread_id: WorkspaceThreadId) {
         self.active_tab = thread_id;
-        self.touch(thread_id);
-        self.ensure_visible(thread_id);
+        if !self.open_tabs.contains(&thread_id) {
+            self.open_tabs.push(thread_id);
+        }
     }
 
     pub fn close_tab(&mut self, thread_id: WorkspaceThreadId) {
-        self.open_tabs.retain(|id| *id != thread_id);
-        self.lru.retain(|id| *id != thread_id);
+        let mut active_fallback: Option<WorkspaceThreadId> = None;
         if self.active_tab == thread_id
-            && let Some(next) = self
-                .open_tabs
-                .first()
-                .copied()
-                .or_else(|| self.lru.front().copied())
+            && let Some(idx) = self.open_tabs.iter().position(|id| *id == thread_id)
         {
+            if idx > 0 {
+                active_fallback = Some(self.open_tabs[idx - 1]);
+            } else if idx + 1 < self.open_tabs.len() {
+                active_fallback = Some(self.open_tabs[idx + 1]);
+            }
+        }
+        self.open_tabs.retain(|id| *id != thread_id);
+        if let Some(next) = active_fallback.or_else(|| self.open_tabs.first().copied()) {
             self.active_tab = next;
         }
     }
@@ -361,21 +361,19 @@ impl WorkspaceTabs {
         id
     }
 
-    fn touch(&mut self, thread_id: WorkspaceThreadId) {
-        self.lru.retain(|id| *id != thread_id);
-        self.lru.push_front(thread_id);
-    }
-
-    fn ensure_visible(&mut self, thread_id: WorkspaceThreadId) {
-        if !self.open_tabs.contains(&thread_id) {
-            self.open_tabs.insert(0, thread_id);
-        } else {
-            self.open_tabs.retain(|id| *id != thread_id);
-            self.open_tabs.insert(0, thread_id);
+    pub fn reorder_tab(&mut self, thread_id: WorkspaceThreadId, to_index: usize) {
+        let Some(from_index) = self.open_tabs.iter().position(|id| *id == thread_id) else {
+            return;
+        };
+        if from_index == to_index {
+            return;
         }
-        if self.open_tabs.len() > Self::MAX_VISIBLE_TABS {
-            self.open_tabs.truncate(Self::MAX_VISIBLE_TABS);
+        let tab = self.open_tabs.remove(from_index);
+        let mut target = to_index.min(self.open_tabs.len());
+        if from_index < to_index {
+            target = target.saturating_sub(1);
         }
+        self.open_tabs.insert(target, tab);
     }
 }
 
@@ -658,6 +656,11 @@ pub enum Action {
         workspace_id: WorkspaceId,
         thread_id: WorkspaceThreadId,
     },
+    ReorderWorkspaceThreadTab {
+        workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
+        to_index: usize,
+    },
 
     WorkspaceThreadsLoaded {
         workspace_id: WorkspaceId,
@@ -680,6 +683,8 @@ pub enum Action {
         thread_id: WorkspaceThreadId,
         offset_y10: i32,
     },
+
+    SaveAppState,
 
     AppStateLoaded {
         persisted: PersistedAppState,
@@ -1374,6 +1379,15 @@ impl AppState {
                 }
                 effects
             }
+            Action::ReorderWorkspaceThreadTab {
+                workspace_id,
+                thread_id,
+                to_index,
+            } => {
+                let tabs = self.ensure_workspace_tabs_mut(workspace_id);
+                tabs.reorder_tab(thread_id, to_index);
+                Vec::new()
+            }
             Action::WorkspaceThreadsLoaded {
                 workspace_id,
                 threads,
@@ -1438,6 +1452,7 @@ impl AppState {
                 self.workspace_chat_scroll_y10.insert(key, offset_y10);
                 vec![Effect::SaveAppState]
             }
+            Action::SaveAppState => vec![Effect::SaveAppState],
 
             Action::AppStateLoaded { persisted } => {
                 if !self.projects.is_empty() {
@@ -1498,9 +1513,8 @@ impl AppState {
                         open_tabs.push(active);
                     }
                     if !open_tabs.contains(&active) {
-                        open_tabs.insert(0, active);
+                        open_tabs.push(active);
                     }
-                    open_tabs.truncate(WorkspaceTabs::MAX_VISIBLE_TABS);
 
                     let next_thread_id = persisted
                         .workspace_next_thread_id
@@ -1513,7 +1527,6 @@ impl AppState {
                         WorkspaceTabs {
                             open_tabs: open_tabs.clone(),
                             active_tab: active,
-                            lru: open_tabs.iter().copied().collect(),
                             next_thread_id,
                         },
                     );
@@ -2195,7 +2208,7 @@ mod tests {
     }
 
     #[test]
-    fn workspace_thread_tabs_limit_visible_to_three_and_preserve_conversation() {
+    fn workspace_thread_tabs_preserve_order_and_allow_reorder() {
         let mut state = AppState::new();
         state.apply(Action::AddProject {
             path: PathBuf::from("/tmp/repo"),
@@ -2210,17 +2223,38 @@ mod tests {
         let workspace_id = workspace_id_by_name(&state, "w1");
         state.apply(Action::OpenWorkspace { workspace_id });
 
-        let mut thread_ids = Vec::new();
-        thread_ids.push(state.active_thread_id(workspace_id).unwrap());
+        let mut thread_ids = vec![state.active_thread_id(workspace_id).unwrap()];
         for _ in 0..3 {
             state.apply(Action::CreateWorkspaceThread { workspace_id });
             thread_ids.push(state.active_thread_id(workspace_id).unwrap());
         }
 
         let tabs = state.workspace_tabs(workspace_id).unwrap();
-        assert_eq!(tabs.open_tabs.len(), 3);
+        assert_eq!(tabs.open_tabs, thread_ids);
 
-        let closed_thread = tabs.open_tabs[0];
+        state.apply(Action::ActivateWorkspaceThread {
+            workspace_id,
+            thread_id: thread_ids[1],
+        });
+        let tabs = state.workspace_tabs(workspace_id).unwrap();
+        assert_eq!(tabs.active_tab, thread_ids[1]);
+        assert_eq!(
+            tabs.open_tabs, thread_ids,
+            "activating a thread should not reorder tabs"
+        );
+
+        state.apply(Action::ReorderWorkspaceThreadTab {
+            workspace_id,
+            thread_id: thread_ids[3],
+            to_index: 1,
+        });
+        let tabs = state.workspace_tabs(workspace_id).unwrap();
+        assert_eq!(
+            tabs.open_tabs,
+            vec![thread_ids[0], thread_ids[3], thread_ids[1], thread_ids[2]]
+        );
+
+        let closed_thread = thread_ids[3];
         state.apply(Action::CloseWorkspaceThreadTab {
             workspace_id,
             thread_id: closed_thread,
@@ -2230,19 +2264,6 @@ mod tests {
                 .workspace_thread_conversation(workspace_id, closed_thread)
                 .is_some(),
             "closing a tab should not delete the conversation"
-        );
-
-        state.apply(Action::ActivateWorkspaceThread {
-            workspace_id,
-            thread_id: thread_ids[0],
-        });
-        assert!(
-            state
-                .workspace_tabs(workspace_id)
-                .unwrap()
-                .open_tabs
-                .contains(&thread_ids[0]),
-            "activating a thread should make it visible"
         );
     }
 
