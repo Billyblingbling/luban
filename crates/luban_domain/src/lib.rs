@@ -281,6 +281,7 @@ pub struct ConversationSnapshot {
 pub struct WorkspaceConversation {
     pub thread_id: Option<String>,
     pub draft: String,
+    pub draft_attachments: Vec<DraftAttachment>,
     pub agent_model_id: String,
     pub thinking_effort: ThinkingEffort,
     pub entries: Vec<ConversationEntry>,
@@ -289,6 +290,14 @@ pub struct WorkspaceConversation {
     pub in_progress_order: VecDeque<String>,
     pub pending_prompts: VecDeque<QueuedPrompt>,
     pub queue_paused: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DraftAttachment {
+    pub id: u64,
+    pub kind: ContextTokenKind,
+    pub path: Option<PathBuf>,
+    pub failed: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -448,6 +457,24 @@ pub enum Action {
     ChatDraftChanged {
         workspace_id: WorkspaceId,
         text: String,
+    },
+    ChatDraftAttachmentAdded {
+        workspace_id: WorkspaceId,
+        id: u64,
+        kind: ContextTokenKind,
+    },
+    ChatDraftAttachmentResolved {
+        workspace_id: WorkspaceId,
+        id: u64,
+        path: PathBuf,
+    },
+    ChatDraftAttachmentFailed {
+        workspace_id: WorkspaceId,
+        id: u64,
+    },
+    ChatDraftAttachmentRemoved {
+        workspace_id: WorkspaceId,
+        id: u64,
     },
     RemoveQueuedPrompt {
         workspace_id: WorkspaceId,
@@ -653,6 +680,7 @@ impl AppState {
                     WorkspaceConversation {
                         thread_id: None,
                         draft: String::new(),
+                        draft_attachments: Vec::new(),
                         agent_model_id: default_agent_model_id().to_owned(),
                         thinking_effort: default_thinking_effort(),
                         entries: Vec::new(),
@@ -791,6 +819,7 @@ impl AppState {
                     WorkspaceConversation {
                         thread_id: snapshot.thread_id,
                         draft: String::new(),
+                        draft_attachments: Vec::new(),
                         agent_model_id: default_agent_model_id().to_owned(),
                         thinking_effort: default_thinking_effort(),
                         entries: snapshot.entries,
@@ -815,6 +844,7 @@ impl AppState {
                     WorkspaceConversation {
                         thread_id: None,
                         draft: String::new(),
+                        draft_attachments: Vec::new(),
                         agent_model_id: default_agent_model_id().to_owned(),
                         thinking_effort: default_thinking_effort(),
                         entries: Vec::new(),
@@ -826,6 +856,7 @@ impl AppState {
                     }
                 });
                 conversation.draft.clear();
+                conversation.draft_attachments.clear();
 
                 let run_config = AgentRunConfig {
                     model_id: conversation.agent_model_id.clone(),
@@ -883,6 +914,7 @@ impl AppState {
                     WorkspaceConversation {
                         thread_id: None,
                         draft: String::new(),
+                        draft_attachments: Vec::new(),
                         agent_model_id: default_agent_model_id().to_owned(),
                         thinking_effort: default_thinking_effort(),
                         entries: Vec::new(),
@@ -907,6 +939,7 @@ impl AppState {
                     WorkspaceConversation {
                         thread_id: None,
                         draft: String::new(),
+                        draft_attachments: Vec::new(),
                         agent_model_id: default_agent_model_id().to_owned(),
                         thinking_effort: default_thinking_effort(),
                         entries: Vec::new(),
@@ -928,6 +961,7 @@ impl AppState {
                     WorkspaceConversation {
                         thread_id: None,
                         draft: String::new(),
+                        draft_attachments: Vec::new(),
                         agent_model_id: default_agent_model_id().to_owned(),
                         thinking_effort: default_thinking_effort(),
                         entries: Vec::new(),
@@ -939,6 +973,72 @@ impl AppState {
                     }
                 });
                 conversation.draft = text;
+                Vec::new()
+            }
+            Action::ChatDraftAttachmentAdded {
+                workspace_id,
+                id,
+                kind,
+            } => {
+                let conversation = self.conversations.entry(workspace_id).or_insert_with(|| {
+                    WorkspaceConversation {
+                        thread_id: None,
+                        draft: String::new(),
+                        draft_attachments: Vec::new(),
+                        agent_model_id: default_agent_model_id().to_owned(),
+                        thinking_effort: default_thinking_effort(),
+                        entries: Vec::new(),
+                        run_status: OperationStatus::Idle,
+                        in_progress_items: BTreeMap::new(),
+                        in_progress_order: VecDeque::new(),
+                        pending_prompts: VecDeque::new(),
+                        queue_paused: false,
+                    }
+                });
+                conversation.draft_attachments.push(DraftAttachment {
+                    id,
+                    kind,
+                    path: None,
+                    failed: false,
+                });
+                Vec::new()
+            }
+            Action::ChatDraftAttachmentResolved {
+                workspace_id,
+                id,
+                path,
+            } => {
+                let Some(conversation) = self.conversations.get_mut(&workspace_id) else {
+                    return Vec::new();
+                };
+                if let Some(attachment) = conversation
+                    .draft_attachments
+                    .iter_mut()
+                    .find(|a| a.id == id)
+                {
+                    attachment.path = Some(path);
+                    attachment.failed = false;
+                }
+                Vec::new()
+            }
+            Action::ChatDraftAttachmentFailed { workspace_id, id } => {
+                let Some(conversation) = self.conversations.get_mut(&workspace_id) else {
+                    return Vec::new();
+                };
+                if let Some(attachment) = conversation
+                    .draft_attachments
+                    .iter_mut()
+                    .find(|a| a.id == id)
+                {
+                    attachment.failed = true;
+                }
+                Vec::new()
+            }
+            Action::ChatDraftAttachmentRemoved { workspace_id, id } => {
+                let Some(conversation) = self.conversations.get_mut(&workspace_id) else {
+                    return Vec::new();
+                };
+                conversation.draft_attachments.retain(|a| a.id != id);
                 Vec::new()
             }
             Action::RemoveQueuedPrompt {
@@ -975,6 +1075,7 @@ impl AppState {
                     WorkspaceConversation {
                         thread_id: None,
                         draft: String::new(),
+                        draft_attachments: Vec::new(),
                         agent_model_id: default_agent_model_id().to_owned(),
                         thinking_effort: default_thinking_effort(),
                         entries: Vec::new(),

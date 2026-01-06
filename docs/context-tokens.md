@@ -4,7 +4,7 @@
 
 Enable users to paste or drop images and text files into the chat composer and have them appear as inline attachments in the message UI, while keeping the underlying message content stable and replayable.
 
-This design intentionally avoids a separate "prompt assembly" step. The user message is sent as-is, and attachments are represented by tokens embedded in the text.
+This design avoids assembling file contents into the prompt. Attachments are stored as files and referenced by path tokens.
 
 ## Non-goals
 
@@ -56,17 +56,23 @@ conversations/<project>/<workspace>/context/
 
 Clipboard parsing order:
 
-1. Images (`ClipboardEntry::Image`) are imported into `context/blobs/` and inserted as `image` tokens.
+1. Images (`ClipboardEntry::Image`) are imported into `context/blobs/` and added as `image` attachments.
 2. External file paths (`ClipboardEntry::ExternalPaths`) are imported if they match a text-like allowlist.
 3. Plain text (`ClipboardEntry::String`):
-   - If it exceeds a threshold, it is stored as a `text` blob and inserted as a token.
+   - If it exceeds a threshold, it is stored as a `text` blob and added as a `text` attachment.
    - Otherwise, it is pasted into the input normally.
 
-Mixed clipboard content is supported: the implementation may choose to insert both text and token(s) in a single paste operation.
+Mixed clipboard content is supported: the implementation may insert plain text and also add one or more attachments in a single paste operation.
 
 ### Drag & drop
 
-Dropping files onto the composer imports them into `context/blobs/` (text-like allowlist only) and inserts tokens in drop order.
+Dropping files onto the composer imports them into `context/blobs/` (text-like allowlist only) and adds attachments in drop order.
+
+### Composer UI (ChatGPT-style)
+
+The composer input remains a plain text editor. Attachments are shown as thumbnails/chips inside the same input surface (below the text area). Tokens are not shown in the editor.
+
+On send, the final user message text is composed by appending context tokens (in attachment insertion order) after the typed text.
 
 ## Message rendering (B1)
 
@@ -81,7 +87,7 @@ When rendering a `UserMessage`:
 
 ## Sending to the model
 
-- The message `prompt` is sent as-is (tokens remain in the text).
+- The message `prompt` is sent as-is (tokens remain in the text that is persisted with the message).
 - Image tokens are additionally extracted and passed to Codex CLI via `codex exec --image <path>...` in the order the tokens appear.
 - Text tokens are not automatically inlined into the prompt.
 
@@ -91,4 +97,3 @@ When rendering a `UserMessage`:
   - Unknown kinds must be treated as plain text.
   - Tokens with invalid paths must render a fallback element.
 - Paths are stored as absolute paths to simplify resolution during rendering and agent execution.
-

@@ -428,24 +428,23 @@ impl LubanRootView {
             }
         }
 
-        apply_pending_context_replacements_for_input(
-            &mut self.pending_context_replacements,
-            workspace_id,
-            &input_state,
-            window,
-            cx,
-        );
-
         let theme = cx.theme();
 
         let draft_raw = input_state.read(cx).value().to_owned();
         let draft = draft_raw.trim().to_owned();
+        let draft_attachments: Vec<luban_domain::DraftAttachment> = conversation
+            .map(|c| c.draft_attachments.clone())
+            .unwrap_or_default();
+        let has_ready_attachments = draft_attachments
+            .iter()
+            .any(|a| a.path.is_some() && !a.failed);
         let pending_context_imports = self
             .pending_context_imports
             .get(&workspace_id)
             .copied()
             .unwrap_or(0);
-        let send_disabled = draft.is_empty() || pending_context_imports > 0;
+        let send_disabled =
+            pending_context_imports > 0 || (draft.is_empty() && !has_ready_attachments);
         let running_elapsed = if is_running {
             self.running_turn_started_at
                 .get(&workspace_id)
@@ -806,44 +805,46 @@ impl LubanRootView {
                                     return;
                                 };
 
-                                let (inline_text, imports) =
-                                    context_import_plan_from_clipboard(&clipboard);
-                                if imports.is_empty() {
-                                    return;
-                                }
+	                                let (inline_text, imports) =
+	                                    context_import_plan_from_clipboard(&clipboard);
+	                                if imports.is_empty() {
+	                                    return;
+	                                }
 
                                 app.stop_propagation();
 
-                                let inline_text_for_insert = inline_text.clone();
-                                input_state.update(app, |state, cx| {
-                                    if let Some(text) = inline_text_for_insert && !text.is_empty()
-                                    {
-                                        state.replace(text, window, cx);
-                                    }
+	                                let inline_text_for_insert = inline_text.clone();
+	                                input_state.update(app, |state, cx| {
+	                                    if let Some(text) = inline_text_for_insert && !text.is_empty()
+	                                    {
+	                                        state.replace(text, window, cx);
+	                                    }
+	                                });
 
-                                    for (placeholder, _) in &imports {
-                                        state.insert("\n", window, cx);
-                                        state.insert(placeholder.clone(), window, cx);
-                                        state.insert("\n", window, cx);
-                                    }
-                                });
-
-                                for (placeholder, spec) in imports {
-                                    let placeholder = placeholder.clone();
-                                    let _ = view_handle.update(app, move |view, cx| {
-                                        view.enqueue_context_import(workspace_id, placeholder, spec, cx);
-                                    });
-                                }
-                            }
-                        })
-                        .on_drop({
-                            let view_handle = view_handle.clone();
-                            let input_state = input_state.clone();
-                            let pending_drop_paths = pending_drop_paths.clone();
-                            move |event: &gpui::FileDropEvent,
-                                  window: &mut Window,
-                                  app: &mut gpui::App| {
-                                match event {
+	                                for spec in imports {
+	                                    let id = next_pending_context_id();
+	                                    let kind = match &spec {
+	                                        ContextImportSpec::Image { .. } => {
+	                                            luban_domain::ContextTokenKind::Image
+	                                        }
+	                                        ContextImportSpec::Text { .. }
+	                                        | ContextImportSpec::File { .. } => {
+	                                            luban_domain::ContextTokenKind::Text
+	                                        }
+	                                    };
+	                                    let _ = view_handle.update(app, move |view, cx| {
+	                                        view.enqueue_context_import(workspace_id, id, kind, spec, cx);
+	                                    });
+	                                }
+	                            }
+	                        })
+	                        .on_drop({
+	                            let view_handle = view_handle.clone();
+	                            let pending_drop_paths = pending_drop_paths.clone();
+	                            move |event: &gpui::FileDropEvent,
+	                                  _window: &mut Window,
+	                                  app: &mut gpui::App| {
+	                                match event {
                                     gpui::FileDropEvent::Entered { paths, .. } => {
                                         *pending_drop_paths.borrow_mut() = Some(
                                             paths.paths()
@@ -860,39 +861,31 @@ impl LubanRootView {
                                             return;
                                         };
 
-                                        let mut imports = Vec::new();
-                                        for path in paths {
-                                            if !is_text_like_extension(&path) {
-                                                continue;
-                                            }
-                                            let placeholder = context_token(
-                                                "text",
-                                                &pending_context_value(next_pending_context_id()),
-                                            );
-                                            imports.push((
-                                                placeholder,
-                                                ContextImportSpec::File { source_path: path },
-                                            ));
-                                        }
+	                                        let mut imports = Vec::new();
+	                                        for path in paths {
+	                                            if !is_text_like_extension(&path) {
+	                                                continue;
+	                                            }
+	                                            imports.push(ContextImportSpec::File { source_path: path });
+	                                        }
 
                                         if imports.is_empty() {
                                             return;
                                         }
 
-                                        input_state.update(app, |state, cx| {
-                                            for (placeholder, _) in &imports {
-                                                state.insert("\n", window, cx);
-                                                state.insert(placeholder.clone(), window, cx);
-                                                state.insert("\n", window, cx);
-                                            }
-                                        });
-
-                                        for (placeholder, spec) in imports {
-                                            let _ = view_handle.update(app, move |view, cx| {
-                                                view.enqueue_context_import(workspace_id, placeholder, spec, cx);
-                                            });
-                                        }
-                                    }
+	                                        for spec in imports {
+	                                            let id = next_pending_context_id();
+	                                            let _ = view_handle.update(app, move |view, cx| {
+	                                                view.enqueue_context_import(
+	                                                    workspace_id,
+	                                                    id,
+	                                                    luban_domain::ContextTokenKind::Text,
+	                                                    spec,
+	                                                    cx,
+	                                                );
+	                                            });
+	                                        }
+	                                    }
                                     gpui::FileDropEvent::Pending { .. } => {}
                                 }
                             }
@@ -924,8 +917,13 @@ impl LubanRootView {
                                         ),
                                     )
                                     .when_some(
-                                        chat_composer_context_preview(&draft_raw, theme),
-                                        |s, preview| s.child(preview),
+                                        chat_composer_attachments_row(
+                                            workspace_id,
+                                            &draft_attachments,
+                                            &view_handle,
+                                            theme,
+                                        ),
+                                        |s, row| s.child(row),
                                     )
                                     .child({
                                         let view_handle = view_handle.clone();
@@ -1093,33 +1091,35 @@ impl LubanRootView {
                                                 div()
                                                     .debug_selector(|| "chat-send-message".to_owned())
                                                     .child({
-                                                        let view_handle = view_handle.clone();
-                                                        let input_state = input_state.clone();
-                                                        let draft = draft.clone();
-                                                        Button::new("chat-send-message")
-                                                            .primary()
-                                                            .compact()
-                                                            .disabled(send_disabled)
-                                                            .icon(Icon::new(IconName::ArrowUp))
-                                                            .tooltip(if is_running { "Queue" } else { "Send" })
-                                                            .on_click(move |_, window, app| {
-                                                                if draft.trim().is_empty() {
-                                                                    return;
-                                                                }
+	                                                        let view_handle = view_handle.clone();
+	                                                        let input_state = input_state.clone();
+	                                                        let draft = draft.clone();
+	                                                        let composed =
+	                                                            compose_user_message_text(&draft, &draft_attachments);
+	                                                        Button::new("chat-send-message")
+	                                                            .primary()
+	                                                            .compact()
+	                                                            .disabled(send_disabled)
+	                                                            .icon(Icon::new(IconName::ArrowUp))
+	                                                            .tooltip(if is_running { "Queue" } else { "Send" })
+	                                                            .on_click(move |_, window, app| {
+	                                                                if composed.trim().is_empty() {
+	                                                                    return;
+	                                                                }
 
                                                                 input_state.update(app, |state, cx| {
                                                                     state.set_value("", window, cx);
                                                                 });
 
-                                                                let _ = view_handle.update(app, |view, cx| {
-                                                                    view.dispatch(
-                                                                        Action::SendAgentMessage { workspace_id, text: draft.clone() },
-                                                                        cx,
-                                                                    );
-                                                                });
-                                                            })
-                                                            .into_any_element()
-                                                    }),
+	                                                                let _ = view_handle.update(app, |view, cx| {
+	                                                                    view.dispatch(
+	                                                                        Action::SendAgentMessage { workspace_id, text: composed.clone() },
+	                                                                        cx,
+	                                                                    );
+	                                                                });
+	                                                            })
+	                                                            .into_any_element()
+	                                                    }),
                                             )
                                             .when(is_running, |s| {
                                                 let view_handle = view_handle.clone();

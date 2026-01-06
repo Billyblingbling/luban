@@ -45,10 +45,7 @@ impl LubanRootView {
                     cx.notify();
                 }
                 InputEvent::PressEnter { secondary: true } => {
-                    let text = input_state.read(cx).value().trim().to_owned();
-                    if text.is_empty() {
-                        return;
-                    }
+                    let draft_text = input_state.read(cx).value().to_owned();
                     let workspace_id = match this.state.main_pane {
                         MainPane::Workspace(workspace_id) => Some(workspace_id),
                         MainPane::Dashboard => this.state.dashboard_preview_workspace_id,
@@ -66,8 +63,23 @@ impl LubanRootView {
                     {
                         return;
                     }
+                    let draft_attachments = this
+                        .state
+                        .workspace_conversation(workspace_id)
+                        .map(|c| c.draft_attachments.clone())
+                        .unwrap_or_default();
+                    let composed = compose_user_message_text(&draft_text, &draft_attachments);
+                    if composed.trim().is_empty() {
+                        return;
+                    }
                     input_state.update(cx, |state, cx| state.set_value("", window, cx));
-                    this.dispatch(Action::SendAgentMessage { workspace_id, text }, cx);
+                    this.dispatch(
+                        Action::SendAgentMessage {
+                            workspace_id,
+                            text: composed,
+                        },
+                        cx,
+                    );
                 }
                 InputEvent::PressEnter { .. } | InputEvent::Focus | InputEvent::Blur => {}
             }
