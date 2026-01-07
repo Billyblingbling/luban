@@ -597,8 +597,6 @@ impl LubanRootView {
                             }
                         })
                         .w_full()
-                        .max_w(px(900.0))
-                        .mx_auto()
                         .flex()
                         .flex_col()
                         .gap_3()
@@ -856,8 +854,6 @@ impl LubanRootView {
                 .child(
                     div()
                         .w_full()
-                        .max_w(px(900.0))
-                        .mx_auto()
                         .debug_selector(|| "chat-composer-surface".to_owned())
                         .capture_action({
                             let view_handle = view_handle.clone();

@@ -1772,8 +1772,6 @@ impl LubanRootView {
                                     }
                                 })
                                 .w_full()
-                                .max_w(px(900.0))
-                                .mx_auto()
                                 .flex()
                                 .flex_col()
                                 .gap_3()
