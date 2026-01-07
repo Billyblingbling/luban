@@ -1484,8 +1484,10 @@ impl gpui::Render for LubanRootView {
             min_height_zero(div().flex_1().flex().relative().child(main_split).when(
                 should_render_right_pane,
                 |s| {
-                    let terminal_resizer_left =
-                        viewport_width - right_pane_width - px(TERMINAL_PANE_RESIZER_WIDTH);
+                    // Keep the resizer as an overlay so it doesn't consume layout width, but
+                    // place it on the right pane side of the boundary so it doesn't cover
+                    // the main pane's scrollbar hover area.
+                    let terminal_resizer_left = viewport_width - right_pane_width;
 
                     let resizer = div()
                         .absolute()

@@ -582,7 +582,7 @@ async fn terminal_title_is_rendered_in_titlebar_when_visible(cx: &mut gpui::Test
     let resizer = window_cx
         .debug_bounds("terminal-pane-resizer")
         .expect("missing terminal pane resizer bounds");
-    let divider_dx = (divider.origin.x - resizer.right()).abs();
+    let divider_dx = (divider.origin.x - resizer.origin.x).abs();
     assert!(
         divider_dx <= px(1.0),
         "expected terminal divider to align with resizer: divider={divider:?} resizer={resizer:?}"
@@ -4285,9 +4285,13 @@ async fn terminal_resizer_does_not_create_layout_gap(cx: &mut gpui::TestAppConte
         gap <= px(2.0),
         "expected main and right pane to be adjacent without a visible gap: gap={gap:?} main={main:?} right={right_pane:?}"
     );
+    let resizer = window_cx
+        .debug_bounds("terminal-pane-resizer")
+        .expect("missing terminal pane resizer");
+    let resizer_dx = (resizer.origin.x - right_pane.origin.x).abs();
     assert!(
-        window_cx.debug_bounds("terminal-pane-resizer").is_some(),
-        "expected terminal pane resizer to be present"
+        resizer_dx <= px(1.0),
+        "expected resizer to sit on the right pane boundary: resizer={resizer:?} right={right_pane:?}"
     );
 }
 
