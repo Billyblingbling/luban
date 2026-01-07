@@ -26,6 +26,7 @@ pub use chat_draft::{
     ordered_draft_attachments_for_display,
 };
 mod agent_settings;
+pub mod paths;
 pub use agent_settings::{
     AgentModelSpec, ThinkingEffort, agent_model_label, agent_models, default_agent_model_id,
     default_thinking_effort, normalize_thinking_effort, thinking_effort_supported,

@@ -1,0 +1,57 @@
+use std::path::{Path, PathBuf};
+
+pub const LUBAN_CODEX_BIN_ENV: &str = "LUBAN_CODEX_BIN";
+
+pub fn worktrees_root(luban_root: &Path) -> PathBuf {
+    luban_root.join("worktrees")
+}
+
+pub fn conversations_root(luban_root: &Path) -> PathBuf {
+    luban_root.join("conversations")
+}
+
+pub fn sqlite_path(luban_root: &Path) -> PathBuf {
+    luban_root.join("luban.db")
+}
+
+pub fn workspace_conversation_dir(
+    conversations_root: &Path,
+    project_slug: &str,
+    workspace_name: &str,
+) -> PathBuf {
+    conversations_root.join(project_slug).join(workspace_name)
+}
+
+pub fn workspace_context_dir(
+    conversations_root: &Path,
+    project_slug: &str,
+    workspace_name: &str,
+) -> PathBuf {
+    workspace_conversation_dir(conversations_root, project_slug, workspace_name).join("context")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn roots_join_to_expected_subdirs() {
+        let base = PathBuf::from("luban-root");
+        assert_eq!(worktrees_root(&base), base.join("worktrees"));
+        assert_eq!(conversations_root(&base), base.join("conversations"));
+        assert_eq!(sqlite_path(&base), base.join("luban.db"));
+    }
+
+    #[test]
+    fn workspace_context_dir_is_nested_under_conversations() {
+        let conversations = PathBuf::from("luban-root").join("conversations");
+        assert_eq!(
+            workspace_conversation_dir(&conversations, "proj", "ws"),
+            conversations.join("proj").join("ws")
+        );
+        assert_eq!(
+            workspace_context_dir(&conversations, "proj", "ws"),
+            conversations.join("proj").join("ws").join("context")
+        );
+    }
+}

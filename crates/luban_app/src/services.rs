@@ -1,5 +1,6 @@
 use anyhow::{Context as _, anyhow};
 use bip39::Language;
+use luban_domain::paths;
 use luban_domain::{
     CodexThreadEvent, CodexThreadItem, ContextImage, ConversationEntry, ConversationSnapshot,
     CreatedWorkspace, PersistedAppState, ProjectWorkspaceService, PullRequestInfo,
@@ -22,8 +23,6 @@ mod context_blobs;
 mod conversations;
 mod git;
 use codex_cli::CodexTurnParams;
-
-const CODEX_BIN_ENV: &str = "LUBAN_CODEX_BIN";
 
 fn contains_attempt_fraction(text: &str) -> bool {
     let mut chars = text.chars().peekable();
@@ -187,9 +186,9 @@ impl GitWorkspaceService {
         std::fs::create_dir_all(&luban_root)
             .with_context(|| format!("failed to create {}", luban_root.display()))?;
 
-        let worktrees_root = luban_root.join("worktrees");
-        let conversations_root = luban_root.join("conversations");
-        let sqlite_path = luban_root.join("luban.db");
+        let worktrees_root = paths::worktrees_root(&luban_root);
+        let conversations_root = paths::conversations_root(&luban_root);
+        let sqlite_path = paths::sqlite_path(&luban_root);
         let sqlite = SqliteStore::new(sqlite_path).context("failed to init sqlite store")?;
 
         Ok(Arc::new(Self {
@@ -215,7 +214,7 @@ impl GitWorkspaceService {
     }
 
     fn codex_executable(&self) -> PathBuf {
-        std::env::var_os(CODEX_BIN_ENV)
+        std::env::var_os(paths::LUBAN_CODEX_BIN_ENV)
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("codex"))
     }
@@ -806,13 +805,14 @@ mod tests {
 
         let missing_codex = base_dir.join("missing-codex-bin");
         unsafe {
-            std::env::set_var(CODEX_BIN_ENV, missing_codex.as_os_str());
+            std::env::set_var(paths::LUBAN_CODEX_BIN_ENV, missing_codex.as_os_str());
         }
 
-        let sqlite = SqliteStore::new(base_dir.join("luban.db")).expect("sqlite init should work");
+        let sqlite =
+            SqliteStore::new(paths::sqlite_path(&base_dir)).expect("sqlite init should work");
         let service = GitWorkspaceService {
-            worktrees_root: base_dir.join("worktrees"),
-            conversations_root: base_dir.join("conversations"),
+            worktrees_root: paths::worktrees_root(&base_dir),
+            conversations_root: paths::conversations_root(&base_dir),
             sqlite,
         };
 
@@ -832,7 +832,7 @@ mod tests {
             .expect_err("missing codex executable should fail");
 
         unsafe {
-            std::env::remove_var(CODEX_BIN_ENV);
+            std::env::remove_var(paths::LUBAN_CODEX_BIN_ENV);
         }
 
         assert!(err.to_string().contains("missing codex executable"));
@@ -914,10 +914,11 @@ mod tests {
             "worktree remove without --force should fail for dirty worktree"
         );
 
-        let sqlite = SqliteStore::new(base_dir.join("luban.db")).expect("sqlite init should work");
+        let sqlite =
+            SqliteStore::new(paths::sqlite_path(&base_dir)).expect("sqlite init should work");
         let service = GitWorkspaceService {
-            worktrees_root: base_dir.join("worktrees"),
-            conversations_root: base_dir.join("conversations"),
+            worktrees_root: paths::worktrees_root(&base_dir),
+            conversations_root: paths::conversations_root(&base_dir),
             sqlite,
         };
 
