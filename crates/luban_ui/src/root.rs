@@ -1481,13 +1481,18 @@ impl gpui::Render for LubanRootView {
                     .child(sidebar_resizer),
             );
 
-            min_height_zero(div().flex_1().flex().child(main_split).when(
+            min_height_zero(div().flex_1().flex().relative().child(main_split).when(
                 should_render_right_pane,
                 |s| {
+                    let terminal_resizer_left =
+                        viewport_width - right_pane_width - px(TERMINAL_PANE_RESIZER_WIDTH);
+
                     let resizer = div()
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .left(terminal_resizer_left)
                         .w(px(TERMINAL_PANE_RESIZER_WIDTH))
-                        .h_full()
-                        .flex_shrink_0()
                         .cursor(CursorStyle::ResizeLeftRight)
                         .id("terminal-pane-resizer")
                         .debug_selector(|| "terminal-pane-resizer".to_owned())
@@ -1559,8 +1564,8 @@ impl gpui::Render for LubanRootView {
                             }
                         });
 
-                    s.child(resizer)
-                        .child(self.render_right_pane(right_pane_width, window, cx))
+                    s.child(self.render_right_pane(right_pane_width, window, cx))
+                        .child(resizer)
                 },
             ))
         };

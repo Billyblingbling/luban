@@ -100,6 +100,7 @@ impl LubanRootView {
             .debug_selector(|| "workspace-right-pane".to_owned())
             .w(right_pane_width)
             .h_full()
+            .flex_shrink_0()
             .flex()
             .flex_col()
             .bg(theme.secondary)

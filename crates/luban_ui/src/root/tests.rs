@@ -4240,6 +4240,58 @@ async fn terminal_pane_can_be_resized_by_dragging_divider(cx: &mut gpui::TestApp
 }
 
 #[gpui::test]
+async fn terminal_resizer_does_not_create_layout_gap(cx: &mut gpui::TestAppContext) {
+    cx.update(gpui_component::init);
+
+    let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+    let mut state = AppState::new();
+    state.apply(Action::AddProject {
+        path: PathBuf::from("/tmp/repo"),
+    });
+    let project_id = state.projects[0].id;
+    state.apply(Action::WorkspaceCreated {
+        project_id,
+        workspace_name: "abandon-about".to_owned(),
+        branch_name: "repo/branch".to_owned(),
+        worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+    });
+    let workspace_id = workspace_id_by_name(&state, "abandon-about");
+    state.main_pane = MainPane::Workspace(workspace_id);
+    state.right_pane = RightPane::Terminal;
+
+    let (_view, window_cx) = cx.add_window_view(|_window, cx| {
+        let mut view = LubanRootView::with_state(services, state, cx);
+        view.terminal_enabled = true;
+        view.workspace_terminal_errors
+            .insert(thread_key(workspace_id), "stub terminal".to_owned());
+        view
+    });
+
+    window_cx.simulate_resize(size(px(1200.0), px(720.0)));
+    for _ in 0..3 {
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+    }
+
+    let main = window_cx
+        .debug_bounds("main-pane")
+        .expect("missing debug bounds for main-pane");
+    let right_pane = window_cx
+        .debug_bounds("workspace-right-pane")
+        .expect("missing debug bounds for workspace-right-pane");
+    let gap = right_pane.origin.x - main.right();
+    assert!(
+        gap <= px(2.0),
+        "expected main and right pane to be adjacent without a visible gap: gap={gap:?} main={main:?} right={right_pane:?}"
+    );
+    assert!(
+        window_cx.debug_bounds("terminal-pane-resizer").is_some(),
+        "expected terminal pane resizer to be present"
+    );
+}
+
+#[gpui::test]
 async fn terminal_is_reinitialized_after_session_exits(cx: &mut gpui::TestAppContext) {
     cx.update(gpui_component::init);
 
