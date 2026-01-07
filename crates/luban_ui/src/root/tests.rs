@@ -1978,6 +1978,79 @@ async fn chat_history_is_not_pushed_down_by_scroll_padding(cx: &mut gpui::TestAp
 }
 
 #[gpui::test]
+async fn chat_renders_scrollbar_overlay_when_terminal_is_visible(cx: &mut gpui::TestAppContext) {
+    cx.update(gpui_component::init);
+
+    let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+    let mut state = AppState::new();
+    state.apply(Action::AddProject {
+        path: PathBuf::from("/tmp/repo"),
+    });
+    let project_id = state.projects[0].id;
+    state.apply(Action::WorkspaceCreated {
+        project_id,
+        workspace_name: "abandon-about".to_owned(),
+        branch_name: "luban/abandon-about".to_owned(),
+        worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+    });
+    let workspace_id = workspace_id_by_name(&state, "abandon-about");
+    state.main_pane = MainPane::Workspace(workspace_id);
+    state.right_pane = RightPane::Terminal;
+
+    let entries = (0..80)
+        .map(|idx| ConversationEntry::UserMessage {
+            text: format!("Message {idx}: {}", "x".repeat(120)),
+        })
+        .collect::<Vec<_>>();
+    state.apply(Action::ConversationLoaded {
+        workspace_id,
+        thread_id: default_thread_id(),
+        snapshot: ConversationSnapshot {
+            thread_id: Some("thread-1".to_owned()),
+            entries,
+        },
+    });
+
+    let (_view, window_cx) = cx.add_window_view(|_window, cx| {
+        let mut view = LubanRootView::with_state(services, state, cx);
+        view.terminal_enabled = true;
+        view.workspace_terminal_errors
+            .insert(thread_key(workspace_id), "stub terminal".to_owned());
+        view
+    });
+
+    window_cx.simulate_resize(size(px(900.0), px(420.0)));
+    for _ in 0..3 {
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+    }
+
+    let main = window_cx
+        .debug_bounds("main-pane")
+        .expect("missing debug bounds for main-pane");
+    let scrollbar = window_cx
+        .debug_bounds("workspace-chat-scrollbar")
+        .expect("missing debug bounds for workspace-chat-scrollbar");
+    assert!(
+        scrollbar.size.width >= px(1.0),
+        "expected chat scrollbar overlay to be visible: {scrollbar:?}"
+    );
+    assert!(
+        scrollbar.right() <= main.right() + px(1.0),
+        "expected chat scrollbar to stay within the main pane: main={main:?} scrollbar={scrollbar:?}"
+    );
+
+    let resizer = window_cx
+        .debug_bounds("terminal-pane-resizer")
+        .expect("missing debug bounds for terminal-pane-resizer");
+    assert!(
+        resizer.origin.x >= main.right() - px(1.0),
+        "expected terminal resizer to sit on/after main pane boundary: main={main:?} resizer={resizer:?}"
+    );
+}
+
+#[gpui::test]
 async fn long_user_message_bubble_keeps_right_gutter(cx: &mut gpui::TestAppContext) {
     cx.update(gpui_component::init);
 

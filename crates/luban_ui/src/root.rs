@@ -1857,62 +1857,75 @@ impl LubanRootView {
                 self.last_chat_item_count = entries_len;
 
                 let debug_layout_enabled = self.debug_layout_enabled;
-                let history = min_height_zero(
-                    div()
-                        .flex_1()
-                        .id("workspace-chat-scroll")
-                        .debug_selector(|| "workspace-chat-scroll".to_owned())
-                        .overflow_scroll()
-                        .track_scroll(&self.chat_scroll_handle)
-                        .overflow_x_hidden()
-                        .when(debug_layout_enabled, |s| {
-                            s.on_prepaint(move |bounds, window, _app| {
-                                debug_layout::record(
-                                    "workspace-chat-scroll",
-                                    window.viewport_size(),
-                                    bounds,
-                                );
-                            })
+                let history_scroll = div()
+                    .id("workspace-chat-scroll")
+                    .debug_selector(|| "workspace-chat-scroll".to_owned())
+                    .overflow_scroll()
+                    .track_scroll(&self.chat_scroll_handle)
+                    .overflow_x_hidden()
+                    .when(debug_layout_enabled, |s| {
+                        s.on_prepaint(move |bounds, window, _app| {
+                            debug_layout::record(
+                                "workspace-chat-scroll",
+                                window.viewport_size(),
+                                bounds,
+                            );
                         })
-                        .w_full()
-                        .px_4()
-                        .pb_3()
-                        .child(min_width_zero(
-                            div()
-                                .debug_selector(|| "workspace-chat-column".to_owned())
-                                .on_prepaint({
-                                    let view_handle = view_handle.clone();
-                                    move |bounds, _window, app| {
-                                        let width = bounds.size.width;
-                                        let _ = view_handle.update(app, |view, cx| {
-                                            let should_update = match view.chat_column_width {
-                                                Some(prev) => (prev - width).abs() > px(0.5),
-                                                None => true,
-                                            };
-                                            if should_update {
-                                                view.chat_column_width = Some(width);
-                                                cx.notify();
-                                            }
-                                        });
-                                    }
-                                })
-                                .w_full()
-                                .flex()
-                                .flex_col()
-                                .gap_3()
-                                .whitespace_normal()
-                                .pb_2()
-                                .children(history_children)
-                                .when_some(tail_duration, |s, (elapsed, running)| {
-                                    s.child(
-                                        div()
-                                            .debug_selector(|| "chat-tail-turn-duration".to_owned())
-                                            .child(render_turn_duration_row(
-                                                theme, elapsed, running,
-                                            )),
-                                    )
-                                }),
-                        )),
+                    })
+                    .size_full()
+                    .w_full()
+                    .px_4()
+                    .pb_3()
+                    .child(min_width_zero(
+                        div()
+                            .debug_selector(|| "workspace-chat-column".to_owned())
+                            .on_prepaint({
+                                let view_handle = view_handle.clone();
+                                move |bounds, _window, app| {
+                                    let width = bounds.size.width;
+                                    let _ = view_handle.update(app, |view, cx| {
+                                        let should_update = match view.chat_column_width {
+                                            Some(prev) => (prev - width).abs() > px(0.5),
+                                            None => true,
+                                        };
+                                        if should_update {
+                                            view.chat_column_width = Some(width);
+                                            cx.notify();
+                                        }
+                                    });
+                                }
+                            })
+                            .w_full()
+                            .flex()
+                            .flex_col()
+                            .gap_3()
+                            .whitespace_normal()
+                            .pb_2()
+                            .children(history_children)
+                            .when_some(tail_duration, |s, (elapsed, running)| {
+                                s.child(
+                                    div()
+                                        .debug_selector(|| "chat-tail-turn-duration".to_owned())
+                                        .child(render_turn_duration_row(theme, elapsed, running)),
+                                )
+                            }),
+                    ));
+
+                let history = min_height_zero(
+                    div().flex_1().relative().child(history_scroll).child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .right_0()
+                            .bottom_0()
+                            .w(px(8.0))
+                            .debug_selector(|| "workspace-chat-scrollbar".to_owned())
+                            .child(
+                                Scrollbar::vertical(&self.chat_scroll_handle)
+                                    .id("workspace-chat-scrollbar")
+                                    .scrollbar_show(ScrollbarShow::Always),
+                            ),
+                    ),
                 );
 
                 let queue_panel = if !queued_prompts.is_empty() {
