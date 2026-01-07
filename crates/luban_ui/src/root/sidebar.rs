@@ -613,7 +613,7 @@ fn render_workspace_row(
                                 .compact()
                                 .icon(
                                     Icon::empty()
-                                        .path("icons/git-pull-request-arrow.svg")
+                                        .path("icons/git-pull-request.svg")
                                         .with_size(Size::Small)
                                         .text_color(theme.muted_foreground),
                                 )
