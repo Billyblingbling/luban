@@ -3238,6 +3238,8 @@ dependencies = [
  "gpui_ghostty_terminal",
  "luban_domain",
  "portable-pty",
+ "rusqlite",
+ "serde_json",
 ]
 
 [[package]]

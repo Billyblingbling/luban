@@ -6,6 +6,7 @@ use luban_domain::{
     ConversationEntry, ConversationSnapshot, CreatedWorkspace, PersistedAppState, PullRequestState,
     WorkspaceConversation, WorkspaceTabs,
 };
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -81,6 +82,102 @@ fn collapse_inline_markdown_for_summary_is_single_pass_and_trimmed() {
     assert_eq!(collapse_inline_markdown_for_summary("a___b"), "a_b");
     assert_eq!(collapse_inline_markdown_for_summary("  a  b  "), "a  b");
     assert_eq!(collapse_inline_markdown_for_summary("   "), "");
+}
+
+#[test]
+fn virtualization_scroll_compensation_only_counts_blocks_above_viewport() {
+    let blocks = vec![
+        WorkspaceHistoryBlock {
+            id: "b1".to_owned(),
+            start_entry_index: 0,
+            end_entry_index: 1,
+            turn_index_base: 0,
+            has_top_padding: false,
+        },
+        WorkspaceHistoryBlock {
+            id: "b2".to_owned(),
+            start_entry_index: 1,
+            end_entry_index: 2,
+            turn_index_base: 0,
+            has_top_padding: false,
+        },
+    ];
+
+    let mut heights = HashMap::new();
+    heights.insert("b1".to_owned(), px(100.0));
+    heights.insert("b2".to_owned(), px(200.0));
+
+    let mut pending_updates = HashMap::new();
+    pending_updates.insert("b1".to_owned(), px(140.0));
+    pending_updates.insert("b2".to_owned(), px(300.0));
+
+    // The viewport starts inside b2 (b1 fully above; b2 not fully above).
+    let compensation =
+        compute_virtualization_scroll_compensation(&blocks, &heights, &pending_updates, px(150.0));
+    assert_eq!(compensation, px(40.0));
+
+    // The viewport starts inside b1, so even b1 should not be compensated.
+    let compensation =
+        compute_virtualization_scroll_compensation(&blocks, &heights, &pending_updates, px(50.0));
+    assert_eq!(compensation, px(0.0));
+
+    // The viewport is below both blocks, so both deltas apply.
+    let compensation =
+        compute_virtualization_scroll_compensation(&blocks, &heights, &pending_updates, px(999.0));
+    assert_eq!(compensation, px(140.0));
+}
+
+#[test]
+#[ignore]
+fn local_luban_main_virtualization_estimates_large_blocks() {
+    use rusqlite::{Connection, params};
+    use std::path::Path;
+
+    let db_path = std::env::var("LUBAN_LOCAL_DB")
+        .unwrap_or_else(|_| "/Users/xuanwo/luban/luban.db".to_owned());
+    if !Path::new(&db_path).exists() {
+        return;
+    }
+
+    let conn = Connection::open(db_path).expect("open sqlite db");
+    let mut stmt = conn
+        .prepare(
+            "select payload_json \
+             from conversation_entries \
+             where project_slug=?1 and workspace_name=?2 and thread_local_id=?3 \
+             order by seq",
+        )
+        .expect("prepare query");
+
+    let mut entries = Vec::new();
+    let rows = stmt
+        .query_map(params!["luban", "main", 4], |row| row.get::<_, String>(0))
+        .expect("query");
+    for row in rows {
+        let payload = row.expect("row");
+        let entry: ConversationEntry = serde_json::from_str(&payload).expect("parse entry json");
+        entries.push(entry);
+    }
+
+    assert!(
+        entries.len() >= WORKSPACE_HISTORY_VIRTUALIZATION_MIN_ENTRIES,
+        "expected enough entries to trigger virtualization (got {})",
+        entries.len()
+    );
+
+    let blocks = workspace_history_blocks(&entries);
+    let heights = HashMap::<String, Pixels>::new();
+
+    let max_estimate = blocks
+        .iter()
+        .map(|b| block_estimated_height(&heights, b))
+        .fold(px(0.0), |acc, v| acc.max(v));
+
+    assert!(
+        max_estimate > px(5_000.0),
+        "expected local luban/main data to include at least one large block estimate (max_estimate={:?})",
+        max_estimate
+    );
 }
 
 #[gpui::test]

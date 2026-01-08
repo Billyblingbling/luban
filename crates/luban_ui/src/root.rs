@@ -2118,6 +2118,7 @@ impl LubanRootView {
                     chat_column_width,
                     viewport_height,
                     &self.chat_scroll_handle,
+                    self.should_chat_follow_tail(chat_key),
                     &view_handle,
                     &running_turn_summary_items,
                     force_expand_current_turn,
@@ -3159,6 +3160,7 @@ fn build_chat_history_children_maybe_virtualized(
     chat_column_width: Option<Pixels>,
     chat_history_viewport_height: Option<Pixels>,
     chat_scroll_handle: &gpui::ScrollHandle,
+    chat_follow_tail: bool,
     view_handle: &gpui::WeakEntity<LubanRootView>,
     running_turn_summary_items: &[&CodexThreadItem],
     force_expand_current_turn: bool,
@@ -3188,6 +3190,29 @@ fn build_chat_history_children_maybe_virtualized(
         .remove(&chat_key)
         .unwrap_or_default();
     let heights = chat_history_block_heights.entry(chat_key).or_default();
+
+    // Apply scroll compensation before committing new block heights. Without this, when measured
+    // heights replace estimates for blocks above the viewport, the spacer delta shifts content and
+    // causes the scrollbar thumb (and visible content) to jump.
+    if !chat_follow_tail && !pending_updates.is_empty() {
+        // gpui scroll offsets are negative when scrolling down; convert to a positive distance from
+        // the top of the content for virtualization math.
+        let scroll_offset = (px(0.0) - chat_scroll_handle.offset().y).max(px(0.0));
+        let compensation = compute_virtualization_scroll_compensation(
+            &blocks,
+            heights,
+            &pending_updates,
+            scroll_offset,
+        );
+
+        if compensation != px(0.0) {
+            let current = chat_scroll_handle.offset();
+            let max_y = chat_scroll_handle.max_offset().height.max(px(0.0));
+            let target_y = (current.y - compensation).min(px(0.0)).max(px(0.0) - max_y);
+            chat_scroll_handle.set_offset(point(current.x, target_y));
+        }
+    }
+
     for (id, height) in pending_updates {
         heights.insert(id, height);
     }
@@ -3296,6 +3321,32 @@ fn build_chat_history_children_maybe_virtualized(
             .children(children)
             .into_any_element(),
     ]
+}
+
+fn compute_virtualization_scroll_compensation(
+    blocks: &[WorkspaceHistoryBlock],
+    heights: &HashMap<String, Pixels>,
+    pending_updates: &HashMap<String, Pixels>,
+    scroll_offset: Pixels,
+) -> Pixels {
+    let mut cursor_y = px(0.0);
+    let mut compensation = px(0.0);
+
+    for block in blocks {
+        let old_height = block_estimated_height(heights, block);
+        let old_start = cursor_y;
+        let old_end = old_start + old_height;
+
+        if let Some(new_height) = pending_updates.get(&block.id).copied()
+            && old_end <= scroll_offset
+        {
+            compensation += new_height - old_height;
+        }
+
+        cursor_y += old_height;
+    }
+
+    compensation
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3619,7 +3670,7 @@ fn block_estimated_height(
         .end_entry_index
         .saturating_sub(block.start_entry_index);
     let estimate = 72.0 + (entry_count as f32) * 18.0;
-    px(estimate.clamp(120.0, 1600.0))
+    px(estimate.clamp(120.0, 20_000.0))
 }
 
 fn select_visible_blocks(

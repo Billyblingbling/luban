@@ -572,6 +572,7 @@ impl LubanRootView {
             chat_column_width,
             viewport_height,
             &self.chat_scroll_handle,
+            self.should_chat_follow_tail(chat_key),
             &view_handle,
             &running_turn_summary_items,
             force_expand_current_turn,
