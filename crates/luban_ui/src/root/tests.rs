@@ -2787,6 +2787,106 @@ async fn chat_composer_renders_attachments_inside_surface_in_order(cx: &mut gpui
 }
 
 #[gpui::test]
+async fn user_message_inline_images_are_constrained_and_clickable(cx: &mut gpui::TestAppContext) {
+    cx.update(gpui_component::init);
+
+    let svg_path = PathBuf::from("/tmp/luban-test-large.svg");
+    std::fs::write(
+        &svg_path,
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1000"><rect width="2000" height="1000" fill="#cccccc"/></svg>"##,
+    )
+    .expect("write test svg");
+    let svg_string = svg_path.to_string_lossy().to_string();
+
+    let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+    let mut state = AppState::new();
+    state.apply(Action::AddProject {
+        path: PathBuf::from("/tmp/repo"),
+    });
+    let project_id = state.projects[0].id;
+    state.apply(Action::WorkspaceCreated {
+        project_id,
+        workspace_name: "abandon-about".to_owned(),
+        branch_name: "luban/abandon-about".to_owned(),
+        worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+    });
+    let workspace_id = workspace_id_by_name(&state, "abandon-about");
+    state.main_pane = MainPane::Workspace(workspace_id);
+
+    let text = format!("Hello\n{}\nWorld", context_token("image", &svg_string));
+    state.apply(Action::ConversationLoaded {
+        workspace_id,
+        thread_id: default_thread_id(),
+        snapshot: ConversationSnapshot {
+            thread_id: Some("thread-1".to_owned()),
+            entries: vec![ConversationEntry::UserMessage { text }],
+        },
+    });
+
+    let view_slot: Arc<std::sync::Mutex<Option<gpui::Entity<LubanRootView>>>> =
+        Arc::new(std::sync::Mutex::new(None));
+    let view_slot_for_window = view_slot.clone();
+
+    let (_, window_cx) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| LubanRootView::with_state(services, state, cx));
+        *view_slot_for_window.lock().expect("poisoned mutex") = Some(view.clone());
+        gpui_component::Root::new(view, window, cx)
+    });
+    let view = view_slot
+        .lock()
+        .expect("poisoned mutex")
+        .clone()
+        .expect("missing view handle");
+
+    window_cx.simulate_resize(size(px(980.0), px(640.0)));
+    for _ in 0..6 {
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+    }
+
+    let image_bounds = window_cx
+        .debug_bounds("conversation-user-attachment-image-0-0")
+        .expect("missing inline image attachment bounds");
+    assert!(
+        image_bounds.size.width <= px(CHAT_INLINE_IMAGE_MAX_WIDTH + 24.0),
+        "expected inline image width to be constrained: bounds={image_bounds:?}",
+    );
+    assert!(
+        image_bounds.size.height <= px(CHAT_INLINE_IMAGE_MAX_HEIGHT + 24.0),
+        "expected inline image height to be constrained: bounds={image_bounds:?}",
+    );
+
+    window_cx.simulate_click(image_bounds.center(), Modifiers::none());
+    for _ in 0..6 {
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+    }
+
+    window_cx
+        .debug_bounds("image-viewer-overlay")
+        .expect("expected image viewer overlay after clicking image");
+    assert!(
+        view.read_with(window_cx, |v, _| v.image_viewer_path.is_some()),
+        "expected image viewer state to be set after clicking image",
+    );
+
+    let close = window_cx
+        .debug_bounds("image-viewer-close")
+        .expect("missing image viewer close button");
+    window_cx.simulate_click(close.center(), Modifiers::none());
+    for _ in 0..6 {
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+    }
+
+    assert!(
+        view.read_with(window_cx, |v, _| v.image_viewer_path.is_none()),
+        "expected image viewer state to be cleared after closing",
+    );
+}
+
+#[gpui::test]
 async fn chat_composer_can_send_attachments_without_text(cx: &mut gpui::TestAppContext) {
     cx.update(gpui_component::init);
 

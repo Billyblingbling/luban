@@ -57,6 +57,8 @@ use sidebar::render_sidebar;
 use titlebar::render_titlebar;
 const CHAT_ATTACHMENT_THUMBNAIL_SIZE: f32 = 72.0;
 const CHAT_ATTACHMENT_FILE_WIDTH: f32 = CHAT_ATTACHMENT_THUMBNAIL_SIZE * 2.0;
+const CHAT_INLINE_IMAGE_MAX_WIDTH: f32 = 360.0;
+const CHAT_INLINE_IMAGE_MAX_HEIGHT: f32 = 220.0;
 const CHAT_SCROLL_BOTTOM_TOLERANCE_Y10: i32 = 200;
 const CHAT_SCROLL_PERSIST_BOTTOM_TOLERANCE_Y10: i32 = 1000;
 const CHAT_SCROLL_USER_SCROLL_UP_THRESHOLD_Y10: i32 = 10;
@@ -145,6 +147,7 @@ pub struct LubanRootView {
     chat_follow_tail: HashMap<WorkspaceThreadKey, bool>,
     chat_last_observed_scroll_offset_y10: HashMap<WorkspaceThreadKey, i32>,
     chat_last_observed_scroll_max_y10: HashMap<WorkspaceThreadKey, i32>,
+    image_viewer_path: Option<PathBuf>,
     projects_scroll_handle: gpui::ScrollHandle,
     last_chat_workspace_id: Option<WorkspaceThreadKey>,
     last_chat_item_count: usize,
@@ -209,6 +212,7 @@ impl LubanRootView {
             chat_follow_tail: HashMap::new(),
             chat_last_observed_scroll_offset_y10: HashMap::new(),
             chat_last_observed_scroll_max_y10: HashMap::new(),
+            image_viewer_path: None,
             projects_scroll_handle: gpui::ScrollHandle::new(),
             last_chat_workspace_id: None,
             last_chat_item_count: 0,
@@ -284,6 +288,7 @@ impl LubanRootView {
             chat_follow_tail: HashMap::new(),
             chat_last_observed_scroll_offset_y10: HashMap::new(),
             chat_last_observed_scroll_max_y10: HashMap::new(),
+            image_viewer_path: None,
             projects_scroll_handle: gpui::ScrollHandle::new(),
             last_chat_workspace_id: None,
             last_chat_item_count: 0,
@@ -1866,11 +1871,128 @@ impl gpui::Render for LubanRootView {
                 self.terminal_enabled,
             ))
             .child(content)
+            .child(self.render_image_viewer(window, cx))
             .child(self.render_success_toast(cx))
     }
 }
 
 impl LubanRootView {
+    fn open_image_viewer(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        self.image_viewer_path = Some(path);
+        cx.notify();
+    }
+
+    fn close_image_viewer(&mut self, cx: &mut Context<Self>) {
+        if self.image_viewer_path.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    fn render_image_viewer(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let Some(path) = self.image_viewer_path.clone() else {
+            return div().hidden().into_any_element();
+        };
+
+        let theme = cx.theme();
+        let viewport = window.viewport_size();
+        let max_w = (viewport.width - px(96.0)).max(px(0.0));
+        let max_h = (viewport.height - px(96.0)).max(px(0.0));
+        let view_handle = cx.entity().downgrade();
+        let view_handle_for_backdrop = view_handle.clone();
+        let view_handle_for_close = view_handle.clone();
+
+        div()
+            .id("image-viewer-overlay")
+            .debug_selector(|| "image-viewer-overlay".to_owned())
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .size_full()
+            .relative()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .bottom_0()
+                    .bg(gpui::rgba(0x0000_00aa))
+                    .on_mouse_down(MouseButton::Left, move |_, _, app| {
+                        app.stop_propagation();
+                        let _ = view_handle_for_backdrop.update(app, |view, cx| {
+                            view.close_image_viewer(cx);
+                        });
+                    }),
+            )
+            .child(
+                div()
+                    .debug_selector(|| "image-viewer-surface".to_owned())
+                    .relative()
+                    .max_w(max_w)
+                    .max_h(max_h)
+                    .p_3()
+                    .rounded_lg()
+                    .bg(theme.background)
+                    .border_1()
+                    .border_color(theme.border)
+                    .shadow_lg()
+                    .cursor_default()
+                    .child(
+                        div().child(
+                            gpui::img(path)
+                                .debug_selector(|| "image-viewer-image".to_owned())
+                                .max_w(max_w)
+                                .max_h(max_h)
+                                .rounded_md()
+                                .object_fit(gpui::ObjectFit::Contain)
+                                .with_loading(|| {
+                                    Spinner::new().with_size(Size::Small).into_any_element()
+                                })
+                                .with_fallback(|| {
+                                    div()
+                                        .px_2()
+                                        .py_2()
+                                        .rounded_md()
+                                        .border_1()
+                                        .child("Missing image")
+                                        .into_any_element()
+                                }),
+                        ),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .top(px(10.0))
+                            .right(px(10.0))
+                            .w(px(28.0))
+                            .h(px(28.0))
+                            .debug_selector(|| "image-viewer-close".to_owned())
+                            .rounded_full()
+                            .bg(theme.muted)
+                            .border_1()
+                            .border_color(theme.border)
+                            .text_color(theme.muted_foreground)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .cursor_pointer()
+                            .child(Icon::new(IconName::Close).with_size(Size::Small))
+                            .on_mouse_down(MouseButton::Left, move |_, _, app| {
+                                app.stop_propagation();
+                                let _ = view_handle_for_close.update(app, |view, cx| {
+                                    view.close_image_viewer(cx);
+                                });
+                            }),
+                    ),
+            )
+            .into_any_element()
+    }
+
     fn render_main(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let view_handle = cx.entity().downgrade();
 
@@ -2661,6 +2783,7 @@ fn render_conversation_entry(
                 wrap_width,
                 theme.foreground,
                 theme.border,
+                view_handle,
             );
             let copy_text = text.to_owned();
             let copy_button = copy_to_clipboard_button(
@@ -2793,6 +2916,7 @@ fn user_message_view_with_context_tokens(
     wrap_width: Option<Pixels>,
     text_color: gpui::Hsla,
     border_color: gpui::Hsla,
+    view_handle: &gpui::WeakEntity<LubanRootView>,
 ) -> AnyElement {
     let tokens = luban_domain::find_context_tokens(text);
     if tokens.is_empty() {
@@ -2824,23 +2948,46 @@ fn user_message_view_with_context_tokens(
         let attachment = match token.kind {
             luban_domain::ContextTokenKind::Image => {
                 let path = token.path;
-                gpui::img(path)
-                    .w_full()
-                    .h(px(220.0))
-                    .rounded_md()
-                    .border_1()
-                    .border_color(border_color)
-                    .object_fit(gpui::ObjectFit::Contain)
-                    .with_loading(|| Spinner::new().with_size(Size::Small).into_any_element())
-                    .with_fallback(|| {
-                        div()
-                            .px_2()
-                            .py_2()
+                let open_path = path.clone();
+                let view_handle = view_handle.clone();
+
+                div()
+                    .debug_selector(move || {
+                        format!(
+                            "conversation-user-attachment-image-{entry_index}-{attachment_index}"
+                        )
+                    })
+                    .max_w(px(CHAT_INLINE_IMAGE_MAX_WIDTH))
+                    .max_h(px(CHAT_INLINE_IMAGE_MAX_HEIGHT))
+                    .cursor_pointer()
+                    .on_mouse_down(MouseButton::Left, move |_, _, app| {
+                        app.stop_propagation();
+                        let path = open_path.clone();
+                        let _ = view_handle.update(app, |view, cx| {
+                            view.open_image_viewer(path, cx);
+                        });
+                    })
+                    .child(
+                        gpui::img(path)
+                            .max_w(px(CHAT_INLINE_IMAGE_MAX_WIDTH))
+                            .max_h(px(CHAT_INLINE_IMAGE_MAX_HEIGHT))
                             .rounded_md()
                             .border_1()
-                            .child("Missing image")
-                            .into_any_element()
-                    })
+                            .border_color(border_color)
+                            .object_fit(gpui::ObjectFit::Contain)
+                            .with_loading(|| {
+                                Spinner::new().with_size(Size::Small).into_any_element()
+                            })
+                            .with_fallback(|| {
+                                div()
+                                    .px_2()
+                                    .py_2()
+                                    .rounded_md()
+                                    .border_1()
+                                    .child("Missing image")
+                                    .into_any_element()
+                            }),
+                    )
                     .into_any_element()
             }
             luban_domain::ContextTokenKind::Text | luban_domain::ContextTokenKind::File => {
