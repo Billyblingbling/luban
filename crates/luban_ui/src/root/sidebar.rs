@@ -807,6 +807,25 @@ fn render_main_workspace_row(
                         .child(metadata),
                 ),
         ))
+        .child(
+            div()
+                .flex_shrink_0()
+                .debug_selector(move || format!("workspace-main-home-{project_index}"))
+                .invisible()
+                .group_hover("", |s| s.visible())
+                .child(
+                    Button::new(format!("workspace-main-home-{project_index}"))
+                        .ghost()
+                        .compact()
+                        .icon(
+                            Icon::empty()
+                                .path("icons/house.svg")
+                                .with_size(Size::Small)
+                                .text_color(theme.muted_foreground),
+                        )
+                        .tooltip("Home worktree"),
+                ),
+        )
         .into_any_element()
 }
 

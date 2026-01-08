@@ -1313,6 +1313,10 @@ async fn main_workspace_row_is_rendered_and_is_not_archivable(cx: &mut gpui::Tes
         "main workspace should not render a leading icon"
     );
     assert!(
+        window_cx.debug_bounds("workspace-main-home-0").is_some(),
+        "main workspace should render a home worktree indicator"
+    );
+    assert!(
         window_cx.debug_bounds("workspace-row-0-0").is_none(),
         "main workspace should not be rendered as a normal workspace row"
     );
