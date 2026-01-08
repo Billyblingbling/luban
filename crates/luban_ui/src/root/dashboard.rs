@@ -415,62 +415,17 @@ impl LubanRootView {
 
         let is_running = run_status == OperationStatus::Running;
         let chat_target_changed = self.last_chat_workspace_id != Some(chat_key);
-        let saved_anchor = self
-            .state
-            .workspace_chat_scroll_anchor
-            .get(&(workspace_id, thread_id))
-            .cloned();
-        let saved_offset_y10 = self
-            .state
-            .workspace_chat_scroll_y10
-            .get(&(workspace_id, thread_id))
-            .copied();
-        let saved_is_follow_tail = matches!(saved_anchor, Some(ChatScrollAnchor::FollowTail))
-            || saved_offset_y10 == Some(CHAT_SCROLL_FOLLOW_TAIL_SENTINEL_Y10);
         if chat_target_changed {
-            self.pending_chat_scroll_restore.remove(&chat_key);
-
-            if saved_is_follow_tail {
-                self.chat_scroll_handle.set_offset(point(px(0.0), px(0.0)));
-                self.chat_follow_tail.insert(chat_key, true);
-            } else {
-                self.chat_follow_tail.insert(chat_key, false);
-
-                let mut heights = self
-                    .chat_history_block_heights
-                    .get(&chat_key)
-                    .cloned()
-                    .unwrap_or_default();
-                if let Some(pending_updates) =
-                    self.pending_chat_history_block_heights.get(&chat_key)
-                {
-                    for (id, height) in pending_updates {
-                        heights.insert(id.clone(), *height);
-                    }
-                }
-
-                if let Some(anchor) = saved_anchor.as_ref()
-                    && let Some(scroll_distance) =
-                        scroll_distance_from_top_for_anchor(entries, &heights, anchor)
-                {
-                    self.chat_scroll_handle
-                        .set_offset(point(px(0.0), -scroll_distance));
-                    self.pending_chat_scroll_restore.insert(
-                        chat_key,
-                        PendingChatScrollRestore {
-                            anchor: anchor.clone(),
-                            last_observed_column_width: None,
-                            applied_once: false,
-                        },
-                    );
-                } else if let Some(saved_offset_y10) = saved_offset_y10 {
-                    self.chat_scroll_handle
-                        .set_offset(point(px(0.0), px(saved_offset_y10 as f32 / 10.0)));
-                } else {
-                    self.chat_scroll_handle.set_offset(point(px(0.0), px(0.0)));
-                    self.chat_follow_tail.insert(chat_key, true);
-                }
-            }
+            self.chat_scroll_handle.set_offset(point(px(0.0), px(0.0)));
+            self.chat_follow_tail.insert(chat_key, true);
+            self.pending_chat_scroll_to_bottom.insert(
+                chat_key,
+                PendingChatScrollToBottom {
+                    last_observed_column_width: None,
+                    last_observed_max_y10: None,
+                    stable_max_samples: 0,
+                },
+            );
 
             let saved_draft = conversation.map(|c| c.draft.clone()).unwrap_or_default();
             let current_value = input_state.read(cx).value().to_owned();
@@ -501,11 +456,9 @@ impl LubanRootView {
             &self.chat_scroll_handle,
             &mut self.chat_follow_tail,
             &mut self.chat_last_observed_scroll_offset_y10,
-            &mut self.chat_last_observed_scroll_max_y10_at_offset_change,
         );
         if !self.should_chat_follow_tail(chat_key) {
             self.pending_chat_scroll_to_bottom.remove(&chat_key);
-            self.pending_chat_scroll_restore.remove(&chat_key);
         }
 
         let theme = cx.theme();
@@ -629,26 +582,10 @@ impl LubanRootView {
 
         let history_grew = self.last_chat_workspace_id == Some(chat_key)
             && entries_len > self.last_chat_item_count;
-        let should_scroll_on_open = self.last_chat_workspace_id != Some(chat_key)
-            && (saved_is_follow_tail
-                || (agent_turn_count(entries) >= 2
-                    && saved_anchor.is_none()
-                    && saved_offset_y10.is_none()));
-        let saved_offset_y10 = self
-            .state
-            .workspace_chat_scroll_y10
-            .get(&(workspace_id, thread_id))
-            .copied();
-        if (history_grew && self.should_chat_follow_tail(chat_key)) || should_scroll_on_open {
-            let pending_saved_offset_y10 = if history_grew || saved_is_follow_tail {
-                None
-            } else {
-                saved_offset_y10
-            };
+        if history_grew && self.should_chat_follow_tail(chat_key) {
             self.pending_chat_scroll_to_bottom.insert(
                 chat_key,
                 PendingChatScrollToBottom {
-                    saved_offset_y10: pending_saved_offset_y10,
                     last_observed_column_width: None,
                     last_observed_max_y10: None,
                     stable_max_samples: 0,
@@ -678,7 +615,6 @@ impl LubanRootView {
                     let height = bounds.size.height.max(px(0.0));
                     let _ = view_handle.update(app, |view, cx| {
                         view.chat_history_viewport_height = Some(height);
-                        view.flush_pending_chat_scroll_restore(chat_key, cx);
                         view.flush_pending_chat_scroll_to_bottom(chat_key, cx);
                     });
                 }

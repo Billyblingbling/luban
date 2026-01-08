@@ -3,8 +3,8 @@ use gpui::{
     Modifiers, MouseButton, MouseDownEvent, ScrollDelta, ScrollWheelEvent, point, px, size,
 };
 use luban_domain::{
-    ChatScrollAnchor, ConversationEntry, ConversationSnapshot, CreatedWorkspace, PersistedAppState,
-    PullRequestState, WorkspaceConversation, WorkspaceTabs,
+    ConversationEntry, ConversationSnapshot, CreatedWorkspace, PersistedAppState, PullRequestState,
+    WorkspaceConversation, WorkspaceTabs,
 };
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -3273,7 +3273,7 @@ async fn chat_composer_remains_visible_with_long_history(cx: &mut gpui::TestAppC
 }
 
 #[gpui::test]
-async fn chat_scroll_position_is_saved_and_restored(cx: &mut gpui::TestAppContext) {
+async fn chat_switching_always_jumps_to_latest(cx: &mut gpui::TestAppContext) {
     cx.update(gpui_component::init);
 
     let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
@@ -3338,127 +3338,11 @@ async fn chat_scroll_position_is_saved_and_restored(cx: &mut gpui::TestAppContex
     assert!(max_y10 > 0, "expected a scrollable chat history");
 
     let chat_key = thread_key(workspace_id);
-    window_cx.update(|_, app| {
-        view.update(app, |view, cx| {
-            view.chat_follow_tail.insert(chat_key, false);
-            view.pending_chat_scroll_to_bottom.remove(&chat_key);
-            cx.notify();
-        });
-    });
-
     let desired_offset_y10 = -((max_y10 / 4).clamp(10, 1000));
     window_cx.update(|_, app| {
         view.update(app, |view, cx| {
-            view.chat_scroll_handle
-                .set_offset(point(px(0.0), px(desired_offset_y10 as f32 / 10.0)));
-            cx.notify();
-        });
-    });
-    for _ in 0..3 {
-        window_cx.run_until_parked();
-        window_cx.refresh().unwrap();
-    }
-
-    let current_offset_y10 = view.read_with(window_cx, |v, _| v.debug_chat_scroll_offset_y10());
-    assert!(current_offset_y10 < 0, "expected a non-zero scroll offset");
-
-    window_cx.update(|_, app| {
-        view.update(app, |view, cx| {
-            view.dispatch(Action::OpenDashboard, cx);
-        });
-    });
-    window_cx.run_until_parked();
-    window_cx.refresh().unwrap();
-
-    let saved_offset_y10 = view.read_with(window_cx, |v, _| {
-        v.debug_state()
-            .workspace_chat_scroll_y10
-            .get(&thread_key(workspace_id))
-            .copied()
-    });
-    assert_eq!(saved_offset_y10, Some(current_offset_y10));
-
-    window_cx.update(|_, app| {
-        view.update(app, |view, cx| {
-            view.chat_scroll_handle.set_offset(point(px(0.0), px(0.0)));
-            view.dispatch(Action::OpenWorkspace { workspace_id }, cx);
-        });
-    });
-    for _ in 0..3 {
-        window_cx.run_until_parked();
-        window_cx.refresh().unwrap();
-    }
-
-    let restored_offset_y10 = view.read_with(window_cx, |v, _| v.debug_chat_scroll_offset_y10());
-    assert_eq!(restored_offset_y10, current_offset_y10);
-}
-
-#[gpui::test]
-async fn chat_scroll_anchor_is_preferred_over_offset_y10(cx: &mut gpui::TestAppContext) {
-    cx.update(gpui_component::init);
-
-    let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
-
-    let mut state = AppState::new();
-    state.apply(Action::AddProject {
-        path: PathBuf::from("/tmp/repo"),
-    });
-    let project_id = state.projects[0].id;
-    state.apply(Action::WorkspaceCreated {
-        project_id,
-        workspace_name: "abandon-about".to_owned(),
-        branch_name: "luban/abandon-about".to_owned(),
-        worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
-    });
-    let workspace_id = workspace_id_by_name(&state, "abandon-about");
-    state.main_pane = MainPane::Workspace(workspace_id);
-
-    let long_markdownish = std::iter::repeat_n(
-        "- A very long bullet line that should wrap and force the history to overflow and scroll.\n",
-        40,
-    )
-    .collect::<String>();
-
-    let mut entries = Vec::new();
-    for i in 0..24 {
-        entries.push(ConversationEntry::UserMessage {
-            text: format!("message {i} {long_markdownish}"),
-        });
-        entries.push(ConversationEntry::TurnDuration { duration_ms: 1000 });
-    }
-
-    state.apply(Action::ConversationLoaded {
-        workspace_id,
-        thread_id: default_thread_id(),
-        snapshot: ConversationSnapshot {
-            thread_id: Some("thread-1".to_owned()),
-            entries,
-        },
-    });
-
-    let (view, window_cx) =
-        cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
-    window_cx.simulate_resize(size(px(900.0), px(320.0)));
-    for _ in 0..3 {
-        window_cx.run_until_parked();
-        window_cx.refresh().unwrap();
-    }
-
-    let max_y10 = view.read_with(window_cx, |v, _| v.debug_chat_scroll_max_offset_y10());
-    assert!(max_y10 > 0, "expected a scrollable chat history");
-
-    let chat_key = thread_key(workspace_id);
-    window_cx.update(|_, app| {
-        view.update(app, |view, cx| {
             view.chat_follow_tail.insert(chat_key, false);
             view.pending_chat_scroll_to_bottom.remove(&chat_key);
-            cx.notify();
-        });
-    });
-
-    let desired_offset_y10 = -((max_y10 / 3).clamp(10, 2000));
-    window_cx.update(|_, app| {
-        view.update(app, |view, cx| {
             view.chat_scroll_handle
                 .set_offset(point(px(0.0), px(desired_offset_y10 as f32 / 10.0)));
             cx.notify();
@@ -3480,50 +3364,22 @@ async fn chat_scroll_anchor_is_preferred_over_offset_y10(cx: &mut gpui::TestAppC
     window_cx.run_until_parked();
     window_cx.refresh().unwrap();
 
-    let saved_anchor = view.read_with(window_cx, |v, _| {
-        v.debug_state()
-            .workspace_chat_scroll_anchor
-            .get(&thread_key(workspace_id))
-            .cloned()
-    });
-    assert!(
-        matches!(saved_anchor, Some(ChatScrollAnchor::Block { .. })),
-        "expected a block anchor to be persisted"
-    );
-
-    window_cx.update(|_, app| {
-        view.update(app, |view, cx| {
-            view.dispatch(
-                Action::WorkspaceChatScrollSaved {
-                    workspace_id,
-                    thread_id: default_thread_id(),
-                    offset_y10: 0,
-                },
-                cx,
-            );
-        });
-    });
-    window_cx.run_until_parked();
-
     window_cx.update(|_, app| {
         view.update(app, |view, cx| {
             view.chat_scroll_handle.set_offset(point(px(0.0), px(0.0)));
             view.dispatch(Action::OpenWorkspace { workspace_id }, cx);
         });
     });
-    for _ in 0..4 {
+    for _ in 0..3 {
         window_cx.run_until_parked();
         window_cx.refresh().unwrap();
     }
 
     let restored_offset_y10 = view.read_with(window_cx, |v, _| v.debug_chat_scroll_offset_y10());
-    assert_ne!(
-        restored_offset_y10, 0,
-        "expected anchor restore to ignore a corrupted offset_y10"
-    );
+    let restored_max_y10 = view.read_with(window_cx, |v, _| v.debug_chat_scroll_max_offset_y10());
     assert!(
-        (restored_offset_y10 - current_offset_y10).abs() <= 20,
-        "expected restored offset to be close to the original offset (restored={restored_offset_y10}, original={current_offset_y10})"
+        (restored_offset_y10 + restored_max_y10).abs() <= 250,
+        "expected switching back to jump to the newest entries (offset_y10={restored_offset_y10}, max_y10={restored_max_y10})"
     );
 }
 
@@ -3613,16 +3469,22 @@ async fn switching_away_at_bottom_restores_to_bottom(cx: &mut gpui::TestAppConte
     window_cx.run_until_parked();
     window_cx.refresh().unwrap();
 
+    let chat_key = thread_key(workspace_id);
     let saved = view.read_with(window_cx, |v, _| {
-        v.debug_state()
-            .workspace_chat_scroll_y10
-            .get(&thread_key(workspace_id))
-            .copied()
+        (
+            v.debug_state()
+                .workspace_chat_scroll_y10
+                .get(&chat_key)
+                .copied(),
+            v.debug_state()
+                .workspace_chat_scroll_anchor
+                .get(&chat_key)
+                .cloned(),
+        )
     });
-    assert_eq!(
-        saved,
-        Some(CHAT_SCROLL_FOLLOW_TAIL_SENTINEL_Y10),
-        "expected bottom position to be persisted as a follow-tail sentinel"
+    assert!(
+        saved.0.is_none() && saved.1.is_none(),
+        "expected scroll position not to be persisted"
     );
 
     window_cx.update(|_, app| {
@@ -3648,201 +3510,6 @@ async fn switching_away_at_bottom_restores_to_bottom(cx: &mut gpui::TestAppConte
         (offset_y10_after + max_y10_after).abs() <= 250,
         "expected switching back to follow the newest entries (offset_y10={offset_y10_after}, max_y10={max_y10_after})"
     );
-}
-
-#[gpui::test]
-async fn switching_away_near_bottom_persists_follow_tail(cx: &mut gpui::TestAppContext) {
-    cx.update(gpui_component::init);
-
-    let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
-
-    let mut state = AppState::new();
-    state.apply(Action::AddProject {
-        path: PathBuf::from("/tmp/repo"),
-    });
-    let project_id = state.projects[0].id;
-    state.apply(Action::WorkspaceCreated {
-        project_id,
-        workspace_name: "abandon-about".to_owned(),
-        branch_name: "luban/abandon-about".to_owned(),
-        worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
-    });
-    let workspace_id = workspace_id_by_name(&state, "abandon-about");
-    state.main_pane = MainPane::Workspace(workspace_id);
-
-    let long_text = std::iter::repeat_n(
-        "This is a long message that should wrap and increase history height.\n",
-        40,
-    )
-    .collect::<String>();
-    let mut entries = Vec::new();
-    for i in 0..48 {
-        entries.push(ConversationEntry::UserMessage {
-            text: format!("message {i}\n{long_text}"),
-        });
-        entries.push(ConversationEntry::TurnDuration { duration_ms: 1000 });
-    }
-    state.apply(Action::ConversationLoaded {
-        workspace_id,
-        thread_id: default_thread_id(),
-        snapshot: ConversationSnapshot {
-            thread_id: Some("thread-1".to_owned()),
-            entries,
-        },
-    });
-
-    let (view, window_cx) =
-        cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
-    window_cx.simulate_resize(size(px(900.0), px(320.0)));
-    for _ in 0..4 {
-        window_cx.run_until_parked();
-        window_cx.refresh().unwrap();
-    }
-
-    let max_y10 = view.read_with(window_cx, |v, _| v.debug_chat_scroll_max_offset_y10());
-    assert!(max_y10 > CHAT_SCROLL_PERSIST_BOTTOM_TOLERANCE_Y10 * 2);
-
-    let chat_key = thread_key(workspace_id);
-    window_cx.update(|_, app| {
-        view.update(app, |view, cx| {
-            view.chat_follow_tail.insert(chat_key, false);
-            view.pending_chat_scroll_to_bottom.remove(&chat_key);
-            cx.notify();
-        });
-    });
-
-    let bottom_y10 = -max_y10;
-    let desired_offset_y10 = bottom_y10 + (CHAT_SCROLL_BOTTOM_TOLERANCE_Y10 + 400);
-    window_cx.update(|_, app| {
-        view.update(app, |view, cx| {
-            view.chat_scroll_handle
-                .set_offset(point(px(0.0), px(desired_offset_y10 as f32 / 10.0)));
-            cx.notify();
-        });
-    });
-    for _ in 0..4 {
-        window_cx.run_until_parked();
-        window_cx.refresh().unwrap();
-    }
-
-    window_cx.update(|_, app| {
-        view.update(app, |view, cx| {
-            view.dispatch(Action::OpenDashboard, cx);
-        });
-    });
-    window_cx.run_until_parked();
-    window_cx.refresh().unwrap();
-
-    let saved = view.read_with(window_cx, |v, _| {
-        (
-            v.debug_state()
-                .workspace_chat_scroll_y10
-                .get(&thread_key(workspace_id))
-                .copied(),
-            v.debug_state()
-                .workspace_chat_scroll_anchor
-                .get(&thread_key(workspace_id))
-                .cloned(),
-        )
-    });
-    assert_eq!(saved.0, Some(CHAT_SCROLL_FOLLOW_TAIL_SENTINEL_Y10));
-    assert!(matches!(saved.1, Some(ChatScrollAnchor::FollowTail)));
-}
-
-#[gpui::test]
-async fn switching_away_uses_cached_scroll_state_when_handle_resets(cx: &mut gpui::TestAppContext) {
-    cx.update(gpui_component::init);
-
-    let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
-
-    let mut state = AppState::new();
-    state.apply(Action::AddProject {
-        path: PathBuf::from("/tmp/repo"),
-    });
-    let project_id = state.projects[0].id;
-    state.apply(Action::WorkspaceCreated {
-        project_id,
-        workspace_name: "abandon-about".to_owned(),
-        branch_name: "luban/abandon-about".to_owned(),
-        worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
-    });
-    let workspace_id = workspace_id_by_name(&state, "abandon-about");
-    state.main_pane = MainPane::Workspace(workspace_id);
-
-    let long_text = std::iter::repeat_n("A long line that should wrap and grow height.\n", 40)
-        .collect::<String>();
-    let mut entries = Vec::new();
-    for i in 0..48 {
-        entries.push(ConversationEntry::UserMessage {
-            text: format!("message {i}\n{long_text}"),
-        });
-        entries.push(ConversationEntry::TurnDuration { duration_ms: 1000 });
-    }
-    state.apply(Action::ConversationLoaded {
-        workspace_id,
-        thread_id: default_thread_id(),
-        snapshot: ConversationSnapshot {
-            thread_id: Some("thread-1".to_owned()),
-            entries,
-        },
-    });
-
-    let (view, window_cx) =
-        cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
-    window_cx.simulate_resize(size(px(900.0), px(320.0)));
-    for _ in 0..6 {
-        window_cx.run_until_parked();
-        window_cx.refresh().unwrap();
-    }
-
-    let max_y10 = view.read_with(window_cx, |v, _| v.debug_chat_scroll_max_offset_y10());
-    assert!(max_y10 > 0, "expected a scrollable chat history");
-
-    let chat_key = thread_key(workspace_id);
-    window_cx.update(|_, app| {
-        view.update(app, |view, cx| {
-            view.chat_follow_tail.insert(chat_key, false);
-            view.pending_chat_scroll_to_bottom.remove(&chat_key);
-            cx.notify();
-        });
-    });
-
-    let bottom_y10 = -max_y10;
-    window_cx.update(|_, app| {
-        view.update(app, |view, cx| {
-            view.chat_scroll_handle
-                .set_offset(point(px(0.0), px(bottom_y10 as f32 / 10.0)));
-            cx.notify();
-        });
-    });
-    for _ in 0..6 {
-        window_cx.run_until_parked();
-        window_cx.refresh().unwrap();
-    }
-
-    window_cx.update(|_, app| {
-        view.update(app, |view, cx| {
-            view.chat_scroll_handle = gpui::ScrollHandle::new();
-            view.dispatch(Action::OpenDashboard, cx);
-        });
-    });
-    window_cx.run_until_parked();
-    window_cx.refresh().unwrap();
-
-    let saved = view.read_with(window_cx, |v, _| {
-        (
-            v.debug_state()
-                .workspace_chat_scroll_y10
-                .get(&thread_key(workspace_id))
-                .copied(),
-            v.debug_state()
-                .workspace_chat_scroll_anchor
-                .get(&thread_key(workspace_id))
-                .cloned(),
-        )
-    });
-    assert_eq!(saved.0, Some(CHAT_SCROLL_FOLLOW_TAIL_SENTINEL_Y10));
-    assert!(matches!(saved.1, Some(ChatScrollAnchor::FollowTail)));
 }
 
 #[gpui::test]
