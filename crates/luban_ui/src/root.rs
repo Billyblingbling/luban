@@ -58,6 +58,7 @@ use titlebar::render_titlebar;
 const CHAT_ATTACHMENT_THUMBNAIL_SIZE: f32 = 72.0;
 const CHAT_ATTACHMENT_FILE_WIDTH: f32 = CHAT_ATTACHMENT_THUMBNAIL_SIZE * 2.0;
 const CHAT_SCROLL_BOTTOM_TOLERANCE_Y10: i32 = 200;
+const CHAT_SCROLL_PERSIST_BOTTOM_TOLERANCE_Y10: i32 = 1000;
 const CHAT_SCROLL_USER_SCROLL_UP_THRESHOLD_Y10: i32 = 10;
 const CHAT_SCROLL_FOLLOW_TAIL_SENTINEL_Y10: i32 = i32::MIN;
 const WORKSPACE_HISTORY_VIRTUALIZATION_MIN_ENTRIES: usize = 800;
@@ -505,6 +506,14 @@ impl LubanRootView {
         (offset_y10 - bottom_y10).abs() <= CHAT_SCROLL_BOTTOM_TOLERANCE_Y10
     }
 
+    fn is_chat_near_bottom_for_persistence(offset_y10: i32, max_y10: i32) -> bool {
+        if max_y10 <= 0 {
+            return true;
+        }
+        let bottom_y10 = -max_y10;
+        (offset_y10 - bottom_y10).abs() <= CHAT_SCROLL_PERSIST_BOTTOM_TOLERANCE_Y10
+    }
+
     fn dispatch(&mut self, action: Action, cx: &mut Context<Self>) {
         let previous_chat_key_for_scroll = match self.state.main_pane {
             MainPane::Workspace(workspace_id) => {
@@ -622,12 +631,12 @@ impl LubanRootView {
         {
             let offset_y10 = quantize_pixels_y10(self.chat_scroll_handle.offset().y);
             let max_y10 = quantize_pixels_y10(self.chat_scroll_handle.max_offset().height);
-            let saved_offset_y10 = if max_y10 > 0 && Self::is_chat_near_bottom(offset_y10, max_y10)
-            {
-                CHAT_SCROLL_FOLLOW_TAIL_SENTINEL_Y10
-            } else {
-                offset_y10
-            };
+            let saved_offset_y10 =
+                if max_y10 > 0 && Self::is_chat_near_bottom_for_persistence(offset_y10, max_y10) {
+                    CHAT_SCROLL_FOLLOW_TAIL_SENTINEL_Y10
+                } else {
+                    offset_y10
+                };
             effects.extend(self.state.apply(Action::WorkspaceChatScrollSaved {
                 workspace_id,
                 thread_id,
@@ -3654,7 +3663,7 @@ fn compute_chat_scroll_anchor(
 ) -> ChatScrollAnchor {
     let offset_y10 = quantize_pixels_y10(offset_y);
     let max_y10 = quantize_pixels_y10(max_offset_height);
-    if max_y10 > 0 && LubanRootView::is_chat_near_bottom(offset_y10, max_y10) {
+    if max_y10 > 0 && LubanRootView::is_chat_near_bottom_for_persistence(offset_y10, max_y10) {
         return ChatScrollAnchor::FollowTail;
     }
 
