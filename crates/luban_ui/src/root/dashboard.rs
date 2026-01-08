@@ -726,7 +726,7 @@ impl LubanRootView {
                     .top_0()
                     .right_0()
                     .bottom_0()
-                    .w(px(8.0))
+                    .w(px(16.0))
                     .debug_selector(|| "workspace-chat-scrollbar".to_owned())
                     .child(
                         Scrollbar::vertical(&self.chat_scroll_handle)
