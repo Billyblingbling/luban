@@ -2,6 +2,7 @@ use gpui::{
     App, Application, Bounds, KeyBinding, TitlebarOptions, WindowBounds, WindowOptions, point,
     prelude::*, px, size,
 };
+use gpui_component::scroll::ScrollbarShow;
 use gpui_component::{Root, Theme, ThemeMode};
 use gpui_ghostty_terminal::view::{Copy, Paste, SelectAll};
 use luban_ui::{LubanRootView, apply_linear_theme};
@@ -15,6 +16,7 @@ fn init_components(cx: &mut App) {
     gpui_component::init(cx);
     apply_linear_theme(cx);
     Theme::change(ThemeMode::Light, None, cx);
+    Theme::global_mut(cx).scrollbar_show = ScrollbarShow::Scrolling;
 }
 
 fn main() {
@@ -64,6 +66,7 @@ mod tests {
             assert_eq!(Theme::global(app).mode, ThemeMode::Light);
             assert_eq!(Theme::global(app).font_size, px(14.0));
             assert_eq!(Theme::global(app).radius, px(8.0));
+            assert_eq!(Theme::global(app).scrollbar_show, ScrollbarShow::Scrolling);
             assert_eq!(
                 Theme::global(app).theme_name().as_ref(),
                 "Luban Linear Light"

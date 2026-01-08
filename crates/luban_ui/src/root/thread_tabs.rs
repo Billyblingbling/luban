@@ -301,8 +301,7 @@ impl LubanRootView {
                             .debug_selector(|| "workspace-thread-tabs-menu-scrollbar".to_owned())
                             .child(
                                 Scrollbar::vertical(&scroll_handle_overlay)
-                                    .id("workspace-thread-tabs-menu-scrollbar")
-                                    .scrollbar_show(ScrollbarShow::Always),
+                                    .id("workspace-thread-tabs-menu-scrollbar"),
                             ),
                     )
                     .into_any_element()

@@ -67,9 +67,7 @@ pub(super) fn render_sidebar(
                         .w(px(16.0))
                         .debug_selector(|| "projects-scrollbar".to_owned())
                         .child(
-                            Scrollbar::vertical(&projects_scroll_handle)
-                                .id("projects-scrollbar")
-                                .scrollbar_show(ScrollbarShow::Always),
+                            Scrollbar::vertical(&projects_scroll_handle).id("projects-scrollbar"),
                         ),
                 ),
         ))

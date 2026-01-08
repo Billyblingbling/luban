@@ -12,7 +12,7 @@ use gpui_component::{
     collapsible::Collapsible,
     input::{Input, InputEvent, InputState},
     popover::Popover,
-    scroll::{ScrollableElement as _, Scrollbar, ScrollbarShow},
+    scroll::{ScrollableElement as _, Scrollbar},
     spinner::Spinner,
     text::{TextView, TextViewStyle},
 };
@@ -2300,8 +2300,7 @@ impl LubanRootView {
                             .debug_selector(|| "workspace-chat-scrollbar".to_owned())
                             .child(
                                 Scrollbar::vertical(&self.chat_scroll_handle)
-                                    .id("workspace-chat-scrollbar")
-                                    .scrollbar_show(ScrollbarShow::Always),
+                                    .id("workspace-chat-scrollbar"),
                             ),
                     ),
                 );
