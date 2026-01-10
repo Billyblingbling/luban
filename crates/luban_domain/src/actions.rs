@@ -206,7 +206,7 @@ pub enum Action {
     SaveAppState,
 
     AppStateLoaded {
-        persisted: PersistedAppState,
+        persisted: Box<PersistedAppState>,
     },
     AppStateLoadFailed {
         message: String,

@@ -861,7 +861,7 @@ impl AppState {
             Action::SaveAppState => vec![Effect::SaveAppState],
 
             Action::AppStateLoaded { persisted } => {
-                persistence::apply_persisted_app_state(self, persisted)
+                persistence::apply_persisted_app_state(self, *persisted)
             }
             Action::AppStateLoadFailed { message } => {
                 self.last_error = Some(message);
@@ -1658,7 +1658,7 @@ mod tests {
 
         let mut state = AppState::new();
         state.apply(Action::AppStateLoaded {
-            persisted: PersistedAppState {
+            persisted: Box::new(PersistedAppState {
                 projects: Vec::new(),
                 sidebar_width: None,
                 terminal_pane_width: Some(480),
@@ -1672,7 +1672,7 @@ mod tests {
                 workspace_chat_scroll_y10: HashMap::new(),
                 workspace_chat_scroll_anchor: HashMap::new(),
                 workspace_unread_completions: HashMap::new(),
-            },
+            }),
         });
         assert_eq!(state.terminal_pane_width, Some(480));
     }
@@ -1690,7 +1690,7 @@ mod tests {
 
         let mut state = AppState::new();
         state.apply(Action::AppStateLoaded {
-            persisted: PersistedAppState {
+            persisted: Box::new(PersistedAppState {
                 projects: Vec::new(),
                 sidebar_width: Some(360),
                 terminal_pane_width: None,
@@ -1704,7 +1704,7 @@ mod tests {
                 workspace_chat_scroll_y10: HashMap::new(),
                 workspace_chat_scroll_anchor: HashMap::new(),
                 workspace_unread_completions: HashMap::new(),
-            },
+            }),
         });
         assert_eq!(state.sidebar_width, Some(360));
     }
@@ -1737,7 +1737,9 @@ mod tests {
         );
 
         let mut loaded = AppState::new();
-        loaded.apply(Action::AppStateLoaded { persisted });
+        loaded.apply(Action::AppStateLoaded {
+            persisted: Box::new(persisted),
+        });
         assert_eq!(
             loaded
                 .workspace_chat_scroll_y10
@@ -1784,7 +1786,9 @@ mod tests {
         );
 
         let mut loaded = AppState::new();
-        loaded.apply(Action::AppStateLoaded { persisted });
+        loaded.apply(Action::AppStateLoaded {
+            persisted: Box::new(persisted),
+        });
         assert_eq!(
             loaded
                 .workspace_chat_scroll_anchor
@@ -1895,7 +1899,9 @@ mod tests {
         assert!(persisted.projects[0].expanded);
 
         let mut loaded = AppState::new();
-        loaded.apply(Action::AppStateLoaded { persisted });
+        loaded.apply(Action::AppStateLoaded {
+            persisted: Box::new(persisted),
+        });
         assert!(loaded.projects[0].expanded);
     }
 
@@ -2132,7 +2138,9 @@ mod tests {
         assert_eq!(persisted.last_open_workspace_id, Some(workspace_id.0));
 
         let mut loaded = AppState::new();
-        let effects = loaded.apply(Action::AppStateLoaded { persisted });
+        let effects = loaded.apply(Action::AppStateLoaded {
+            persisted: Box::new(persisted),
+        });
 
         assert!(
             matches!(loaded.main_pane, MainPane::Workspace(id) if id == workspace_id),

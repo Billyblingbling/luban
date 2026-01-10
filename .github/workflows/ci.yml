@@ -38,6 +38,10 @@ jobs:
             pkg-config \
             libssl-dev \
             xz-utils \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            librsvg2-dev \
+            libayatana-appindicator3-dev \
             libx11-dev \
             libxrandr-dev \
             libxinerama-dev \
@@ -63,11 +67,6 @@ jobs:
         with:
           cache-on-failure: true
 
-      - name: Install Zig (required by ghostty_vt_sys)
-        run: |
-          just zig-bootstrap
-          echo "${PWD}/.context/zig" >> "${GITHUB_PATH}"
-
       - name: Format (must be clean)
         run: |
           just fmt
@@ -75,3 +74,6 @@ jobs:
 
       - name: Lint
         run: just lint
+
+      - name: Test
+        run: just test

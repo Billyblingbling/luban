@@ -14,10 +14,10 @@ This document constrains and guides how AI agents (and human contributors) shoul
 - After finishing a task, run the relevant checks, then commit and push.
 
 ## 1. Project context and goals (first-screen context for agents)
-- Tech stack: Rust + gpui (native UI framework)
+- Tech stack: Rust server + web frontend (optionally wrapped by Tauri)
 - All engineering commands are managed via `justfile` (prefer `just` over invoking `cargo` directly)
 - Primary goals:
-  1) Keep the UI thread responsive; avoid blocking work / heavy recomputation / IO
+  1) Keep the server responsive; avoid blocking the async runtime or request handlers
   2) Make business logic unit-testable, property-testable, and regression-testable
   3) Make changes reviewable: small steps, and each change has corresponding verification/tests
 
@@ -45,12 +45,10 @@ This document constrains and guides how AI agents (and human contributors) shoul
 
 ## 2.4 Repository map (where things live)
 - `crates/luban_domain/`: pure state + reducers (`AppState`, `Action`, `Effect`), deterministic logic, most regressions should be captured here.
-- `crates/luban_ui/`: GPUI views. Prefer thin rendering + event forwarding; avoid IO; keep expensive work off the UI thread.
-  - Most UI integration tests live in `crates/luban_ui/src/root.rs` under `#[gpui::test]`.
-  - Prefer `debug_selector` strings that are stable and descriptive; tests should use `debug_bounds(...)`.
-- `crates/luban_app/`: app wiring, side effects, adapters, persistence.
-  - SQLite persistence: `crates/luban_app/src/sqlite_store.rs` + migrations under `crates/luban_app/migrations/`.
-- `tools/`: helper tooling (including the sidecar).
+- `crates/luban_server/`: local server, WebSocket event stream, PTY endpoint, static file serving for `web/`.
+- `crates/luban_tauri/`: desktop wrapper for the web UI.
+- `web/`: browser UI (and Playwright E2E tests).
+- `tools/`: helper tooling.
 - `docs/`: design notes and decisions. Add/update docs for non-trivial UX or architecture changes.
 - `.context/` (gitignored): local scratchpad for collaboration between agents.
 
@@ -63,26 +61,10 @@ Goal: UI is replaceable, logic is testable, and IO is isolated.
 - `adapters/`: boundaries to external systems (filesystem / network / database / system APIs); provide replaceable interfaces
 - `app/` (or near `main.rs`): wire dependencies, bootstrap, routing, global resource management
 
-### 3.2 gpui constraints (general and practical)
-- The UI thread should only do:
-  - state reads / lightweight computation
-  - view rendering
-  - event dispatching (action/command)
-- Anything that may block (file IO, network, heavy recomputation, index building, etc.) must run in background tasks.
-- Background task results must return to the UI through a unified "message/event/scheduler" entrypoint to update state (avoid mutating shared state directly from many places).
-- Allowed side-effect entrypoints:
-  - adapter layer
-  - a unified "effect runner" defined in the app wiring layer
-- Forbidden in the view rendering path:
-  - file/network IO
-  - large allocations / sorting / traversing full datasets
-  - uncontrollable lock contention
-
-### 3.3 gpui-component usage (required)
-- Use `gpui-component = "0.6.0-preview0"` as the component library.
-- If `0.6.0-preview0` is unavailable on crates.io, pin to the upstream git tag `v0.6.0-preview0`.
-- Prefer reusable components: when a suitable component exists in `gpui-component`, always use it instead of building a custom implementation.
-- Only implement custom components when `gpui-component` does not provide an equivalent.
+### 3.2 Server constraints (general and practical)
+- Do not block in request handlers (filesystem, network, long computations).
+- Prefer async IO and bounded work; offload expensive tasks to background workers.
+- Avoid unbounded memory growth in websocket/PTY streams (use backpressure or bounded buffers).
 
 ## 4. State management and actions (recommended pattern, unless the repo already defines one)
 Prefer writing interactions as an "action-driven" state machine:
@@ -101,7 +83,7 @@ Requirements:
 - Unit tests (required): cover domain rules, parsing, state transitions, sorting/filtering, and error branches
 - Property tests (recommended): use proptest/quickcheck for key invariants
 - Integration tests (as needed): validate adapters with real dependencies (controlled by features/env vars)
-- UI/E2E (small amount): only cover smoke tests for key user paths; if gpui is hard to automate, at least provide "structure snapshot tests" or "state snapshot tests"
+- UI/E2E (small amount): cover key user paths with Playwright (`just test-ui`)
 
 ### 5.2 Hard requirements for agents
 - Every functional change must add or update at least one test (unless it is pure refactoring; refactors still must not reduce coverage)
@@ -118,15 +100,9 @@ When writing or using commands, choose by intent (names may differ; follow the r
 
 > If a `justfile` already provides similar commands with different names, do not force new naming. Align this document to the existing naming instead.
 
-## 5.4 GPUI UI testing tips (for stable tests)
-- Prefer `debug_selector(|| "...".to_owned())` on key elements. Avoid selectors derived from transient values.
-- For bounds/layout assertions, use `window_cx.debug_bounds("selector")` and compare with tolerances.
-- When you need to assert resizing/dragging behavior, follow existing patterns in `crates/luban_ui/src/root.rs` tests:
-  - `simulate_mouse_down` → `simulate_mouse_move` → `simulate_mouse_up`
-  - `run_until_parked` + `refresh()` between steps
-- For scrollable lists, prefer the existing pattern:
-  - container: `.overflow_y_scroll().track_scroll(&handle)`
-  - overlay scrollbar: `Scrollbar::vertical(&handle).scrollbar_show(ScrollbarShow::Always)` with a stable selector.
+## 5.4 Playwright tips (for stable tests)
+- Prefer stable `data-testid` selectors and avoid text-based selectors for dynamic content.
+- Keep tests focused on smoke coverage for core user flows to reduce flakiness.
 
 ## 6. Error handling and logging (debuggability requirements)
 - User-visible errors:

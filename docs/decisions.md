@@ -69,4 +69,4 @@ See `docs/codex-cli.md`.
 - Remote access / multi-machine use.
 - Authentication/authorization and security hardening (localhost-only use).
 - Multi-user support or concurrent writers.
-- Keeping legacy GPUI UI behavior in sync with the web UI.
+- Maintaining a legacy native UI implementation.

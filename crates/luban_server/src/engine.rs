@@ -474,7 +474,9 @@ impl Engine {
                     .ok()
                     .unwrap_or_else(|| Err("failed to join load task".to_owned()));
                 let action = match loaded {
-                    Ok(persisted) => Action::AppStateLoaded { persisted },
+                    Ok(persisted) => Action::AppStateLoaded {
+                        persisted: Box::new(persisted),
+                    },
                     Err(message) => Action::AppStateLoadFailed { message },
                 };
                 Ok(VecDeque::from([action]))
@@ -1114,7 +1116,7 @@ fn map_agent_item(item: &CodexThreadItem) -> (luban_api::AgentItemKind, serde_js
         CodexThreadItem::TodoList { .. } => luban_api::AgentItemKind::TodoList,
         CodexThreadItem::Error { .. } => luban_api::AgentItemKind::Error,
     };
-    let payload = serde_json::to_value(item).unwrap_or_else(|_| serde_json::Value::Null);
+    let payload = serde_json::to_value(item).unwrap_or(serde_json::Value::Null);
     (kind, payload)
 }
 

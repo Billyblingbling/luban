@@ -1,29 +1,16 @@
 # Luban
 
-Luban is a standalone AI code editor app built with GPUI, with a Zed-like layout:
+Luban is a standalone AI code editor app with a web frontend and a local Rust server.
 
-- Left: sidebar
-- Center: timeline
-- Right: diff / terminal
+- UI: `web/` (served by `crates/luban_server`)
+- Desktop wrapper: `crates/luban_tauri` (Tauri)
 
 ## Development
 
 This project uses `just` to manage all common dev commands.
 
-The embedded terminal requires Zig (0.14.1) for building `ghostty_vt_sys`.
-
-Install Zig using a toolchain manager (recommended: `zvm`) or your system package manager, and ensure `zig` is available in `PATH` (or set `ZIG=/path/to/zig`).
-
 ```bash
 just -l
-```
-
-### macOS Requirements
-
-GPUI uses Metal shaders on macOS. Ensure the Metal toolchain component is installed:
-
-```bash
-xcodebuild -downloadComponent MetalToolchain
 ```
 
 ### Run

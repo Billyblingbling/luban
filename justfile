@@ -1,9 +1,6 @@
 default:
   @just --list
 
-zig-bootstrap:
-  bash tools/bootstrap-zig.sh
-
 fmt:
   cargo fmt --all
 
