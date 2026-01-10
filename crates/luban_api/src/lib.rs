@@ -108,6 +108,77 @@ pub enum ThinkingEffort {
     XHigh,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskIntentKind {
+    FixIssue,
+    ImplementFeature,
+    ReviewPullRequest,
+    ResolvePullRequestConflicts,
+    AddProject,
+    Other,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TaskRepoInfo {
+    pub full_name: String,
+    pub url: String,
+    pub default_branch: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TaskIssueInfo {
+    pub number: u64,
+    pub title: String,
+    pub url: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TaskPullRequestInfo {
+    pub number: u64,
+    pub title: String,
+    pub url: String,
+    pub head_ref: Option<String>,
+    pub base_ref: Option<String>,
+    pub mergeable: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum TaskProjectSpec {
+    LocalPath { path: String },
+    GitHubRepo { full_name: String },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TaskDraft {
+    pub input: String,
+    pub project: TaskProjectSpec,
+    pub intent_kind: TaskIntentKind,
+    pub summary: String,
+    pub prompt: String,
+    pub repo: Option<TaskRepoInfo>,
+    pub issue: Option<TaskIssueInfo>,
+    pub pull_request: Option<TaskPullRequestInfo>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskExecuteMode {
+    Create,
+    Start,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TaskExecuteResult {
+    pub project_id: ProjectId,
+    pub workspace_id: WorkspaceId,
+    pub thread_id: WorkspaceThreadId,
+    pub worktree_path: String,
+    pub prompt: String,
+    pub mode: TaskExecuteMode,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ThreadsSnapshot {
     pub rev: u64,
@@ -185,7 +256,7 @@ pub enum WsClientMessage {
     },
     Action {
         request_id: String,
-        action: ClientAction,
+        action: Box<ClientAction>,
     },
     Ping,
 }
@@ -203,7 +274,7 @@ pub enum WsServerMessage {
     },
     Event {
         rev: u64,
-        event: ServerEvent,
+        event: Box<ServerEvent>,
     },
     Error {
         request_id: Option<String>,
@@ -218,6 +289,13 @@ pub enum ClientAction {
     PickProjectPath,
     AddProject {
         path: String,
+    },
+    TaskPreview {
+        input: String,
+    },
+    TaskExecute {
+        draft: Box<TaskDraft>,
+        mode: TaskExecuteMode,
     },
     DeleteProject {
         project_id: ProjectId,
@@ -288,6 +366,18 @@ pub enum ServerEvent {
     },
     Toast {
         message: String,
+    },
+    ProjectPathPicked {
+        request_id: String,
+        path: Option<String>,
+    },
+    TaskPreviewReady {
+        request_id: String,
+        draft: Box<TaskDraft>,
+    },
+    TaskExecuted {
+        request_id: String,
+        result: TaskExecuteResult,
     },
 }
 

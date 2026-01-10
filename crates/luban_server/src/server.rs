@@ -174,7 +174,9 @@ async fn handle_ws_incoming(
             Ok(())
         }
         WsClientMessage::Action { request_id, action } => {
-            let ack = engine.apply_client_action(action).await;
+            let ack = engine
+                .apply_client_action(request_id.clone(), *action)
+                .await;
             let msg = match ack {
                 Ok(rev) => WsServerMessage::Ack { request_id, rev },
                 Err(message) => WsServerMessage::Error {

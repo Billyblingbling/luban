@@ -6,6 +6,10 @@ pub fn worktrees_root(luban_root: &Path) -> PathBuf {
     luban_root.join("worktrees")
 }
 
+pub fn projects_root(luban_root: &Path) -> PathBuf {
+    luban_root.join("projects")
+}
+
 pub fn conversations_root(luban_root: &Path) -> PathBuf {
     luban_root.join("conversations")
 }
@@ -38,6 +42,7 @@ mod tests {
     fn roots_join_to_expected_subdirs() {
         let base = PathBuf::from("luban-root");
         assert_eq!(worktrees_root(&base), base.join("worktrees"));
+        assert_eq!(projects_root(&base), base.join("projects"));
         assert_eq!(conversations_root(&base), base.join("conversations"));
         assert_eq!(sqlite_path(&base), base.join("luban.db"));
     }

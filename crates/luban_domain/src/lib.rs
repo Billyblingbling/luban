@@ -8,7 +8,8 @@ pub use codex::{
 mod adapters;
 pub use adapters::{
     ContextImage, CreatedWorkspace, ProjectWorkspaceService, PullRequestCiState, PullRequestInfo,
-    PullRequestState, RunAgentTurnRequest,
+    PullRequestState, RunAgentTurnRequest, TaskDraft, TaskIntentKind, TaskIssueInfo,
+    TaskProjectSpec, TaskPullRequestInfo, TaskRepoInfo,
 };
 mod context_tokens;
 pub use context_tokens::{

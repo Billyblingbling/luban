@@ -2,13 +2,15 @@
 
 import type React from "react"
 
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 import { FileText, FolderOpen, GitBranch, GitPullRequest, CircleDot, Link2, Loader2, Sparkles, Play } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
+import { useLuban } from "@/lib/luban-context"
+import type { TaskDraft, TaskExecuteMode, TaskIntentKind } from "@/lib/luban-api"
 
 type DetectedType = "repo" | "issue" | "pr" | "local_path" | "description" | null
 
@@ -101,21 +103,84 @@ function detectInputType(input: string): DetectionResult | null {
 interface AddProjectModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onPickProjectPath: () => void
-  onAddProjectPath: (path: string) => void
 }
 
-export function AddProjectModal({ open, onOpenChange, onPickProjectPath, onAddProjectPath }: AddProjectModalProps) {
+function draftKeyForThread(workspaceId: number, threadId: number) {
+  return `luban:draft:${workspaceId}:${threadId}`
+}
+
+function intentLabel(kind: TaskIntentKind): string {
+  switch (kind) {
+    case "fix_issue":
+      return "Fix issue"
+    case "implement_feature":
+      return "Implement feature"
+    case "review_pull_request":
+      return "Review PR"
+    case "resolve_pull_request_conflicts":
+      return "Resolve PR conflicts"
+    case "add_project":
+      return "Add project"
+    case "other":
+      return "Other"
+  }
+}
+
+export function AddProjectModal({ open, onOpenChange }: AddProjectModalProps) {
+  const { pickProjectPath, previewTask, executeTask, openWorkspace } = useLuban()
+
   const [input, setInput] = useState("")
   const [isDragging, setIsDragging] = useState(false)
-  const [isAdding, setIsAdding] = useState(false)
+  const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [draft, setDraft] = useState<TaskDraft | null>(null)
+  const [analysisError, setAnalysisError] = useState<string | null>(null)
+  const [executingMode, setExecutingMode] = useState<TaskExecuteMode | null>(null)
+  const seqRef = useRef(0)
 
   const detection = useMemo(() => detectInputType(input), [input])
 
-  const handleBrowse = () => {
-    onPickProjectPath()
-    setInput("")
-    onOpenChange(false)
+  useEffect(() => {
+    if (!open) return
+    const trimmed = input.trim()
+    if (trimmed.length === 0) {
+      setDraft(null)
+      setAnalysisError(null)
+      return
+    }
+
+    const seq = (seqRef.current += 1)
+    setIsAnalyzing(true)
+    setAnalysisError(null)
+
+    const t = window.setTimeout(() => {
+      previewTask(trimmed)
+        .then((d) => {
+          if (seqRef.current !== seq) return
+          setDraft(d)
+          setAnalysisError(null)
+        })
+        .catch((err: unknown) => {
+          if (seqRef.current !== seq) return
+          setDraft(null)
+          setAnalysisError(err instanceof Error ? err.message : String(err))
+        })
+        .finally(() => {
+          if (seqRef.current !== seq) return
+          setIsAnalyzing(false)
+        })
+    }, 650)
+
+    return () => window.clearTimeout(t)
+  }, [input, open, previewTask])
+
+  const handleBrowse = async () => {
+    try {
+      const picked = await pickProjectPath()
+      if (!picked) return
+      setInput(picked)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    }
   }
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -137,27 +202,39 @@ export function AddProjectModal({ open, onOpenChange, onPickProjectPath, onAddPr
     [handleBrowse],
   )
 
-  const handleSubmit = async (startImmediately: boolean) => {
-    if (!detection) return
-
-    if (detection.type !== "local_path") {
-      toast.error("Only local paths are supported right now. Use Browse to pick a folder.")
-      return
-    }
-
-    setIsAdding(true)
+  const handleSubmit = async (mode: TaskExecuteMode) => {
+    if (!draft) return
+    setExecutingMode(mode)
     try {
-      onAddProjectPath(input.trim())
-      void startImmediately
+      const result = await executeTask(draft, mode)
+      if (mode === "create") {
+        localStorage.setItem(
+          draftKeyForThread(result.workspace_id, result.thread_id),
+          JSON.stringify({ text: result.prompt }),
+        )
+      } else {
+        // No-op
+      }
+
+      await openWorkspace(result.workspace_id)
+
+      toast(mode === "create" ? "Draft created" : "Task started")
+
       setInput("")
+      setDraft(null)
+      setAnalysisError(null)
       onOpenChange(false)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
     } finally {
-      setIsAdding(false)
+      setExecutingMode(null)
     }
   }
 
   const handleClose = () => {
     setInput("")
+    setDraft(null)
+    setAnalysisError(null)
     onOpenChange(false)
   }
 
@@ -206,7 +283,7 @@ export function AddProjectModal({ open, onOpenChange, onPickProjectPath, onAddPr
                 "w-full min-h-[100px] p-4 pb-12 bg-transparent text-sm resize-none font-mono",
                 "placeholder:text-muted-foreground/50 placeholder:font-sans focus:outline-none",
               )}
-              disabled={isAdding}
+              disabled={executingMode != null}
               autoFocus
             />
 
@@ -219,7 +296,7 @@ export function AddProjectModal({ open, onOpenChange, onPickProjectPath, onAddPr
                   "text-xs text-muted-foreground hover:text-foreground",
                   "bg-secondary/80 hover:bg-secondary rounded-md transition-colors",
                 )}
-                disabled={isAdding}
+                disabled={executingMode != null}
               >
                 <FolderOpen className="w-3.5 h-3.5" />
                 <span>Browse</span>
@@ -236,7 +313,39 @@ export function AddProjectModal({ open, onOpenChange, onPickProjectPath, onAddPr
             )}
           </div>
 
-          {detection && (
+          {analysisError && (
+            <div className="px-3 py-2.5 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive">
+              {analysisError}
+            </div>
+          )}
+
+          {draft ? (
+            <div className="space-y-2">
+              <div className="flex items-start gap-3 px-3 py-2.5 bg-secondary/50 rounded-lg">
+                <div className={cn("p-1.5 rounded-md bg-background", getIconColor(detection?.type ?? null))}>
+                  {(detection?.icon ?? <FileText className="w-4 h-4" />) as React.ReactNode}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs text-muted-foreground">Intent</span>
+                    <span className="text-[11px] text-muted-foreground">{intentLabel(draft.intent_kind)}</span>
+                  </div>
+                  <p className="text-sm font-medium whitespace-pre-line">{draft.summary}</p>
+                </div>
+              </div>
+
+              <details className="group">
+                <summary className="cursor-pointer select-none text-xs text-muted-foreground hover:text-foreground transition-colors">
+                  Suggested prompt
+                </summary>
+                <pre className="mt-2 whitespace-pre-wrap text-xs bg-muted/30 border border-border rounded-lg p-3 font-mono text-foreground/90">
+                  {draft.prompt}
+                </pre>
+              </details>
+            </div>
+          ) : null}
+
+          {!draft && detection && (
             <div className="flex items-center gap-3 px-3 py-2.5 bg-secondary/50 rounded-lg animate-in fade-in slide-in-from-top-1 duration-200">
               <div className={cn("p-1.5 rounded-md bg-background", getIconColor(detection.type))}>{detection.icon}</div>
               <div className="flex-1 min-w-0">
@@ -245,14 +354,26 @@ export function AddProjectModal({ open, onOpenChange, onPickProjectPath, onAddPr
               </div>
             </div>
           )}
+
+          {isAnalyzing ? (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground px-1">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              Analyzing intent…
+            </div>
+          ) : null}
         </div>
 
         <div className="px-5 py-4 border-t border-border bg-secondary/30 flex items-center justify-end gap-2">
-          <Button variant="ghost" size="sm" onClick={handleClose} disabled={isAdding}>
+          <Button variant="ghost" size="sm" onClick={handleClose} disabled={executingMode != null}>
             Cancel
           </Button>
-          <Button variant="outline" size="sm" onClick={() => void handleSubmit(false)} disabled={!detection || isAdding}>
-            {isAdding ? (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void handleSubmit("create")}
+            disabled={!draft || executingMode != null}
+          >
+            {executingMode === "create" ? (
               <>
                 <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
                 Creating...
@@ -261,8 +382,8 @@ export function AddProjectModal({ open, onOpenChange, onPickProjectPath, onAddPr
               "Create"
             )}
           </Button>
-          <Button size="sm" onClick={() => void handleSubmit(true)} disabled={!detection || isAdding}>
-            {isAdding ? (
+          <Button size="sm" onClick={() => void handleSubmit("start")} disabled={!draft || executingMode != null}>
+            {executingMode === "start" ? (
               <>
                 <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
                 Starting...
@@ -279,4 +400,3 @@ export function AddProjectModal({ open, onOpenChange, onPickProjectPath, onAddPr
     </Dialog>
   )
 }
-

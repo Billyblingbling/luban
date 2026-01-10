@@ -23,6 +23,7 @@ mod codex_cli;
 mod context_blobs;
 mod conversations;
 mod git;
+mod task;
 use codex_cli::CodexTurnParams;
 
 fn contains_attempt_fraction(text: &str) -> bool {
@@ -566,6 +567,7 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                     image_paths,
                     model: model.clone(),
                     model_reasoning_effort: model_reasoning_effort.clone(),
+                    sandbox_mode: None,
                 },
                 cancel.clone(),
                 |event| {
@@ -972,6 +974,14 @@ impl ProjectWorkspaceService for GitWorkspaceService {
 
         result.map_err(|e| format!("{e:#}"))
     }
+
+    fn task_preview(&self, input: String) -> Result<luban_domain::TaskDraft, String> {
+        task::task_preview(self, input).map_err(|e| format!("{e:#}"))
+    }
+
+    fn task_prepare_project(&self, spec: luban_domain::TaskProjectSpec) -> Result<PathBuf, String> {
+        task::task_prepare_project(self, spec).map_err(|e| format!("{e:#}"))
+    }
 }
 
 impl GitWorkspaceService {
@@ -1087,6 +1097,7 @@ mod tests {
                     image_paths: Vec::new(),
                     model: None,
                     model_reasoning_effort: None,
+                    sandbox_mode: None,
                 },
                 Arc::new(AtomicBool::new(false)),
                 |_event| Ok(()),

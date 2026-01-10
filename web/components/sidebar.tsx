@@ -181,8 +181,6 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
   const {
     app,
     activeWorkspaceId,
-    pickProjectPath,
-    addProject,
     createWorkspace,
     openWorkspacePullRequest,
     openWorkspacePullRequestFailedAction,
@@ -443,8 +441,6 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
       <AddProjectModal
         open={addProjectOpen}
         onOpenChange={setAddProjectOpen}
-        onPickProjectPath={pickProjectPath}
-        onAddProjectPath={addProject}
       />
     </aside>
   )

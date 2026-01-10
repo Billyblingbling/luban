@@ -93,12 +93,17 @@ impl EngineHandle {
 
     pub async fn apply_client_action(
         &self,
+        request_id: String,
         action: luban_api::ClientAction,
     ) -> Result<u64, String> {
         let (tx, rx) = oneshot::channel();
         if self
             .tx
-            .send(EngineCommand::ApplyClientAction { action, reply: tx })
+            .send(EngineCommand::ApplyClientAction {
+                request_id,
+                action,
+                reply: tx,
+            })
             .await
             .is_err()
         {
@@ -130,6 +135,7 @@ pub enum EngineCommand {
         reply: oneshot::Sender<anyhow::Result<Option<PathBuf>>>,
     },
     ApplyClientAction {
+        request_id: String,
         action: luban_api::ClientAction,
         reply: oneshot::Sender<Result<u64, String>>,
     },
@@ -270,29 +276,206 @@ impl Engine {
                 let path = self.state.workspace(id).map(|w| w.worktree_path.clone());
                 let _ = reply.send(Ok(path));
             }
-            EngineCommand::ApplyClientAction { action, reply } => {
+            EngineCommand::ApplyClientAction {
+                request_id,
+                action,
+                reply,
+            } => {
                 if matches!(action, luban_api::ClientAction::PickProjectPath) {
-                    let tx = self.tx.clone();
                     let events = self.events.clone();
                     let rev = self.rev;
                     tokio::task::spawn_blocking(move || {
                         let picked = pick_project_folder();
-                        match picked {
-                            Some(path) => {
-                                let _ = tx.blocking_send(EngineCommand::DispatchAction {
-                                    action: Box::new(Action::AddProject { path }),
+                        let _ = events.send(WsServerMessage::Event {
+                            rev,
+                            event: Box::new(luban_api::ServerEvent::ProjectPathPicked {
+                                request_id,
+                                path: picked.as_ref().map(|p| p.to_string_lossy().to_string()),
+                            }),
+                        });
+                    });
+                    let _ = reply.send(Ok(self.rev));
+                    return;
+                }
+
+                if let luban_api::ClientAction::TaskPreview { input } = &action {
+                    let services = self.services.clone();
+                    let events = self.events.clone();
+                    let request_id = request_id.clone();
+                    let rev = self.rev;
+                    let input = input.clone();
+                    tokio::spawn(async move {
+                        let result =
+                            tokio::task::spawn_blocking(move || services.task_preview(input))
+                                .await
+                                .ok()
+                                .unwrap_or_else(|| {
+                                    Err("failed to join task preview task".to_owned())
                                 });
-                            }
-                            None => {
+
+                        match result {
+                            Ok(draft) => {
                                 let _ = events.send(WsServerMessage::Event {
                                     rev,
-                                    event: luban_api::ServerEvent::Toast {
-                                        message: "No folder selected".to_owned(),
-                                    },
+                                    event: Box::new(luban_api::ServerEvent::TaskPreviewReady {
+                                        request_id,
+                                        draft: Box::new(map_task_draft(&draft)),
+                                    }),
+                                });
+                            }
+                            Err(message) => {
+                                let _ = events.send(WsServerMessage::Error {
+                                    request_id: Some(request_id),
+                                    message,
                                 });
                             }
                         }
                     });
+
+                    let _ = reply.send(Ok(self.rev));
+                    return;
+                }
+
+                if let luban_api::ClientAction::TaskExecute { draft, mode } = &action {
+                    let draft = draft.clone();
+                    let mode = *mode;
+
+                    let local_project_path = match draft.project {
+                        luban_api::TaskProjectSpec::GitHubRepo { ref full_name } => {
+                            let services = self.services.clone();
+                            let spec = luban_domain::TaskProjectSpec::GitHubRepo {
+                                full_name: full_name.clone(),
+                            };
+                            match tokio::task::spawn_blocking(move || {
+                                services.task_prepare_project(spec)
+                            })
+                            .await
+                            {
+                                Ok(Ok(path)) => path,
+                                Ok(Err(message)) => {
+                                    let _ = reply.send(Err(message));
+                                    return;
+                                }
+                                Err(_) => {
+                                    let _ = reply
+                                        .send(Err("failed to join task prepare task".to_owned()));
+                                    return;
+                                }
+                            }
+                        }
+                        luban_api::TaskProjectSpec::LocalPath { ref path } => {
+                            let services = self.services.clone();
+                            let spec = luban_domain::TaskProjectSpec::LocalPath {
+                                path: expand_user_path(path),
+                            };
+                            match tokio::task::spawn_blocking(move || {
+                                services.task_prepare_project(spec)
+                            })
+                            .await
+                            {
+                                Ok(Ok(path)) => path,
+                                Ok(Err(message)) => {
+                                    let _ = reply.send(Err(message));
+                                    return;
+                                }
+                                Err(_) => {
+                                    let _ = reply
+                                        .send(Err("failed to join task prepare task".to_owned()));
+                                    return;
+                                }
+                            }
+                        }
+                    };
+
+                    let before_workspace_ids = self
+                        .state
+                        .projects
+                        .iter()
+                        .flat_map(|p| p.workspaces.iter().map(|w| w.id))
+                        .collect::<HashSet<_>>();
+
+                    self.process_action_queue(Action::AddProject {
+                        path: local_project_path.clone(),
+                    })
+                    .await;
+
+                    let Some(project_id) =
+                        find_project_id_by_path(&self.state, &local_project_path)
+                    else {
+                        let _ =
+                            reply.send(Err("failed to locate project after adding it".to_owned()));
+                        return;
+                    };
+
+                    self.process_action_queue(Action::CreateWorkspace { project_id })
+                        .await;
+
+                    let after_workspace_ids = self
+                        .state
+                        .projects
+                        .iter()
+                        .flat_map(|p| p.workspaces.iter().map(|w| w.id))
+                        .collect::<HashSet<_>>();
+                    let new_workspace_id = after_workspace_ids
+                        .difference(&before_workspace_ids)
+                        .copied()
+                        .next();
+
+                    let Some(workspace_id) = new_workspace_id else {
+                        let _ =
+                            reply.send(Err("failed to determine created workspace id".to_owned()));
+                        return;
+                    };
+
+                    let thread_id = WorkspaceThreadId::from_u64(1);
+
+                    self.process_action_queue(Action::OpenWorkspace { workspace_id })
+                        .await;
+
+                    self.process_action_queue(Action::ChatModelChanged {
+                        workspace_id,
+                        thread_id,
+                        model_id: "gpt-5.2-codex".to_owned(),
+                    })
+                    .await;
+                    self.process_action_queue(Action::ThinkingEffortChanged {
+                        workspace_id,
+                        thread_id,
+                        thinking_effort: ThinkingEffort::Low,
+                    })
+                    .await;
+
+                    if mode == luban_api::TaskExecuteMode::Start {
+                        self.process_action_queue(Action::SendAgentMessage {
+                            workspace_id,
+                            thread_id,
+                            text: draft.prompt.clone(),
+                            attachments: Vec::new(),
+                        })
+                        .await;
+                    }
+
+                    let worktree_path = self
+                        .state
+                        .workspace(workspace_id)
+                        .map(|w| w.worktree_path.to_string_lossy().to_string())
+                        .unwrap_or_default();
+
+                    let _ = self.events.send(WsServerMessage::Event {
+                        rev: self.rev,
+                        event: Box::new(luban_api::ServerEvent::TaskExecuted {
+                            request_id: request_id.clone(),
+                            result: luban_api::TaskExecuteResult {
+                                project_id: luban_api::ProjectId(project_id.as_u64()),
+                                workspace_id: luban_api::WorkspaceId(workspace_id.as_u64()),
+                                thread_id: luban_api::WorkspaceThreadId(thread_id.as_u64()),
+                                worktree_path,
+                                prompt: draft.prompt.clone(),
+                                mode,
+                            },
+                        }),
+                    });
+
                     let _ = reply.send(Ok(self.rev));
                     return;
                 }
@@ -702,9 +885,9 @@ impl Engine {
                     Err(message) => {
                         let _ = self.events.send(WsServerMessage::Event {
                             rev: self.rev,
-                            event: luban_api::ServerEvent::Toast {
+                            event: Box::new(luban_api::ServerEvent::Toast {
                                 message: message.clone(),
-                            },
+                            }),
                         });
                         Ok(VecDeque::from([Action::OpenWorkspacePullRequestFailed {
                             message,
@@ -731,9 +914,9 @@ impl Engine {
                     Err(message) => {
                         let _ = self.events.send(WsServerMessage::Event {
                             rev: self.rev,
-                            event: luban_api::ServerEvent::Toast {
+                            event: Box::new(luban_api::ServerEvent::Toast {
                                 message: message.clone(),
-                            },
+                            }),
                         });
                         Ok(VecDeque::from([
                             Action::OpenWorkspacePullRequestFailedActionFailed { message },
@@ -748,10 +931,10 @@ impl Engine {
     fn publish_app_snapshot(&self) {
         let _ = self.events.send(WsServerMessage::Event {
             rev: self.rev,
-            event: luban_api::ServerEvent::AppChanged {
+            event: Box::new(luban_api::ServerEvent::AppChanged {
                 rev: self.rev,
                 snapshot: self.app_snapshot(),
-            },
+            }),
         });
     }
 
@@ -773,10 +956,10 @@ impl Engine {
 
         let _ = self.events.send(WsServerMessage::Event {
             rev: self.rev,
-            event: luban_api::ServerEvent::WorkspaceThreadsChanged {
+            event: Box::new(luban_api::ServerEvent::WorkspaceThreadsChanged {
                 workspace_id: api_id,
                 threads,
-            },
+            }),
         });
     }
 
@@ -790,7 +973,7 @@ impl Engine {
         if let Ok(snapshot) = self.conversation_snapshot(api_wid, api_tid) {
             let _ = self.events.send(WsServerMessage::Event {
                 rev: self.rev,
-                event: luban_api::ServerEvent::ConversationChanged { snapshot },
+                event: Box::new(luban_api::ServerEvent::ConversationChanged { snapshot }),
             });
         }
     }
@@ -905,6 +1088,100 @@ impl Engine {
             remote_thread_id: conversation.thread_id.clone(),
             title: conversation.title.clone(),
         })
+    }
+}
+
+fn normalize_project_path(path: &std::path::Path) -> PathBuf {
+    use std::path::Component;
+
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                let popped = out.pop();
+                if !popped {
+                    out.push(component);
+                }
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+fn find_project_id_by_path(
+    state: &AppState,
+    path: &std::path::Path,
+) -> Option<luban_domain::ProjectId> {
+    let normalized_path = normalize_project_path(path);
+    state
+        .projects
+        .iter()
+        .find(|p| normalize_project_path(&p.path) == normalized_path)
+        .map(|p| p.id)
+}
+
+fn map_task_intent_kind(kind: luban_domain::TaskIntentKind) -> luban_api::TaskIntentKind {
+    match kind {
+        luban_domain::TaskIntentKind::FixIssue => luban_api::TaskIntentKind::FixIssue,
+        luban_domain::TaskIntentKind::ImplementFeature => {
+            luban_api::TaskIntentKind::ImplementFeature
+        }
+        luban_domain::TaskIntentKind::ReviewPullRequest => {
+            luban_api::TaskIntentKind::ReviewPullRequest
+        }
+        luban_domain::TaskIntentKind::ResolvePullRequestConflicts => {
+            luban_api::TaskIntentKind::ResolvePullRequestConflicts
+        }
+        luban_domain::TaskIntentKind::AddProject => luban_api::TaskIntentKind::AddProject,
+        luban_domain::TaskIntentKind::Other => luban_api::TaskIntentKind::Other,
+    }
+}
+
+fn map_task_project_spec(spec: &luban_domain::TaskProjectSpec) -> luban_api::TaskProjectSpec {
+    match spec {
+        luban_domain::TaskProjectSpec::LocalPath { path } => {
+            luban_api::TaskProjectSpec::LocalPath {
+                path: path.to_string_lossy().to_string(),
+            }
+        }
+        luban_domain::TaskProjectSpec::GitHubRepo { full_name } => {
+            luban_api::TaskProjectSpec::GitHubRepo {
+                full_name: full_name.clone(),
+            }
+        }
+    }
+}
+
+fn map_task_draft(draft: &luban_domain::TaskDraft) -> luban_api::TaskDraft {
+    luban_api::TaskDraft {
+        input: draft.input.clone(),
+        project: map_task_project_spec(&draft.project),
+        intent_kind: map_task_intent_kind(draft.intent_kind),
+        summary: draft.summary.clone(),
+        prompt: draft.prompt.clone(),
+        repo: draft.repo.as_ref().map(|r| luban_api::TaskRepoInfo {
+            full_name: r.full_name.clone(),
+            url: r.url.clone(),
+            default_branch: r.default_branch.clone(),
+        }),
+        issue: draft.issue.as_ref().map(|i| luban_api::TaskIssueInfo {
+            number: i.number,
+            title: i.title.clone(),
+            url: i.url.clone(),
+        }),
+        pull_request: draft
+            .pull_request
+            .as_ref()
+            .map(|pr| luban_api::TaskPullRequestInfo {
+                number: pr.number,
+                title: pr.title.clone(),
+                url: pr.url.clone(),
+                head_ref: pr.head_ref.clone(),
+                base_ref: pr.base_ref.clone(),
+                mergeable: pr.mergeable.clone(),
+            }),
     }
 }
 
@@ -1139,6 +1416,8 @@ fn map_client_action(action: luban_api::ClientAction) -> Option<Action> {
         luban_api::ClientAction::AddProject { path } => Some(Action::AddProject {
             path: expand_user_path(&path),
         }),
+        luban_api::ClientAction::TaskPreview { .. } => None,
+        luban_api::ClientAction::TaskExecute { .. } => None,
         luban_api::ClientAction::DeleteProject { project_id } => Some(Action::DeleteProject {
             project_id: luban_domain::ProjectId::from_u64(project_id.0),
         }),
@@ -1386,6 +1665,17 @@ mod tests {
             &self,
             _worktree_path: PathBuf,
         ) -> Result<(), String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn task_preview(&self, _input: String) -> Result<luban_domain::TaskDraft, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn task_prepare_project(
+            &self,
+            _spec: luban_domain::TaskProjectSpec,
+        ) -> Result<PathBuf, String> {
             Err("unimplemented".to_owned())
         }
     }

@@ -10,6 +10,9 @@ import type {
   ClientAction,
   ConversationSnapshot,
   ThreadMeta,
+  TaskDraft,
+  TaskExecuteMode,
+  TaskExecuteResult,
   WorkspaceId,
   WorkspaceSnapshot,
   WsClientMessage,
@@ -44,13 +47,16 @@ type LubanContextValue = {
   conversation: ConversationSnapshot | null
   wsConnected: boolean
 
-  pickProjectPath: () => void
+  pickProjectPath: () => Promise<string | null>
   addProject: (path: string) => void
   createWorkspace: (projectId: number) => void
   openWorkspacePullRequest: (workspaceId: WorkspaceId) => void
   openWorkspacePullRequestFailedAction: (workspaceId: WorkspaceId) => void
   archiveWorkspace: (workspaceId: number) => void
   toggleProjectExpanded: (projectId: number) => void
+
+  previewTask: (input: string) => Promise<TaskDraft>
+  executeTask: (draft: TaskDraft, mode: TaskExecuteMode) => Promise<TaskExecuteResult>
 
   openWorkspace: (workspaceId: WorkspaceId) => Promise<void>
   selectThread: (threadId: number) => Promise<void>
@@ -80,6 +86,16 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     existingThreadIds: Set<number>
     requestedAtUnixMs: number
   } | null>(null)
+
+  const pendingResponsesRef = useRef<
+    Map<
+      string,
+      {
+        resolve: (value: unknown) => void
+        reject: (err: Error) => void
+      }
+    >
+  >(new Map())
 
   useEffect(() => {
     activeWorkspaceIdRef.current = activeWorkspaceId
@@ -175,9 +191,44 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
           toast(event.message)
           return
         }
+
+        if (event.type === "project_path_picked") {
+          const pending = pendingResponsesRef.current.get(event.request_id)
+          if (pending) {
+            pendingResponsesRef.current.delete(event.request_id)
+            pending.resolve(event.path)
+          }
+          return
+        }
+
+        if (event.type === "task_preview_ready") {
+          const pending = pendingResponsesRef.current.get(event.request_id)
+          if (pending) {
+            pendingResponsesRef.current.delete(event.request_id)
+            pending.resolve(event.draft)
+          }
+          return
+        }
+
+        if (event.type === "task_executed") {
+          const pending = pendingResponsesRef.current.get(event.request_id)
+          if (pending) {
+            pendingResponsesRef.current.delete(event.request_id)
+            pending.resolve(event.result)
+          }
+          return
+        }
       }
 
       if (msg.type === "error") {
+        if (msg.request_id) {
+          const pending = pendingResponsesRef.current.get(msg.request_id)
+          if (pending) {
+            pendingResponsesRef.current.delete(msg.request_id)
+            pending.reject(new Error(msg.message))
+            return
+          }
+        }
         console.warn("server error:", msg.message)
         toast.error(msg.message)
       }
@@ -209,7 +260,7 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     return null
   }, [app, activeWorkspaceId])
 
-  function sendAction(action: ClientAction) {
+  function sendAction(action: ClientAction, requestId?: string) {
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       if (pendingActionsRef.current.length < 128) {
@@ -220,8 +271,19 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
       }
       return
     }
-    const msg: WsClientMessage = { type: "action", request_id: randomRequestId(), action }
+    const msg: WsClientMessage = { type: "action", request_id: requestId ?? randomRequestId(), action }
     ws.send(JSON.stringify(msg))
+  }
+
+  function request<T>(action: ClientAction): Promise<T> {
+    const requestId = randomRequestId()
+    return new Promise<T>((resolve, reject) => {
+      pendingResponsesRef.current.set(requestId, {
+        resolve,
+        reject: (err) => reject(err),
+      })
+      sendAction(action, requestId)
+    })
   }
 
   async function waitForNewThread(
@@ -249,8 +311,8 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     sendAction({ type: "add_project", path })
   }
 
-  function pickProjectPath() {
-    sendAction({ type: "pick_project_path" })
+  function pickProjectPath(): Promise<string | null> {
+    return request<string | null>({ type: "pick_project_path" })
   }
 
   function createWorkspace(projectId: number) {
@@ -280,6 +342,14 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
       }
     })
     sendAction({ type: "toggle_project_expanded", project_id: projectId })
+  }
+
+  function previewTask(input: string): Promise<TaskDraft> {
+    return request<TaskDraft>({ type: "task_preview", input })
+  }
+
+  function executeTask(draft: TaskDraft, mode: TaskExecuteMode): Promise<TaskExecuteResult> {
+    return request<TaskExecuteResult>({ type: "task_execute", draft, mode })
   }
 
   async function selectThreadInternal(workspaceId: WorkspaceId, threadId: number) {
@@ -407,6 +477,8 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     openWorkspacePullRequestFailedAction,
     archiveWorkspace,
     toggleProjectExpanded,
+    previewTask,
+    executeTask,
     openWorkspace,
     selectThread,
     createThread,

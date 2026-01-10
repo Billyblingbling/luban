@@ -16,6 +16,7 @@ pub(super) struct CodexTurnParams {
     pub(super) image_paths: Vec<PathBuf>,
     pub(super) model: Option<String>,
     pub(super) model_reasoning_effort: Option<String>,
+    pub(super) sandbox_mode: Option<String>,
 }
 
 enum CodexStdoutLine {
@@ -78,12 +79,15 @@ pub(super) fn run_codex_turn_streamed_via_cli(
         image_paths,
         model,
         model_reasoning_effort,
+        sandbox_mode,
     } = params;
+
+    let sandbox_mode = sandbox_mode.as_deref().unwrap_or("danger-full-access");
 
     let mut command = Command::new(codex);
     command
         .arg("--sandbox")
-        .arg("danger-full-access")
+        .arg(sandbox_mode)
         .arg("--ask-for-approval")
         .arg("never")
         .arg("--search")
