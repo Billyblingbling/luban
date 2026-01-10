@@ -805,7 +805,7 @@ fn main_pane_title_tracks_selected_context() {
 }
 
 #[test]
-fn sidebar_workspace_title_uses_branch_name() {
+fn sidebar_workspace_title_uses_workspace_name() {
     let mut state = AppState::new();
     state.apply(Action::AddProject {
         path: PathBuf::from("/tmp/repo"),
@@ -825,10 +825,7 @@ fn sidebar_workspace_title_uses_branch_name() {
         .find(|w| w.status == WorkspaceStatus::Active && w.workspace_name == "w1")
         .expect("missing workspace w1");
 
-    assert_eq!(
-        sidebar::sidebar_workspace_title(workspace),
-        "repo/w1".to_owned()
-    );
+    assert_eq!(sidebar::sidebar_workspace_title(workspace), "w1".to_owned());
 }
 
 #[test]
@@ -1463,14 +1460,6 @@ async fn main_workspace_row_is_rendered_and_is_not_archivable(cx: &mut gpui::Tes
     let main_bounds = window_cx
         .debug_bounds("workspace-main-row-0")
         .expect("missing main workspace row");
-    assert!(
-        window_cx.debug_bounds("workspace-main-badge-0").is_none(),
-        "main workspace should not render a separate badge label"
-    );
-    assert!(
-        window_cx.debug_bounds("workspace-main-icon-0").is_none(),
-        "main workspace should not render a leading icon"
-    );
     assert!(
         window_cx.debug_bounds("workspace-main-home-0").is_some(),
         "main workspace should render a home worktree indicator"
@@ -4303,32 +4292,100 @@ async fn sidebar_buttons_remain_visible_with_long_titles(cx: &mut gpui::TestAppC
     let title_bounds = window_cx
         .debug_bounds("project-title-0")
         .expect("missing debug bounds for project-title-0");
-
-    window_cx.simulate_mouse_move(header_bounds.center(), None, Modifiers::none());
-    window_cx.run_until_parked();
-    window_cx.refresh().unwrap();
-
     let toggle_bounds = window_cx
         .debug_bounds("project-toggle-0")
         .expect("missing debug bounds for project-toggle-0");
-    let create_bounds = window_cx
-        .debug_bounds("project-create-workspace-0")
-        .expect("missing debug bounds for project-create-workspace-0");
-    let settings_bounds = window_cx
-        .debug_bounds("project-settings-0")
-        .expect("missing debug bounds for project-settings-0");
-
-    assert!(settings_bounds.right() <= header_bounds.right() + px(2.0));
-    assert!(create_bounds.right() <= settings_bounds.left() + px(4.0));
-    assert!(toggle_bounds.left() <= title_bounds.right() + px(8.0));
+    assert!(toggle_bounds.right() + px(6.0) <= title_bounds.left() + px(10.0));
 
     let row_bounds = window_cx
         .debug_bounds("workspace-row-0-0")
         .expect("missing debug bounds for workspace-row-0-0");
+    window_cx.simulate_mouse_move(row_bounds.center(), None, Modifiers::none());
+    window_cx.run_until_parked();
+    window_cx.refresh().unwrap();
     let archive_bounds = window_cx
         .debug_bounds("workspace-archive-0-0")
         .expect("missing debug bounds for workspace-archive-0-0");
     assert!(archive_bounds.right() <= row_bounds.right() + px(2.0));
+
+    let settings_bounds = window_cx
+        .debug_bounds("sidebar-settings")
+        .expect("missing debug bounds for sidebar settings button");
+    assert!(settings_bounds.right() <= header_bounds.right() + px(2.0));
+}
+
+#[gpui::test]
+async fn sidebar_renders_at_prototype_viewport(cx: &mut gpui::TestAppContext) {
+    cx.update(gpui_component::init);
+
+    let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+    let mut state = AppState::new();
+    state.apply(Action::AddProject {
+        path: PathBuf::from("/tmp/repo"),
+    });
+    let project_id = state.projects[0].id;
+    state.apply(Action::ToggleProjectExpanded { project_id });
+    state.apply(Action::WorkspaceCreated {
+        project_id,
+        workspace_name: "w1".to_owned(),
+        branch_name: "repo/w1".to_owned(),
+        worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/w1"),
+    });
+
+    let (_view, window_cx) =
+        cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+    window_cx.simulate_resize(size(px(1440.0), px(900.0)));
+    window_cx.run_until_parked();
+    window_cx.refresh().unwrap();
+
+    assert!(window_cx.debug_bounds("titlebar-sidebar").is_some());
+
+    let workspace_menu = window_cx
+        .debug_bounds("sidebar-workspace-menu")
+        .expect("missing workspace menu trigger");
+    assert!(
+        (workspace_menu.size.height - px(32.0)).abs() <= px(1.0),
+        "expected workspace menu trigger to be 32px tall: {workspace_menu:?}"
+    );
+    #[cfg(target_os = "macos")]
+    assert!(
+        workspace_menu.origin.x >= px(72.0),
+        "expected workspace menu trigger to avoid macOS traffic lights: {workspace_menu:?}"
+    );
+
+    let add_project = window_cx
+        .debug_bounds("add-project-button")
+        .expect("missing add project button");
+    assert!(
+        (add_project.size.width - px(28.0)).abs() <= px(1.0)
+            && (add_project.size.height - px(28.0)).abs() <= px(1.0),
+        "expected add project button to be 28x28: {add_project:?}"
+    );
+
+    let main_row = window_cx
+        .debug_bounds("workspace-main-row-0")
+        .expect("missing main workspace row");
+    assert!(
+        (main_row.size.height - px(28.0)).abs() <= px(1.0),
+        "expected main workspace row to be 28px tall: {main_row:?}"
+    );
+
+    let row = window_cx
+        .debug_bounds("workspace-row-0-0")
+        .expect("missing workspace row");
+    assert!(
+        (row.size.height - px(28.0)).abs() <= px(1.0),
+        "expected workspace row to be 28px tall: {row:?}"
+    );
+
+    let settings = window_cx
+        .debug_bounds("sidebar-settings")
+        .expect("missing sidebar settings");
+    assert!(
+        (settings.size.height - px(36.0)).abs() <= px(1.0),
+        "expected sidebar settings to be 36px tall: {settings:?}"
+    );
 }
 
 #[gpui::test]
@@ -4359,14 +4416,14 @@ async fn workspace_icons_are_vertically_centered_in_rows(cx: &mut gpui::TestAppC
     let main_row = window_cx
         .debug_bounds("workspace-main-row-0")
         .expect("missing main workspace row");
-    let main_status_container = window_cx
-        .debug_bounds("workspace-main-status-container-0")
-        .expect("missing main workspace status container");
-    let main_dy = (main_status_container.center().y - main_row.center().y).abs();
+    let main_icon = window_cx
+        .debug_bounds("workspace-main-icon-0")
+        .expect("missing main workspace icon");
+    let main_dy = (main_icon.center().y - main_row.center().y).abs();
     assert!(
         main_dy <= px(2.0),
-        "main status container should be vertically centered: icon={:?} row={:?}",
-        main_status_container,
+        "main icon should be vertically centered: icon={:?} row={:?}",
+        main_icon,
         main_row
     );
 
@@ -4374,8 +4431,8 @@ async fn workspace_icons_are_vertically_centered_in_rows(cx: &mut gpui::TestAppC
         .debug_bounds("workspace-row-0-0")
         .expect("missing workspace row");
     let icon = window_cx
-        .debug_bounds("workspace-status-container-0-0")
-        .expect("missing workspace status indicator");
+        .debug_bounds("workspace-icon-0-0")
+        .expect("missing workspace icon");
     let dy = (icon.center().y - row.center().y).abs();
     assert!(
         dy <= px(2.0),
@@ -4425,27 +4482,17 @@ async fn dashboard_uses_full_window_and_renders_horizontal_columns(cx: &mut gpui
         "dashboard should not render the sidebar resizer"
     );
 
-    let titlebar = window_cx
+    let _titlebar = window_cx
         .debug_bounds("titlebar-sidebar")
         .expect("missing sidebar titlebar");
-    let title = window_cx
-        .debug_bounds("titlebar-dashboard-title")
-        .expect("missing dashboard toggle");
-    let center_dx = (title.center().x - titlebar.center().x).abs();
     assert!(
-        center_dx <= px(2.0),
-        "dashboard toggle should be centered in sidebar titlebar: title={:?} titlebar={:?}",
-        title,
-        titlebar
+        window_cx.debug_bounds("sidebar-workspace-menu").is_some(),
+        "dashboard should render the workspace menu trigger"
     );
 
     assert!(
         window_cx.debug_bounds("add-project-button").is_none(),
         "dashboard should not render add project button"
-    );
-    assert!(
-        window_cx.debug_bounds("titlebar-dashboard-label").is_some(),
-        "dashboard toggle label should switch to dashboard"
     );
 
     let start = window_cx
@@ -4478,7 +4525,7 @@ async fn dashboard_uses_full_window_and_renders_horizontal_columns(cx: &mut gpui
 }
 
 #[gpui::test]
-async fn dashboard_toggle_returns_to_workspace_without_moving(cx: &mut gpui::TestAppContext) {
+async fn dashboard_menu_returns_to_workspace(cx: &mut gpui::TestAppContext) {
     cx.update(gpui_component::init);
 
     let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
@@ -4510,49 +4557,47 @@ async fn dashboard_toggle_returns_to_workspace_without_moving(cx: &mut gpui::Tes
         "expected last chat workspace to be set after rendering a workspace"
     );
 
-    let initial_toggle = window_cx
-        .debug_bounds("titlebar-dashboard-title")
-        .expect("missing dashboard toggle");
-    let initial_center_x = initial_toggle.center().x;
+    let trigger = window_cx
+        .debug_bounds("sidebar-workspace-menu")
+        .expect("missing workspace menu trigger");
+    window_cx.simulate_click(trigger.center(), Modifiers::none());
+    window_cx.refresh().unwrap();
 
-    window_cx.simulate_click(initial_toggle.center(), Modifiers::none());
+    let toggle_dashboard = window_cx
+        .debug_bounds("sidebar-workspace-menu-toggle-dashboard")
+        .expect("missing dashboard toggle menu item");
+    window_cx.simulate_click(toggle_dashboard.center(), Modifiers::none());
     window_cx.refresh().unwrap();
 
     let selected = view.read_with(window_cx, |v, _| v.debug_state().main_pane);
     assert!(
         matches!(selected, MainPane::Dashboard),
-        "expected dashboard to open after clicking the toggle"
+        "expected dashboard to open after selecting the menu item"
     );
 
     let last_workspace = view.read_with(window_cx, |v, _| v.last_workspace_before_dashboard);
     assert_eq!(
         last_workspace,
         Some(w1),
-        "expected the dashboard toggle to remember the previous workspace"
+        "expected the dashboard action to remember the previous workspace"
     );
 
-    let dashboard_toggle = window_cx
-        .debug_bounds("titlebar-dashboard-title")
-        .expect("missing dashboard toggle on dashboard");
-    let dashboard_center_x = dashboard_toggle.center().x;
-    assert!(
-        (dashboard_center_x - initial_center_x).abs() <= px(2.0),
-        "toggle should not move when entering dashboard: before={:?} after={:?}",
-        initial_toggle,
-        dashboard_toggle
-    );
-    assert!(
-        window_cx.debug_bounds("titlebar-dashboard-label").is_some(),
-        "expected toggle label to switch to dashboard on dashboard"
-    );
+    let trigger = window_cx
+        .debug_bounds("sidebar-workspace-menu")
+        .expect("missing workspace menu trigger on dashboard");
+    window_cx.simulate_click(trigger.center(), Modifiers::none());
+    window_cx.refresh().unwrap();
 
-    window_cx.simulate_click(dashboard_toggle.center(), Modifiers::none());
+    let return_to_workspace = window_cx
+        .debug_bounds("sidebar-workspace-menu-toggle-dashboard")
+        .expect("missing return to workspace menu item");
+    window_cx.simulate_click(return_to_workspace.center(), Modifiers::none());
     window_cx.refresh().unwrap();
 
     let selected = view.read_with(window_cx, |v, _| v.debug_state().main_pane);
     assert!(
         matches!(selected, MainPane::Workspace(id) if id == w1),
-        "expected workspace view to return after clicking the toggle on dashboard"
+        "expected workspace view to return after selecting the menu item on dashboard"
     );
 }
 
@@ -5449,8 +5494,8 @@ async fn project_header_has_extra_spacing_before_main_workspace(cx: &mut gpui::T
         .expect("missing main workspace row");
     let gap = main_row.top() - header.bottom();
     assert!(
-        gap >= px(4.0),
-        "expected extra spacing between project header and main row: gap={gap:?} header={header:?} main={main_row:?}"
+        gap <= px(1.0),
+        "expected project main row to be adjacent to header: gap={gap:?} header={header:?} main={main_row:?}"
     );
 }
 
@@ -6805,8 +6850,8 @@ async fn workspace_row_shows_pull_request_number_when_available(cx: &mut gpui::T
     assert!(
         window_cx
             .debug_bounds("workspace-status-idle-0-1")
-            .is_some(),
-        "expected idle indicator for workspace without PR"
+            .is_none(),
+        "idle workspaces should not render a trailing status indicator"
     );
 }
 
