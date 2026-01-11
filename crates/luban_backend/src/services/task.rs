@@ -290,6 +290,45 @@ fn compose_agent_prompt(
     issue: &Option<TaskIssueInfo>,
     pull_request: &Option<TaskPullRequestInfo>,
 ) -> String {
+    fn render_known_context(
+        project: &TaskProjectSpec,
+        repo: &Option<TaskRepoInfo>,
+        issue: &Option<TaskIssueInfo>,
+        pull_request: &Option<TaskPullRequestInfo>,
+    ) -> String {
+        let mut out = String::new();
+        out.push_str("Known context:\n");
+        match project {
+            TaskProjectSpec::Unspecified => out.push_str("- Project: Unspecified\n"),
+            TaskProjectSpec::LocalPath { path } => {
+                out.push_str(&format!("- Project: Local path {}\n", path.display()));
+            }
+            TaskProjectSpec::GitHubRepo { full_name } => {
+                out.push_str(&format!("- Project: GitHub repo {full_name}\n"));
+            }
+        }
+
+        if let Some(r) = repo {
+            out.push_str(&format!("- Repo URL: {}\n", r.url));
+            if let Some(branch) = &r.default_branch {
+                out.push_str(&format!("- Default branch: {branch}\n"));
+            }
+        }
+        if let Some(i) = issue {
+            out.push_str(&format!("- Issue: #{} {}\n", i.number, i.url));
+        }
+        if let Some(pr) = pull_request {
+            out.push_str(&format!("- PR: #{} {}\n", pr.number, pr.url));
+            if let Some(head) = &pr.head_ref {
+                out.push_str(&format!("- PR head: {head}\n"));
+            }
+            if let Some(base) = &pr.base_ref {
+                out.push_str(&format!("- PR base: {base}\n"));
+            }
+        }
+        out
+    }
+
     let mut out = String::new();
     out.push_str("You are an AI coding agent working inside a git worktree.\n\n");
     out.push_str("Task input:\n");
@@ -298,42 +337,57 @@ fn compose_agent_prompt(
     out.push_str("Intent:\n");
     out.push_str(intent_kind_label(intent_kind));
     out.push_str("\n\n");
-    out.push_str("Known context:\n");
+    out.push_str(&render_known_context(project, repo, issue, pull_request));
 
-    match project {
-        TaskProjectSpec::Unspecified => out.push_str("- Project: Unspecified\n"),
-        TaskProjectSpec::LocalPath { path } => {
-            out.push_str(&format!("- Project: Local path {}\n", path.display()));
-        }
-        TaskProjectSpec::GitHubRepo { full_name } => {
-            out.push_str(&format!("- Project: GitHub repo {full_name}\n"));
-        }
-    }
-
-    if let Some(r) = repo {
-        out.push_str(&format!("- Repo URL: {}\n", r.url));
-        if let Some(branch) = &r.default_branch {
-            out.push_str(&format!("- Default branch: {branch}\n"));
-        }
-    }
-    if let Some(i) = issue {
-        out.push_str(&format!("- Issue: #{} {}\n", i.number, i.url));
-    }
-    if let Some(pr) = pull_request {
-        out.push_str(&format!("- PR: #{} {}\n", pr.number, pr.url));
-        if let Some(head) = &pr.head_ref {
-            out.push_str(&format!("- PR head: {head}\n"));
-        }
-        if let Some(base) = &pr.base_ref {
-            out.push_str(&format!("- PR base: {base}\n"));
-        }
-    }
+    out.push_str("\nGlobal constraints:\n");
+    out.push_str("- Do NOT commit, push, open a pull request, create a PR review, or comment on the upstream issue/PR unless the user explicitly asks.\n");
+    out.push_str("- If changes are needed, provide a patch/diff and clear instructions for the user to apply.\n");
+    out.push_str(
+        "- Prefer minimal, reviewable steps and follow the target repository's conventions.\n",
+    );
 
     out.push_str("\nInstructions:\n");
-    out.push_str("- First, inspect the repository to gather the missing context (read code, search for relevant symbols, and check existing docs and tooling).\n");
-    out.push_str("- Then implement the task end-to-end with small, reviewable changes.\n");
-    out.push_str("- Validate locally using the project's standard workflow (formatters, linters, and tests as defined by the repository).\n");
-    out.push_str("- Summarize what changed, how to verify, and any risks or follow-ups.\n");
+    match intent_kind {
+        TaskIntentKind::FixIssue => {
+            out.push_str(
+                "- Goal: reproduce the reported problem, identify the root cause, and fix it.\n",
+            );
+            out.push_str("- Steps: find reproduction steps, narrow down the failing behavior, implement a minimal fix, and add/adjust tests to prevent regression.\n");
+            out.push_str("- Output: explain the root cause, the fix, tests/verification performed, and any remaining risks.\n");
+        }
+        TaskIntentKind::ImplementFeature => {
+            out.push_str(
+                "- Goal: implement the requested feature with minimal, maintainable changes.\n",
+            );
+            out.push_str("- Steps: locate the correct extension points, implement the feature, update docs/tests if applicable, and verify with the repository's standard checks.\n");
+            out.push_str(
+                "- Output: describe behavior changes, how to verify, and any trade-offs.\n",
+            );
+        }
+        TaskIntentKind::ReviewPullRequest => {
+            out.push_str("- Goal: produce a high-quality code review. Do NOT implement changes unless explicitly requested.\n");
+            out.push_str("- Steps: understand the PR intent, review for correctness, security, performance, maintainability, and test coverage.\n");
+            out.push_str("- Output: a structured review with (1) summary, (2) major issues, (3) minor notes, (4) suggested tests, (5) questions.\n");
+        }
+        TaskIntentKind::ResolvePullRequestConflicts => {
+            out.push_str(
+                "- Goal: resolve merge conflicts between the PR branch and the base branch.\n",
+            );
+            out.push_str("- Steps: update the branch locally, resolve conflicts with minimal semantic changes, and verify with the repository's standard checks.\n");
+            out.push_str("- Output: list the conflicted files, explain key resolutions, and provide the final diff (without committing).\n");
+        }
+        TaskIntentKind::AddProject => {
+            out.push_str("- Goal: help initialize/onboard the project for further work.\n");
+            out.push_str("- Steps: inspect repository structure, find the standard build/test workflow, and validate the local setup.\n");
+            out.push_str("- Output: a concise project map and the recommended local workflow for future tasks.\n");
+        }
+        TaskIntentKind::Other => {
+            out.push_str("- Goal: interpret the request, gather needed context from the repository, and propose a concrete plan.\n");
+            out.push_str("- Steps: summarize the intent, list assumptions, identify the relevant code areas, and propose next actions.\n");
+            out.push_str("- Output: a clear plan and, if feasible, a minimal implementation or a review (depending on what the request implies).\n");
+        }
+    }
+
     out
 }
 
@@ -699,6 +753,18 @@ pub(super) fn task_prepare_project(
 mod tests {
     use super::*;
 
+    fn assert_global_constraints(prompt: &str) {
+        assert!(
+            prompt.contains("Do NOT commit")
+                && prompt.contains("Do NOT commit, push, open a pull request"),
+            "prompt must include global no-commit/no-pr constraint"
+        );
+        assert!(
+            !prompt.contains("`just") && !prompt.contains("\njust "),
+            "prompt must not include luban-specific just commands"
+        );
+    }
+
     #[test]
     fn parse_github_repo_url() {
         let parsed = parse_task_input("https://github.com/openai/openai-cookbook").unwrap();
@@ -756,5 +822,78 @@ mod tests {
             }
             other => panic!("unexpected: {other:?}"),
         }
+    }
+
+    #[test]
+    fn prompts_are_intent_specific_and_no_commit_by_default() {
+        let input = "example task";
+        let project = TaskProjectSpec::Unspecified;
+
+        let fix = compose_agent_prompt(
+            input,
+            TaskIntentKind::FixIssue,
+            &project,
+            &None,
+            &None,
+            &None,
+        );
+        assert!(fix.contains("Goal: reproduce"), "{fix}");
+        assert_global_constraints(&fix);
+
+        let feature = compose_agent_prompt(
+            input,
+            TaskIntentKind::ImplementFeature,
+            &project,
+            &None,
+            &None,
+            &None,
+        );
+        assert!(
+            feature.contains("Goal: implement the requested feature"),
+            "{feature}"
+        );
+        assert_global_constraints(&feature);
+
+        let review = compose_agent_prompt(
+            input,
+            TaskIntentKind::ReviewPullRequest,
+            &project,
+            &None,
+            &None,
+            &None,
+        );
+        assert!(
+            review.contains("produce a high-quality code review"),
+            "{review}"
+        );
+        assert!(review.contains("Do NOT implement changes"), "{review}");
+        assert_global_constraints(&review);
+
+        let conflicts = compose_agent_prompt(
+            input,
+            TaskIntentKind::ResolvePullRequestConflicts,
+            &project,
+            &None,
+            &None,
+            &None,
+        );
+        assert!(conflicts.contains("resolve merge conflicts"), "{conflicts}");
+        assert_global_constraints(&conflicts);
+
+        let add_project = compose_agent_prompt(
+            input,
+            TaskIntentKind::AddProject,
+            &project,
+            &None,
+            &None,
+            &None,
+        );
+        assert!(add_project.contains("initialize/onboard"), "{add_project}");
+        assert_global_constraints(&add_project);
+
+        let other =
+            compose_agent_prompt(input, TaskIntentKind::Other, &project, &None, &None, &None);
+        assert!(other.contains("propose a concrete plan"), "{other}");
+        assert_global_constraints(&other);
     }
 }
