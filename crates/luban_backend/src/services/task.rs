@@ -198,20 +198,19 @@ struct GhPrView {
 struct TaskIntentModelOutput {
     #[serde(default)]
     intent_kind: Option<String>,
-    #[serde(default, alias = "reason")]
-    rationale: String,
 }
 
 fn model_prompt_for_task_intent(input: &str, context_json: &str) -> String {
     format!(
-        r#"You are classifying a user's input into a task intent kind for a local, single-user developer tool.
+        r#"You are classifying a user's input into a task intent kind.
 
 Rules:
 - Do NOT run commands.
 - Do NOT modify files.
 - Output ONLY a single JSON object, no markdown, no extra text.
-- Always output a result, even if the input is vague: choose intent_kind="other" and provide a short rationale.
-- Do NOT say "insufficient information" or ask the user for more info in the output.
+- Always output a result, even if the input is vague: choose intent_kind="other".
+- Do NOT include rationale, notes, or any extra fields in the output.
+- Do NOT ask the user for more info in the output.
 
 Allowed intent_kind values:
 - fix_issue
@@ -229,8 +228,7 @@ Retrieved context (JSON):
 
 Output JSON schema:
 {{
-  "intent_kind": "<one of the allowed values>",
-  "rationale": "<1-2 sentences explaining why this intent_kind fits>"
+  "intent_kind": "<one of the allowed values>"
 }}
 "#
     )
@@ -262,7 +260,6 @@ fn compose_task_summary(
     issue: &Option<TaskIssueInfo>,
     pull_request: &Option<TaskPullRequestInfo>,
     notes: &[String],
-    rationale: &str,
 ) -> String {
     let mut lines = Vec::new();
     lines.push(format!("Intent: {}", intent_kind_label(intent_kind)));
@@ -282,11 +279,6 @@ fn compose_task_summary(
         lines.push(format!("Notes: {}", notes.join("; ")));
     }
 
-    let trimmed = rationale.trim();
-    if !trimmed.is_empty() {
-        lines.push(format!("Rationale: {trimmed}"));
-    }
-
     lines.join("\n")
 }
 
@@ -299,7 +291,7 @@ fn compose_agent_prompt(
     pull_request: &Option<TaskPullRequestInfo>,
 ) -> String {
     let mut out = String::new();
-    out.push_str("You are a coding agent working inside a git worktree for this project.\n\n");
+    out.push_str("You are an AI coding agent working inside a git worktree.\n\n");
     out.push_str("Task input:\n");
     out.push_str(input.trim());
     out.push_str("\n\n");
@@ -338,10 +330,10 @@ fn compose_agent_prompt(
     }
 
     out.push_str("\nInstructions:\n");
-    out.push_str("- First, gather the missing context by inspecting the repository (read code, search for relevant symbols, and run focused checks).\n");
+    out.push_str("- First, inspect the repository to gather the missing context (read code, search for relevant symbols, and check existing docs and tooling).\n");
     out.push_str("- Then implement the task end-to-end with small, reviewable changes.\n");
-    out.push_str("- Validate locally with `just fmt && just lint && just test` (and `just web build` if you touch web code).\n");
-    out.push_str("- Summarize what changed, how to verify, and any risks.\n");
+    out.push_str("- Validate locally using the project's standard workflow (formatters, linters, and tests as defined by the repository).\n");
+    out.push_str("- Summarize what changed, how to verify, and any risks or follow-ups.\n");
     out
 }
 
@@ -352,24 +344,6 @@ fn extract_first_json_object(raw: &str) -> Option<&str> {
         return None;
     }
     Some(&raw[start..=end])
-}
-
-fn sanitize_rationale(raw: &str) -> String {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return String::new();
-    }
-    let lower = trimmed.to_ascii_lowercase();
-    let looks_like_non_answer = lower.contains("insufficient")
-        || lower.contains("not enough")
-        || lower.contains("need more")
-        || lower.contains("lack of")
-        || lower.contains("can't tell")
-        || lower.contains("cannot tell");
-    if looks_like_non_answer {
-        return String::new();
-    }
-    trimmed.to_owned()
 }
 
 fn parse_intent_kind(raw: &str) -> TaskIntentKind {
@@ -634,22 +608,10 @@ pub(super) fn task_preview(
 
     let output = extract_first_json_object(raw.trim())
         .and_then(|json| serde_json::from_str::<TaskIntentModelOutput>(json).ok())
-        .unwrap_or(TaskIntentModelOutput {
-            intent_kind: None,
-            rationale: String::new(),
-        });
+        .unwrap_or(TaskIntentModelOutput { intent_kind: None });
 
     let intent_kind = parse_intent_kind(output.intent_kind.as_deref().unwrap_or("other"));
-    let rationale = sanitize_rationale(&output.rationale);
-    let summary = compose_task_summary(
-        intent_kind,
-        &project,
-        &repo,
-        &issue,
-        &pull_request,
-        &notes,
-        &rationale,
-    );
+    let summary = compose_task_summary(intent_kind, &project, &repo, &issue, &pull_request, &notes);
     let prompt = compose_agent_prompt(&input, intent_kind, &project, &repo, &issue, &pull_request);
 
     Ok(TaskDraft {
