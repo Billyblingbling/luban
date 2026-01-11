@@ -11,6 +11,7 @@ use std::sync::atomic::AtomicBool;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum ParsedTaskInput {
+    Unspecified,
     LocalPath(PathBuf),
     GitHubRepo { full_name: String },
     GitHubIssue { full_name: String, number: u64 },
@@ -84,11 +85,11 @@ fn expand_tilde(path: &str) -> anyhow::Result<PathBuf> {
 fn parse_task_input(input: &str) -> anyhow::Result<ParsedTaskInput> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
-        return Err(anyhow!("task input is empty"));
+        return Ok(ParsedTaskInput::Unspecified);
     }
 
     if let Some(url) = extract_first_github_url(trimmed) {
-        return parse_github_url(&url).ok_or_else(|| anyhow!("unsupported GitHub URL: {url}"));
+        return Ok(parse_github_url(&url).unwrap_or(ParsedTaskInput::Unspecified));
     }
 
     let tokens = trimmed.split_whitespace().map(|s| {
@@ -119,9 +120,7 @@ fn parse_task_input(input: &str) -> anyhow::Result<ParsedTaskInput> {
         }
     }
 
-    Err(anyhow!(
-        "unsupported input: provide a GitHub URL, owner/repo, or a local path"
-    ))
+    Ok(ParsedTaskInput::Unspecified)
 }
 
 fn ensure_gh_cli() -> anyhow::Result<()> {
@@ -197,20 +196,22 @@ struct GhPrView {
 
 #[derive(Deserialize)]
 struct TaskIntentModelOutput {
-    intent_kind: String,
-    summary: String,
-    prompt: String,
+    #[serde(default)]
+    intent_kind: Option<String>,
+    #[serde(default, alias = "reason")]
+    rationale: String,
 }
 
 fn model_prompt_for_task_intent(input: &str, context_json: &str) -> String {
     format!(
-        r#"You are generating a task draft for a local, single-user developer tool.
+        r#"You are classifying a user's input into a task intent kind for a local, single-user developer tool.
 
 Rules:
 - Do NOT run commands.
 - Do NOT modify files.
 - Output ONLY a single JSON object, no markdown, no extra text.
-- If the context is insufficient to decide, set intent_kind="other" and explain what is missing in summary, but still produce a safe prompt that asks for the missing info.
+- Always output a result, even if the input is vague: choose intent_kind="other" and provide a short rationale.
+- Do NOT say "insufficient information" or ask the user for more info in the output.
 
 Allowed intent_kind values:
 - fix_issue
@@ -229,11 +230,146 @@ Retrieved context (JSON):
 Output JSON schema:
 {{
   "intent_kind": "<one of the allowed values>",
-  "summary": "<2-6 sentences, concrete and actionable>",
-  "prompt": "<a runnable first user message for the coding agent>"
+  "rationale": "<1-2 sentences explaining why this intent_kind fits>"
 }}
 "#
     )
+}
+
+fn intent_kind_label(kind: TaskIntentKind) -> &'static str {
+    match kind {
+        TaskIntentKind::FixIssue => "Fix issue",
+        TaskIntentKind::ImplementFeature => "Implement feature",
+        TaskIntentKind::ReviewPullRequest => "Review pull request",
+        TaskIntentKind::ResolvePullRequestConflicts => "Resolve pull request conflicts",
+        TaskIntentKind::AddProject => "Add project",
+        TaskIntentKind::Other => "Other",
+    }
+}
+
+fn project_label(spec: &TaskProjectSpec) -> String {
+    match spec {
+        TaskProjectSpec::Unspecified => "Unspecified".to_owned(),
+        TaskProjectSpec::LocalPath { path } => format!("Local path: {}", path.display()),
+        TaskProjectSpec::GitHubRepo { full_name } => format!("GitHub repo: {full_name}"),
+    }
+}
+
+fn compose_task_summary(
+    intent_kind: TaskIntentKind,
+    project: &TaskProjectSpec,
+    repo: &Option<TaskRepoInfo>,
+    issue: &Option<TaskIssueInfo>,
+    pull_request: &Option<TaskPullRequestInfo>,
+    notes: &[String],
+    rationale: &str,
+) -> String {
+    let mut lines = Vec::new();
+    lines.push(format!("Intent: {}", intent_kind_label(intent_kind)));
+    lines.push(format!("Project: {}", project_label(project)));
+
+    if let Some(i) = issue {
+        lines.push(format!("Issue: #{} {}", i.number, i.title));
+    } else if let Some(pr) = pull_request {
+        lines.push(format!("PR: #{} {}", pr.number, pr.title));
+    } else if let Some(r) = repo {
+        lines.push(format!("Repo: {}", r.full_name));
+    } else {
+        lines.push("Context: None".to_owned());
+    }
+
+    if !notes.is_empty() {
+        lines.push(format!("Notes: {}", notes.join("; ")));
+    }
+
+    let trimmed = rationale.trim();
+    if !trimmed.is_empty() {
+        lines.push(format!("Rationale: {trimmed}"));
+    }
+
+    lines.join("\n")
+}
+
+fn compose_agent_prompt(
+    input: &str,
+    intent_kind: TaskIntentKind,
+    project: &TaskProjectSpec,
+    repo: &Option<TaskRepoInfo>,
+    issue: &Option<TaskIssueInfo>,
+    pull_request: &Option<TaskPullRequestInfo>,
+) -> String {
+    let mut out = String::new();
+    out.push_str("You are a coding agent working inside a git worktree for this project.\n\n");
+    out.push_str("Task input:\n");
+    out.push_str(input.trim());
+    out.push_str("\n\n");
+    out.push_str("Intent:\n");
+    out.push_str(intent_kind_label(intent_kind));
+    out.push_str("\n\n");
+    out.push_str("Known context:\n");
+
+    match project {
+        TaskProjectSpec::Unspecified => out.push_str("- Project: Unspecified\n"),
+        TaskProjectSpec::LocalPath { path } => {
+            out.push_str(&format!("- Project: Local path {}\n", path.display()));
+        }
+        TaskProjectSpec::GitHubRepo { full_name } => {
+            out.push_str(&format!("- Project: GitHub repo {full_name}\n"));
+        }
+    }
+
+    if let Some(r) = repo {
+        out.push_str(&format!("- Repo URL: {}\n", r.url));
+        if let Some(branch) = &r.default_branch {
+            out.push_str(&format!("- Default branch: {branch}\n"));
+        }
+    }
+    if let Some(i) = issue {
+        out.push_str(&format!("- Issue: #{} {}\n", i.number, i.url));
+    }
+    if let Some(pr) = pull_request {
+        out.push_str(&format!("- PR: #{} {}\n", pr.number, pr.url));
+        if let Some(head) = &pr.head_ref {
+            out.push_str(&format!("- PR head: {head}\n"));
+        }
+        if let Some(base) = &pr.base_ref {
+            out.push_str(&format!("- PR base: {base}\n"));
+        }
+    }
+
+    out.push_str("\nInstructions:\n");
+    out.push_str("- First, gather the missing context by inspecting the repository (read code, search for relevant symbols, and run focused checks).\n");
+    out.push_str("- Then implement the task end-to-end with small, reviewable changes.\n");
+    out.push_str("- Validate locally with `just fmt && just lint && just test` (and `just web build` if you touch web code).\n");
+    out.push_str("- Summarize what changed, how to verify, and any risks.\n");
+    out
+}
+
+fn extract_first_json_object(raw: &str) -> Option<&str> {
+    let start = raw.find('{')?;
+    let end = raw.rfind('}')?;
+    if end <= start {
+        return None;
+    }
+    Some(&raw[start..=end])
+}
+
+fn sanitize_rationale(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    let looks_like_non_answer = lower.contains("insufficient")
+        || lower.contains("not enough")
+        || lower.contains("need more")
+        || lower.contains("lack of")
+        || lower.contains("can't tell")
+        || lower.contains("cannot tell");
+    if looks_like_non_answer {
+        return String::new();
+    }
+    trimmed.to_owned()
 }
 
 fn parse_intent_kind(raw: &str) -> TaskIntentKind {
@@ -275,12 +411,11 @@ pub(super) fn task_preview(
     let mut repo: Option<TaskRepoInfo> = None;
     let mut issue: Option<TaskIssueInfo> = None;
     let mut pull_request: Option<TaskPullRequestInfo> = None;
+    let mut notes: Vec<String> = Vec::new();
 
     let project = match &parsed {
-        ParsedTaskInput::LocalPath(path) => {
-            let root = parse_local_repo_root(path)?;
-            TaskProjectSpec::LocalPath { path: root }
-        }
+        ParsedTaskInput::Unspecified => TaskProjectSpec::Unspecified,
+        ParsedTaskInput::LocalPath(path) => TaskProjectSpec::LocalPath { path: path.clone() },
         ParsedTaskInput::GitHubRepo { full_name } => TaskProjectSpec::GitHubRepo {
             full_name: full_name.clone(),
         },
@@ -293,34 +428,41 @@ pub(super) fn task_preview(
     };
 
     let context_json = match &parsed {
+        ParsedTaskInput::Unspecified => {
+            serde_json::json!({
+                "kind": "unspecified",
+                "input": input.trim(),
+            })
+        }
         ParsedTaskInput::LocalPath(path) => {
-            let root = match &project {
-                TaskProjectSpec::LocalPath { path } => path.clone(),
-                _ => path.clone(),
-            };
             serde_json::json!({
                 "kind": "local_path",
-                "path": root.to_string_lossy(),
+                "path": path.to_string_lossy(),
             })
         }
         ParsedTaskInput::GitHubRepo { full_name } => {
-            let view: GhRepoView = run_gh_json(&[
+            let view = run_gh_json::<GhRepoView>(&[
                 "repo",
                 "view",
                 full_name,
                 "--json",
                 "nameWithOwner,url,defaultBranchRef",
-            ])?;
-            repo = Some(TaskRepoInfo {
-                full_name: view.name_with_owner.clone(),
-                url: view.url.clone(),
-                default_branch: view
-                    .default_branch_ref
-                    .and_then(|r| r.name)
-                    .filter(|s| !s.trim().is_empty()),
-            });
+            ]);
+            if let Ok(view) = view {
+                repo = Some(TaskRepoInfo {
+                    full_name: view.name_with_owner.clone(),
+                    url: view.url.clone(),
+                    default_branch: view
+                        .default_branch_ref
+                        .and_then(|r| r.name)
+                        .filter(|s| !s.trim().is_empty()),
+                });
+            } else if let Err(err) = view {
+                notes.push(format!("Failed to retrieve repo metadata via gh: {err}"));
+            }
             serde_json::json!({
                 "kind": "repo",
+                "full_name": full_name,
                 "repo": repo.as_ref().map(|r| {
                     serde_json::json!({
                         "full_name": r.full_name,
@@ -331,22 +473,27 @@ pub(super) fn task_preview(
             })
         }
         ParsedTaskInput::GitHubIssue { full_name, number } => {
-            let repo_view: GhRepoView = run_gh_json(&[
+            let repo_view = run_gh_json::<GhRepoView>(&[
                 "repo",
                 "view",
                 full_name,
                 "--json",
                 "nameWithOwner,url,defaultBranchRef",
-            ])?;
-            repo = Some(TaskRepoInfo {
-                full_name: repo_view.name_with_owner.clone(),
-                url: repo_view.url.clone(),
-                default_branch: repo_view
-                    .default_branch_ref
-                    .and_then(|r| r.name)
-                    .filter(|s| !s.trim().is_empty()),
-            });
-            let issue_view: GhIssueView = run_gh_json(&[
+            ]);
+            if let Ok(repo_view) = repo_view {
+                repo = Some(TaskRepoInfo {
+                    full_name: repo_view.name_with_owner.clone(),
+                    url: repo_view.url.clone(),
+                    default_branch: repo_view
+                        .default_branch_ref
+                        .and_then(|r| r.name)
+                        .filter(|s| !s.trim().is_empty()),
+                });
+            } else if let Err(err) = repo_view {
+                notes.push(format!("Failed to retrieve repo metadata via gh: {err}"));
+            }
+
+            let issue_view = run_gh_json::<GhIssueView>(&[
                 "issue",
                 "view",
                 &number.to_string(),
@@ -354,14 +501,20 @@ pub(super) fn task_preview(
                 full_name,
                 "--json",
                 "title,url",
-            ])?;
-            issue = Some(TaskIssueInfo {
-                number: *number,
-                title: issue_view.title,
-                url: issue_view.url,
-            });
+            ]);
+            if let Ok(issue_view) = issue_view {
+                issue = Some(TaskIssueInfo {
+                    number: *number,
+                    title: issue_view.title,
+                    url: issue_view.url,
+                });
+            } else if let Err(err) = issue_view {
+                notes.push(format!("Failed to retrieve issue metadata via gh: {err}"));
+            }
             serde_json::json!({
                 "kind": "issue",
+                "full_name": full_name,
+                "number": number,
                 "repo": repo.as_ref().map(|r| {
                     serde_json::json!({
                         "full_name": r.full_name,
@@ -379,22 +532,27 @@ pub(super) fn task_preview(
             })
         }
         ParsedTaskInput::GitHubPullRequest { full_name, number } => {
-            let repo_view: GhRepoView = run_gh_json(&[
+            let repo_view = run_gh_json::<GhRepoView>(&[
                 "repo",
                 "view",
                 full_name,
                 "--json",
                 "nameWithOwner,url,defaultBranchRef",
-            ])?;
-            repo = Some(TaskRepoInfo {
-                full_name: repo_view.name_with_owner.clone(),
-                url: repo_view.url.clone(),
-                default_branch: repo_view
-                    .default_branch_ref
-                    .and_then(|r| r.name)
-                    .filter(|s| !s.trim().is_empty()),
-            });
-            let pr_view: GhPrView = run_gh_json(&[
+            ]);
+            if let Ok(repo_view) = repo_view {
+                repo = Some(TaskRepoInfo {
+                    full_name: repo_view.name_with_owner.clone(),
+                    url: repo_view.url.clone(),
+                    default_branch: repo_view
+                        .default_branch_ref
+                        .and_then(|r| r.name)
+                        .filter(|s| !s.trim().is_empty()),
+                });
+            } else if let Err(err) = repo_view {
+                notes.push(format!("Failed to retrieve repo metadata via gh: {err}"));
+            }
+
+            let pr_view = run_gh_json::<GhPrView>(&[
                 "pr",
                 "view",
                 &number.to_string(),
@@ -402,17 +560,25 @@ pub(super) fn task_preview(
                 full_name,
                 "--json",
                 "title,url,headRefName,baseRefName,mergeable",
-            ])?;
-            pull_request = Some(TaskPullRequestInfo {
-                number: *number,
-                title: pr_view.title,
-                url: pr_view.url,
-                head_ref: pr_view.head_ref_name,
-                base_ref: pr_view.base_ref_name,
-                mergeable: pr_view.mergeable,
-            });
+            ]);
+            if let Ok(pr_view) = pr_view {
+                pull_request = Some(TaskPullRequestInfo {
+                    number: *number,
+                    title: pr_view.title,
+                    url: pr_view.url,
+                    head_ref: pr_view.head_ref_name,
+                    base_ref: pr_view.base_ref_name,
+                    mergeable: pr_view.mergeable,
+                });
+            } else if let Err(err) = pr_view {
+                notes.push(format!(
+                    "Failed to retrieve pull request metadata via gh: {err}"
+                ));
+            }
             serde_json::json!({
                 "kind": "pull_request",
+                "full_name": full_name,
+                "number": number,
                 "repo": repo.as_ref().map(|r| {
                     serde_json::json!({
                         "full_name": r.full_name,
@@ -466,15 +632,32 @@ pub(super) fn task_preview(
         .find(|s| !s.trim().is_empty())
         .ok_or_else(|| anyhow!("codex returned no agent_message output"))?;
 
-    let output: TaskIntentModelOutput =
-        serde_json::from_str(raw.trim()).context("failed to parse codex task intent json")?;
+    let output = extract_first_json_object(raw.trim())
+        .and_then(|json| serde_json::from_str::<TaskIntentModelOutput>(json).ok())
+        .unwrap_or(TaskIntentModelOutput {
+            intent_kind: None,
+            rationale: String::new(),
+        });
+
+    let intent_kind = parse_intent_kind(output.intent_kind.as_deref().unwrap_or("other"));
+    let rationale = sanitize_rationale(&output.rationale);
+    let summary = compose_task_summary(
+        intent_kind,
+        &project,
+        &repo,
+        &issue,
+        &pull_request,
+        &notes,
+        &rationale,
+    );
+    let prompt = compose_agent_prompt(&input, intent_kind, &project, &repo, &issue, &pull_request);
 
     Ok(TaskDraft {
         input,
         project,
-        intent_kind: parse_intent_kind(&output.intent_kind),
-        summary: output.summary,
-        prompt: output.prompt,
+        intent_kind,
+        summary,
+        prompt,
         repo,
         issue,
         pull_request,
@@ -488,11 +671,14 @@ pub(super) fn task_prepare_project(
     ensure_gh_cli()?;
 
     match spec {
+        TaskProjectSpec::Unspecified => Err(anyhow!(
+            "project is unspecified: provide a local path or a GitHub repo"
+        )),
         TaskProjectSpec::LocalPath { path } => {
             if !path.exists() {
                 return Err(anyhow!("path does not exist: {}", path.display()));
             }
-            Ok(path)
+            parse_local_repo_root(&path)
         }
         TaskProjectSpec::GitHubRepo { full_name } => {
             let mut it = full_name.split('/');

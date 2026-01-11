@@ -114,6 +114,7 @@ export type TaskPullRequestInfo = {
 }
 
 export type TaskProjectSpec =
+  | { type: "unspecified" }
   | { type: "local_path"; path: string }
   | { type: "git_hub_repo"; full_name: string }
 

@@ -146,6 +146,7 @@ pub struct TaskPullRequestInfo {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TaskProjectSpec {
+    Unspecified,
     LocalPath { path: String },
     GitHubRepo { full_name: String },
 }

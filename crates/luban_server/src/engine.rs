@@ -341,6 +341,13 @@ impl Engine {
                     let mode = *mode;
 
                     let local_project_path = match draft.project {
+                        luban_api::TaskProjectSpec::Unspecified => {
+                            let _ = reply.send(Err(
+                                "project is unspecified: provide a local path or a GitHub repo"
+                                    .to_owned(),
+                            ));
+                            return;
+                        }
                         luban_api::TaskProjectSpec::GitHubRepo { ref full_name } => {
                             let services = self.services.clone();
                             let spec = luban_domain::TaskProjectSpec::GitHubRepo {
@@ -1141,6 +1148,7 @@ fn map_task_intent_kind(kind: luban_domain::TaskIntentKind) -> luban_api::TaskIn
 
 fn map_task_project_spec(spec: &luban_domain::TaskProjectSpec) -> luban_api::TaskProjectSpec {
     match spec {
+        luban_domain::TaskProjectSpec::Unspecified => luban_api::TaskProjectSpec::Unspecified,
         luban_domain::TaskProjectSpec::LocalPath { path } => {
             luban_api::TaskProjectSpec::LocalPath {
                 path: path.to_string_lossy().to_string(),

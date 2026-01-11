@@ -138,6 +138,7 @@ export function AddProjectModal({ open, onOpenChange }: AddProjectModalProps) {
   const seqRef = useRef(0)
 
   const detection = useMemo(() => detectInputType(input), [input])
+  const canExecute = draft != null && draft.project.type !== "unspecified"
 
   useEffect(() => {
     if (!open) return
@@ -334,6 +335,12 @@ export function AddProjectModal({ open, onOpenChange }: AddProjectModalProps) {
                 </div>
               </div>
 
+              {!canExecute ? (
+                <div className="px-3 py-2.5 bg-muted/30 border border-border rounded-lg text-xs text-muted-foreground">
+                  Select a local path or a GitHub repo to create a workspace.
+                </div>
+              ) : null}
+
               <details className="group">
                 <summary className="cursor-pointer select-none text-xs text-muted-foreground hover:text-foreground transition-colors">
                   Suggested prompt
@@ -371,7 +378,7 @@ export function AddProjectModal({ open, onOpenChange }: AddProjectModalProps) {
             variant="outline"
             size="sm"
             onClick={() => void handleSubmit("create")}
-            disabled={!draft || executingMode != null}
+            disabled={!canExecute || executingMode != null}
           >
             {executingMode === "create" ? (
               <>
@@ -382,7 +389,7 @@ export function AddProjectModal({ open, onOpenChange }: AddProjectModalProps) {
               "Create"
             )}
           </Button>
-          <Button size="sm" onClick={() => void handleSubmit("start")} disabled={!draft || executingMode != null}>
+          <Button size="sm" onClick={() => void handleSubmit("start")} disabled={!canExecute || executingMode != null}>
             {executingMode === "start" ? (
               <>
                 <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />

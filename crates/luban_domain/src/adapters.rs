@@ -95,6 +95,7 @@ pub struct TaskPullRequestInfo {
 
 #[derive(Clone, Debug)]
 pub enum TaskProjectSpec {
+    Unspecified,
     LocalPath { path: PathBuf },
     GitHubRepo { full_name: String },
 }
