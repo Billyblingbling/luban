@@ -293,7 +293,11 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
                         />
                       {/* Archive button only for non-home worktrees */}
                       {worktree.isHome ? (
-                        <span className="p-0.5 text-muted-foreground/50" title="Main worktree">
+                        <span
+                          data-testid="worktree-home-icon"
+                          className="p-0.5 text-muted-foreground/50 opacity-0 group-hover/worktree:opacity-100 transition-opacity"
+                          title="Main worktree"
+                        >
                           <Home className="w-3 h-3" />
                         </span>
                       ) : (

@@ -37,6 +37,30 @@ test("worktree item shows branch name above short id", async ({ page }) => {
   expect((branchBox?.y ?? 0) < (idBox?.y ?? 0)).toBeTruthy()
 })
 
+test("main worktree home icon is only visible on hover", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  const row = page.getByTestId("worktree-branch-name").first().locator("..").locator("..")
+  const icon = row.getByTestId("worktree-home-icon")
+  await expect(icon).toHaveCount(1)
+
+  await page.getByTestId("chat-input").hover()
+  await expect
+    .poll(
+      async () => Number(await icon.evaluate((el) => getComputedStyle(el).opacity)),
+      { timeout: 5_000 },
+    )
+    .toBeLessThanOrEqual(0.05)
+
+  await row.hover()
+  await expect
+    .poll(
+      async () => Number(await icon.evaluate((el) => getComputedStyle(el).opacity)),
+      { timeout: 5_000 },
+    )
+    .toBeGreaterThanOrEqual(0.95)
+})
+
 test("new tab is appended to the end", async ({ page }) => {
   await ensureWorkspace(page)
 
