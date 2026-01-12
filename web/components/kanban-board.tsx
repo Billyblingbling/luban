@@ -27,18 +27,12 @@ import { fetchConversation, fetchThreads } from "@/lib/luban-http"
 import { agentModelLabel, buildMessages, thinkingEffortLabel, type Message } from "@/lib/conversation-ui"
 import type { ConversationEntry, ConversationSnapshot } from "@/lib/luban-api"
 import { ConversationView } from "@/components/conversation-view"
-import { kanbanColumnForStatus, kanbanColumns, worktreeStatusFromWorkspace, type KanbanColumn, type WorktreeStatus } from "@/lib/worktree-ui"
+import { buildKanbanBoardVm, type KanbanWorktreeVm } from "@/lib/kanban-view-model"
+import { kanbanColumns, type KanbanColumn, type WorktreeStatus } from "@/lib/worktree-ui"
 import { activeThreadKey } from "@/lib/ui-prefs"
 import { pickThreadId } from "@/lib/thread-ui"
 
-type Worktree = {
-  id: string
-  name: string
-  projectName: string
-  status: WorktreeStatus
-  prNumber?: number
-  workspaceId: number
-}
+type Worktree = KanbanWorktreeVm
 
 function StatusBadge({
   status,
@@ -362,35 +356,9 @@ export function KanbanBoard({ onViewModeChange }: KanbanBoardProps) {
   const { app, openWorkspace, openWorkspacePullRequest, openWorkspacePullRequestFailedAction } = useLuban()
   const [selectedWorktree, setSelectedWorktree] = useState<Worktree | null>(null)
 
-  const allWorktrees = useMemo(() => {
-    if (!app) return []
-    const out: Worktree[] = []
-    for (const p of app.projects) {
-      for (const w of p.workspaces) {
-        if (w.status !== "active") continue
-        const mapped = worktreeStatusFromWorkspace(w)
-        out.push({
-          id: w.short_id,
-          name: w.branch_name,
-          projectName: p.slug,
-          status: mapped.status,
-          prNumber: mapped.prNumber,
-          workspaceId: w.id,
-        })
-      }
-    }
-    return out
-  }, [app])
-
-  const worktreesByColumn = useMemo(() => {
-    return kanbanColumns.reduce(
-      (acc, col) => {
-        acc[col.id] = allWorktrees.filter((w) => kanbanColumnForStatus(w.status) === col.id)
-        return acc
-      },
-      {} as Record<KanbanColumn, Worktree[]>,
-    )
-  }, [allWorktrees])
+  const board = useMemo(() => buildKanbanBoardVm(app), [app])
+  const allWorktrees = board.worktrees
+  const worktreesByColumn = board.worktreesByColumn as Record<KanbanColumn, Worktree[]>
 
   const handleNavigateToWorkspace = () => {
     const w = selectedWorktree
