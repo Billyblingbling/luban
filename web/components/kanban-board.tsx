@@ -25,49 +25,9 @@ import { cn } from "@/lib/utils"
 import { useLuban } from "@/lib/luban-context"
 import { fetchConversation, fetchThreads } from "@/lib/luban-http"
 import { agentModelLabel, buildMessages, thinkingEffortLabel, type Message } from "@/lib/conversation-ui"
-import { Markdown } from "@/components/markdown"
 import type { ConversationEntry, ConversationSnapshot } from "@/lib/luban-api"
-import { ActivityStream } from "@/components/activity-stream"
-
-type WorktreeStatus =
-  | "idle"
-  | "agent-running"
-  | "agent-done"
-  | "pr-ci-running"
-  | "pr-ci-passed-review"
-  | "pr-ci-passed-merge"
-  | "pr-ci-failed"
-
-type KanbanColumn = "backlog" | "running" | "pending" | "reviewing" | "done"
-
-const columns: { id: KanbanColumn; label: string; color: string }[] = [
-  { id: "backlog", label: "Backlog", color: "text-muted-foreground" },
-  { id: "running", label: "Running", color: "text-blue-400" },
-  { id: "pending", label: "Pending", color: "text-amber-400" },
-  { id: "reviewing", label: "Reviewing", color: "text-purple-400" },
-  { id: "done", label: "Done", color: "text-green-400" },
-]
-
-function getColumnForStatus(status: WorktreeStatus): KanbanColumn {
-  switch (status) {
-    case "idle":
-      return "backlog"
-    case "agent-running":
-      return "running"
-    case "agent-done":
-      return "pending"
-    case "pr-ci-running":
-      return "reviewing"
-    case "pr-ci-passed-review":
-      return "reviewing"
-    case "pr-ci-passed-merge":
-      return "done"
-    case "pr-ci-failed":
-      return "pending"
-    default:
-      return "backlog"
-  }
-}
+import { ConversationView } from "@/components/conversation-view"
+import { kanbanColumnForStatus, kanbanColumns, worktreeStatusFromWorkspace, type KanbanColumn, type WorktreeStatus } from "@/lib/worktree-ui"
 
 function activeThreadKeyForWorkspace(workspaceId: number): string {
   return `luban:active_thread_id:${workspaceId}`
@@ -80,22 +40,6 @@ type Worktree = {
   status: WorktreeStatus
   prNumber?: number
   workspaceId: number
-}
-
-function worktreeStatusFromWorkspace(w: {
-  agent_run_status: "idle" | "running"
-  has_unread_completion: boolean
-  pull_request: { state: "open" | "closed" | "merged"; ci_state: "pending" | "success" | "failure" | null; merge_ready: boolean; number: number } | null
-}): { status: WorktreeStatus; prNumber?: number } {
-  if (w.agent_run_status === "running") return { status: "agent-running" }
-  if (w.has_unread_completion) return { status: "agent-done" }
-
-  const pr = w.pull_request
-  if (!pr || pr.state !== "open") return { status: "idle" }
-  if (pr.ci_state === "failure") return { status: "pr-ci-failed", prNumber: pr.number }
-  if (pr.ci_state === "pending" || pr.ci_state == null) return { status: "pr-ci-running", prNumber: pr.number }
-  if (pr.merge_ready) return { status: "pr-ci-passed-merge", prNumber: pr.number }
-  return { status: "pr-ci-passed-review", prNumber: pr.number }
 }
 
 function StatusBadge({
@@ -343,66 +287,36 @@ function WorktreePreviewPanel({
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        <div className="py-4 px-4 space-y-4">
-          {isLoading && (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              Loading...
-            </div>
-          )}
-          {error && (
-            <div className="text-xs text-destructive border border-destructive/30 bg-destructive/5 rounded-lg px-3 py-2">
-              {error}
-            </div>
-          )}
+        <div className="py-4 px-4">
+          <div className="space-y-4">
+            {isLoading && (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                Loading...
+              </div>
+            )}
+            {error && (
+              <div className="text-xs text-destructive border border-destructive/30 bg-destructive/5 rounded-lg px-3 py-2">
+                {error}
+              </div>
+            )}
 
-          {!isLoading && !error && messages.length === 0 && (
-            <div className="text-xs text-muted-foreground">No conversation yet.</div>
-          )}
+            <ConversationView
+              messages={messages}
+              emptyState={
+                !isLoading && !error ? (
+                  <div className="text-xs text-muted-foreground">No conversation yet.</div>
+                ) : null
+              }
+            />
 
-          {messages.map((message) => (
-            <div key={message.id}>
-              {message.type === "assistant" ? (
-                <div className="space-y-2">
-                  {message.activities && (
-                    <ActivityStream activities={message.activities} isStreaming={message.isStreaming} />
-                  )}
-
-                  {message.content && message.content.length > 0 ? (
-                    <div className="text-[13px] leading-relaxed text-foreground/90">
-                      <Markdown content={message.content} />
-                    </div>
-                  ) : null}
-                </div>
-              ) : (
-                <div className="flex justify-end">
-                  <div className="max-w-[85%] border border-border rounded-lg px-3 py-2.5 bg-muted/30">
-                    <div className="text-[13px] text-foreground space-y-1 break-words overflow-hidden">
-                      {message.content.split("\n").map((line, idx) => (
-                        <p key={idx} className="flex items-start gap-2 min-w-0">
-                          {line.startsWith("•") ? (
-                            <>
-                              <span className="text-muted-foreground mt-0.5 flex-shrink-0">•</span>
-                              <span className="flex-1 min-w-0 break-words">{line.slice(2)}</span>
-                            </>
-                          ) : (
-                            <span className="flex-1 min-w-0 break-words">{line}</span>
-                          )}
-                        </p>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          ))}
-
-          {worktree.status === "agent-running" && (
-            <div className="flex items-center gap-2 py-2 px-2 rounded text-xs text-primary">
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              <span>Agent is working...</span>
-            </div>
-          )}
+            {worktree.status === "agent-running" && (
+              <div className="flex items-center gap-2 py-2 px-2 rounded text-xs text-primary">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Agent is working...</span>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -475,9 +389,9 @@ export function KanbanBoard({ onViewModeChange }: KanbanBoardProps) {
   }, [app])
 
   const worktreesByColumn = useMemo(() => {
-    return columns.reduce(
+    return kanbanColumns.reduce(
       (acc, col) => {
-        acc[col.id] = allWorktrees.filter((w) => getColumnForStatus(w.status) === col.id)
+        acc[col.id] = allWorktrees.filter((w) => kanbanColumnForStatus(w.status) === col.id)
         return acc
       },
       {} as Record<KanbanColumn, Worktree[]>,
@@ -511,7 +425,7 @@ export function KanbanBoard({ onViewModeChange }: KanbanBoardProps) {
         </div>
 
         <div className="flex-1 flex gap-4 p-4 overflow-x-auto">
-          {columns.map((column) => (
+          {kanbanColumns.map((column) => (
             <div key={column.id} className="flex-shrink-0 w-72 flex flex-col">
               <div className="flex items-center gap-2 mb-3 px-1">
                 <span className={cn("text-sm font-medium", column.color)}>{column.label}</span>

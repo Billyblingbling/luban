@@ -5,13 +5,9 @@ import type React from "react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import {
   Send,
+  Brain,
   ChevronDown,
   ChevronRight,
-  Copy,
-  Clock,
-  Wrench,
-  Brain,
-  FileCode,
   ArrowDown,
   Settings2,
   MessageSquare,
@@ -28,13 +24,12 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useLuban } from "@/lib/luban-context"
-import { Markdown } from "@/components/markdown"
 import {
   agentModelLabel,
   buildMessages,
   thinkingEffortLabel,
 } from "@/lib/conversation-ui"
-import { ActivityStream } from "@/components/activity-stream"
+import { ConversationView } from "@/components/conversation-view"
 
 function loadJson<T>(key: string): T | null {
   const raw = localStorage.getItem(key)
@@ -81,22 +76,6 @@ interface ClosedTab {
   id: string
   title: string
   closedAt: Date
-}
-
-async function copyToClipboard(text: string): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(text)
-  } catch {
-    const el = document.createElement("textarea")
-    el.value = text
-    el.style.position = "fixed"
-    el.style.opacity = "0"
-    document.body.appendChild(el)
-    el.focus()
-    el.select()
-    document.execCommand("copy")
-    document.body.removeChild(el)
-  }
 }
 
 export function ChatPanel() {
@@ -518,95 +497,15 @@ export function ChatPanel() {
           }
         }}
       >
-        <div className="max-w-3xl mx-auto py-4 px-4 pb-20 space-y-4">
-          {messages.length > 0 ? (
-            messages.map((message) => (
-            <div key={message.id} className="group">
-              {message.type === "assistant" ? (
-                <div className="space-y-1">
-                  {message.activities && (
-                    <ActivityStream activities={message.activities} isStreaming={message.isStreaming} />
-                  )}
-
-                  {message.content && message.content.length > 0 && (
-                    <Markdown content={message.content} />
-                  )}
-
-                  {message.codeReferences && message.codeReferences.length > 0 && (
-                    <div className="mt-3 flex flex-wrap gap-1.5">
-                      {message.codeReferences.map((ref, idx) => (
-                        <button
-                          key={idx}
-                          className="inline-flex items-center gap-1.5 px-2 py-1 bg-muted/50 hover:bg-primary/10 hover:text-primary rounded text-xs font-mono text-muted-foreground transition-all"
-                        >
-                          <FileCode className="w-3 h-3" />
-                          {ref.file}:{ref.line}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-
-	                  {message.metadata && !message.isStreaming && (
-	                    <div className="flex items-center gap-3 pt-2 text-[11px] text-muted-foreground/70">
-	                      {message.metadata.toolCalls && (
-	                        <span className="flex items-center gap-1">
-	                          <Wrench className="w-3 h-3" />
-	                          {message.metadata.toolCalls}
-	                        </span>
-	                      )}
-	                      {message.metadata.thinkingSteps && (
-	                        <span className="flex items-center gap-1">
-	                          <Brain className="w-3 h-3" />
-	                          {message.metadata.thinkingSteps}
-	                        </span>
-	                      )}
-	                      {message.metadata.duration && (
-	                        <span className="flex items-center gap-1">
-	                          <Clock className="w-3 h-3" />
-	                          {message.metadata.duration}
-	                        </span>
-	                      )}
-	                      <button
-	                        className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity hover:text-foreground p-1 -m-1"
-	                        onClick={() => void copyToClipboard(message.content)}
-	                      >
-	                        <Copy className="w-3 h-3" />
-	                      </button>
-	                    </div>
-	                  )}
-	                </div>
-	              ) : (
-                <div className="flex justify-end">
-	                  <div
-                      data-testid="user-message-bubble"
-                      className="max-w-[85%] border border-border rounded-lg px-3 py-2.5 bg-muted/30"
-                    >
-	                    <div className="text-[13px] text-foreground space-y-1 break-words overflow-hidden">
-	                      {message.content.split("\n").map((line, idx) => (
-	                        <p key={idx} className="flex items-start gap-2 min-w-0">
-	                          {line.startsWith("•") && (
-	                            <>
-	                              <span className="text-muted-foreground mt-0.5 flex-shrink-0">•</span>
-	                              <span className="flex-1 min-w-0 break-words">{line.slice(2)}</span>
-	                            </>
-	                          )}
-	                          {!line.startsWith("•") && (
-	                            <span className="flex-1 min-w-0 break-words">{line}</span>
-	                          )}
-	                        </p>
-	                      ))}
-	                    </div>
-	                  </div>
-	                </div>
-	              )}
-	            </div>
-          ))
-          ) : (
-            <div className="text-sm text-muted-foreground">
+        <ConversationView
+          messages={messages}
+          className="max-w-3xl mx-auto py-4 px-4 pb-20"
+          emptyState={
+            <div className="max-w-3xl mx-auto py-4 px-4 text-sm text-muted-foreground">
               {activeWorkspaceId == null ? "Select a workspace to start." : "Select a thread to load conversation."}
             </div>
-          )}
-        </div>
+          }
+        />
       </div>
 
       <div className="relative z-10 -mt-16 pt-8 bg-gradient-to-t from-background via-background to-transparent pointer-events-none">

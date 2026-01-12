@@ -24,18 +24,10 @@ import {
 import { cn } from "@/lib/utils"
 import { useLuban } from "@/lib/luban-context"
 import type { OperationStatus } from "@/lib/luban-api"
+import { worktreeStatusFromWorkspace, type WorktreeStatus } from "@/lib/worktree-ui"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { NewTaskModal } from "./new-task-modal"
-
-type WorktreeStatus =
-  | "idle" // Waiting for user input
-  | "agent-running" // Agent is executing
-  | "agent-done" // Agent returned, waiting for user to read
-  | "pr-ci-running" // PR submitted, CI running
-  | "pr-ci-passed-review" // CI passed, waiting for review
-  | "pr-ci-passed-merge" // CI passed, review passed, waiting to merge
-  | "pr-ci-failed" // CI failed
 
 interface Worktree {
   id: string
@@ -244,21 +236,10 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
       worktrees: p.workspaces
         .filter((w) => w.status === "active")
         .map((w) => ({
+          ...worktreeStatusFromWorkspace(w),
           id: w.short_id,
           name: w.branch_name,
           isHome: w.workspace_name === "main",
-          status: (() => {
-            if (w.agent_run_status === "running") return "agent-running" as const
-            if (w.has_unread_completion) return "agent-done" as const
-
-            const pr = w.pull_request
-            if (!pr || pr.state !== "open") return "idle" as const
-            if (pr.ci_state === "failure") return "pr-ci-failed" as const
-            if (pr.ci_state === "pending" || pr.ci_state == null) return "pr-ci-running" as const
-            if (pr.merge_ready) return "pr-ci-passed-merge" as const
-            return "pr-ci-passed-review" as const
-          })(),
-          prNumber: w.pull_request?.state === "open" ? w.pull_request.number : undefined,
           workspaceId: w.id,
         })),
     })) ?? []
