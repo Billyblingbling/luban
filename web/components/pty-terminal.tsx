@@ -6,6 +6,24 @@ import type { ITheme } from "ghostty-web"
 
 import { useLuban } from "@/lib/luban-context"
 
+async function copyToClipboard(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    const el = document.createElement("textarea")
+    el.value = text
+    el.style.position = "fixed"
+    el.style.left = "-9999px"
+    el.style.top = "-9999px"
+    document.body.appendChild(el)
+    el.focus()
+    el.select()
+    el.setSelectionRange(0, text.length)
+    document.execCommand("copy")
+    document.body.removeChild(el)
+  }
+}
+
 function cssVar(name: string): string | null {
   const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
   return raw.length > 0 ? raw : null
@@ -132,6 +150,16 @@ export function PtyTerminal() {
     let ws: WebSocket | null = null
     let dataDisposable: { dispose: () => void } | null = null
     let resizeDisposable: { dispose: () => void } | null = null
+    let keydownCapture: ((ev: KeyboardEvent) => void) | null = null
+    let pasteCapture: ((ev: ClipboardEvent) => void) | null = null
+    let focusCapture: (() => void) | null = null
+    let pendingPastePromise: Promise<string> | null = null
+    let pasteHandled = false
+
+    function sendInput(text: string) {
+      if (ws?.readyState !== WebSocket.OPEN) return
+      ws.send(JSON.stringify({ type: "input", data: text }))
+    }
 
     function sendResizeIfReady(cols: number, rows: number) {
       if (!isValidTerminalSize(cols, rows)) return
@@ -164,6 +192,71 @@ export function PtyTerminal() {
         if (disposed) return
 
         writeOscTheme(term)
+
+        focusCapture = () => {
+          try {
+            container.focus({ preventScroll: true })
+            term.focus()
+          } catch {
+            // ignore
+          }
+        }
+
+        keydownCapture = (ev: KeyboardEvent) => {
+          const isShortcut = ev.ctrlKey || ev.metaKey
+          if (!isShortcut) return
+
+          if (ev.code === "KeyC") {
+            if (!term.hasSelection()) return
+
+            const selection = term.getSelection()
+            if (selection.trim().length === 0) return
+
+            ev.preventDefault()
+            ev.stopPropagation()
+            ev.stopImmediatePropagation()
+
+            void copyToClipboard(selection)
+            return
+          }
+
+          if (ev.code === "KeyV") {
+            pasteHandled = false
+            const promise = navigator.clipboard?.readText ? navigator.clipboard.readText() : null
+            pendingPastePromise = promise
+
+            if (!promise) return
+
+            queueMicrotask(() => {
+              if (disposed) return
+              if (pasteHandled) return
+
+              void promise
+                .then((text) => {
+                  if (disposed) return
+                  if (pasteHandled) return
+                  if (text.length === 0) return
+                  sendInput(text)
+                })
+                .catch(() => {
+                  // Ignore clipboard errors (permissions, etc.).
+                })
+                .finally(() => {
+                  if (pendingPastePromise === promise) pendingPastePromise = null
+                })
+            })
+            return
+          }
+        }
+
+        pasteCapture = () => {
+          pasteHandled = true
+        }
+
+        container.addEventListener("mousedown", focusCapture, true)
+        container.addEventListener("touchstart", focusCapture, true)
+        container.addEventListener("keydown", keydownCapture, true)
+        container.addEventListener("paste", pasteCapture, true)
 
         resizeDisposable = term.onResize(({ cols, rows }) => {
           sendResizeIfReady(cols, rows)
@@ -201,6 +294,10 @@ export function PtyTerminal() {
 
     return () => {
       disposed = true
+      if (focusCapture) container.removeEventListener("mousedown", focusCapture, true)
+      if (focusCapture) container.removeEventListener("touchstart", focusCapture, true)
+      if (keydownCapture) container.removeEventListener("keydown", keydownCapture, true)
+      if (pasteCapture) container.removeEventListener("paste", pasteCapture, true)
       dataDisposable?.dispose()
       resizeDisposable?.dispose()
       ws?.close()
