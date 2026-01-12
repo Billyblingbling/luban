@@ -1,4 +1,11 @@
-import type { AppSnapshot, AttachmentKind, AttachmentRef, ConversationSnapshot, ThreadsSnapshot } from "./luban-api"
+import type {
+  AppSnapshot,
+  AttachmentKind,
+  AttachmentRef,
+  ContextSnapshot,
+  ConversationSnapshot,
+  ThreadsSnapshot,
+} from "./luban-api"
 
 export async function fetchApp(): Promise<AppSnapshot> {
   const res = await fetch("/api/app")
@@ -45,4 +52,21 @@ export async function uploadAttachment(args: {
   }
 
   return (await res.json()) as AttachmentRef
+}
+
+export async function fetchContext(workspaceId: number): Promise<ContextSnapshot> {
+  const res = await fetch(`/api/workspaces/${workspaceId}/context`)
+  if (!res.ok) throw new Error(`GET /api/workspaces/${workspaceId}/context failed: ${res.status}`)
+  return (await res.json()) as ContextSnapshot
+}
+
+export async function deleteContextItem(workspaceId: number, contextId: number): Promise<void> {
+  const res = await fetch(`/api/workspaces/${workspaceId}/context/${contextId}`, { method: "DELETE" })
+  if (res.status === 204) return
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw new Error(
+      `DELETE /api/workspaces/${workspaceId}/context/${contextId} failed: ${res.status}${text ? `: ${text}` : ""}`,
+    )
+  }
 }

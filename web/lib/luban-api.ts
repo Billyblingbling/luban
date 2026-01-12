@@ -74,6 +74,17 @@ export type AttachmentRef = {
   byte_len: number
 }
 
+export type ContextItemSnapshot = {
+  context_id: number
+  attachment: AttachmentRef
+  created_at_unix_ms: number
+}
+
+export type ContextSnapshot = {
+  workspace_id: WorkspaceId
+  items: ContextItemSnapshot[]
+}
+
 export type ConversationSnapshot = {
   rev: number
   workspace_id: WorkspaceId

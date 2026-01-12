@@ -99,4 +99,11 @@ test("file attachments upload and render in user messages", async ({ page }) => 
   const attachment = bubble.getByTestId("user-message-attachment").first()
   await expect(attachment).toBeVisible()
   await expect(attachment).toContainText(/notes-\d+\.txt/)
+
+  await page.getByTestId("right-sidebar-tab-context").click()
+  await page.getByTestId("context-folder-row").filter({ hasText: "text" }).first().click()
+  const row = page.getByTestId("context-file-row").filter({ hasText: "notes-" }).first()
+  await expect(row).toBeVisible({ timeout: 20_000 })
+  await row.getByTestId("context-add-to-chat").click()
+  await expect(page.getByTestId("chat-attachment-tile").first()).toBeVisible({ timeout: 20_000 })
 })

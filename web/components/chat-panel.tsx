@@ -37,6 +37,8 @@ import { AGENT_MODELS, supportedThinkingEffortsForModel } from "@/lib/agent-sett
 import { ConversationView } from "@/components/conversation-view"
 import { uploadAttachment } from "@/lib/luban-http"
 import type { AttachmentRef } from "@/lib/luban-api"
+import { onAddChatAttachments } from "@/lib/chat-attachment-events"
+import { emitContextChanged } from "@/lib/context-events"
 import {
   draftKey,
   followTailKey,
@@ -61,6 +63,7 @@ type ComposerAttachment = {
   name: string
   size: number
   preview?: string
+  previewUrl?: string
   status: "uploading" | "ready" | "failed"
   attachment?: AttachmentRef
 }
@@ -100,6 +103,30 @@ export function ChatPanel() {
   const [isDragging, setIsDragging] = useState(false)
   const attachmentScopeRef = useRef<string>("")
   const attachmentScope = `${activeWorkspaceId ?? "none"}:${activeThreadId ?? "none"}`
+
+  useEffect(() => {
+    return onAddChatAttachments((incoming) => {
+      if (activeWorkspaceId == null || activeThreadId == null) return
+      const scopeAtStart = attachmentScopeRef.current
+      const items: ComposerAttachment[] = incoming.map((attachment) => {
+        const isImage = attachment.kind === "image"
+        const previewUrl =
+          isImage ? `/api/workspaces/${activeWorkspaceId}/attachments/${attachment.id}?ext=${encodeURIComponent(attachment.extension)}` : undefined
+        return {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          type: isImage ? "image" : "file",
+          name: attachment.name,
+          size: attachment.byte_len,
+          previewUrl,
+          status: "ready",
+          attachment,
+        }
+      })
+
+      if (attachmentScopeRef.current !== scopeAtStart) return
+      setAttachments((prev) => [...prev, ...items])
+    })
+  }, [activeWorkspaceId, activeThreadId])
 
   useEffect(() => {
     const el = textareaRef.current
@@ -306,6 +333,7 @@ export function ChatPanel() {
           setAttachments((prev) =>
             prev.map((a) => (a.id === id ? { ...a, status: "ready", attachment, name: attachment.name } : a)),
           )
+          emitContextChanged(activeWorkspaceId)
         })
         .catch(() => {
           if (attachmentScopeRef.current !== scopeAtStart) return
@@ -547,6 +575,35 @@ export function ChatPanel() {
                 onDrop={(e) => {
                   e.preventDefault()
                   setIsDragging(false)
+                  const raw = e.dataTransfer.getData("luban-context-attachment")
+                  if (raw) {
+                    try {
+                      const attachment = JSON.parse(raw) as AttachmentRef
+                      if (attachment && typeof attachment.id === "string") {
+                        const isImage = attachment.kind === "image"
+                        const previewUrl =
+                          isImage && activeWorkspaceId != null
+                            ? `/api/workspaces/${activeWorkspaceId}/attachments/${attachment.id}?ext=${encodeURIComponent(attachment.extension)}`
+                            : undefined
+                        setAttachments((prev) => [
+                          ...prev,
+                          {
+                            id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                            type: isImage ? "image" : "file",
+                            name: attachment.name,
+                            size: attachment.byte_len,
+                            previewUrl,
+                            status: "ready",
+                            attachment,
+                          },
+                        ])
+                        return
+                      }
+                    } catch {
+                      // Ignore invalid payloads.
+                    }
+                  }
+
                   handleFileSelect(e.dataTransfer.files)
                 }}
               >
@@ -562,12 +619,12 @@ export function ChatPanel() {
                 {attachments.length > 0 && (
                   <div className="px-3 pt-3 pb-1 flex flex-wrap gap-3">
                     {attachments.map((attachment) => (
-                      <div key={attachment.id} className="group relative">
+                      <div key={attachment.id} data-testid="chat-attachment-tile" className="group relative">
                         <div className="relative">
                           <div className="w-20 h-20 rounded-lg overflow-hidden border border-border/50 hover:border-border transition-colors bg-muted/40 flex items-center justify-center">
-                            {attachment.type === "image" && attachment.preview ? (
+                            {attachment.type === "image" && (attachment.preview || attachment.previewUrl) ? (
                               <img
-                                src={attachment.preview}
+                                src={attachment.preview ?? attachment.previewUrl}
                                 alt={attachment.name}
                                 className="w-full h-full object-cover"
                               />
