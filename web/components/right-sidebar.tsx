@@ -9,15 +9,12 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Paperclip,
-  ChevronRight,
   ChevronDown,
   File as FileIcon,
   FileImage,
   FileText,
   FileJson,
   FileCode,
-  Folder,
-  FolderOpen,
   Trash2,
   Copy,
   FilePlus,
@@ -173,19 +170,6 @@ type ContextFileNode = {
   attachment: AttachmentRef
 }
 
-type ContextFolderNode = {
-  id: string
-  name: string
-  path: string
-  children: (ContextFolderNode | ContextFileNode)[]
-}
-
-type ContextNode = ContextFolderNode | ContextFileNode
-
-function isFolder(node: ContextNode): node is ContextFolderNode {
-  return (node as any).children != null
-}
-
 function fileTypeForAttachment(att: AttachmentRef): ContextFileType {
   if (att.kind === "image") return "image"
   const ext = att.extension.toLowerCase()
@@ -199,56 +183,21 @@ function fileTypeForAttachment(att: AttachmentRef): ContextFileType {
   return "document"
 }
 
-function folderForType(t: ContextFileType): { id: string; name: string; path: string } {
-  switch (t) {
-    case "image":
-      return { id: "images", name: "images", path: "/context/images" }
-    case "document":
-      return { id: "documents", name: "documents", path: "/context/documents" }
-    case "data":
-      return { id: "data", name: "data", path: "/context/data" }
-    case "code":
-      return { id: "code", name: "code", path: "/context/code" }
-    case "text":
-      return { id: "text", name: "text", path: "/context/text" }
-  }
-}
-
-function buildContextTree(items: ContextItemSnapshot[]): ContextFolderNode[] {
-  const byFolder = new Map<string, ContextFolderNode>()
-
-  for (const item of items) {
+function buildContextList(items: ContextItemSnapshot[]): ContextFileNode[] {
+  return items.map((item) => {
     const att = item.attachment
-    const t = fileTypeForAttachment(att)
-    const folder = folderForType(t)
-
-    const f =
-      byFolder.get(folder.id) ??
-      ({
-        id: folder.id,
-        name: folder.name,
-        path: folder.path,
-        children: [],
-      } satisfies ContextFolderNode)
-
+    const type = fileTypeForAttachment(att)
     const name = att.name
-    const path = `${folder.path}/${name}`
-    f.children.push({
+    const path = `/context/${name}`
+    return {
       id: `ctx-${item.context_id}`,
       name,
-      type: t,
+      type,
       path,
       contextId: item.context_id,
       attachment: att,
-    })
-    byFolder.set(folder.id, f)
-  }
-
-  const order: ContextFileType[] = ["image", "document", "data", "code", "text"]
-  return order
-    .map((t) => folderForType(t).id)
-    .map((id) => byFolder.get(id))
-    .filter(Boolean) as ContextFolderNode[]
+    }
+  })
 }
 
 function attachmentKindForFile(file: File): "image" | "text" | "file" {
@@ -276,7 +225,6 @@ function ContextPanel({
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set(["images"]))
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
@@ -334,16 +282,7 @@ function ContextPanel({
     })()
   }, [droppedFiles, onConsumeDroppedFiles, uploadFiles, workspaceId])
 
-  const tree = useMemo(() => buildContextTree(items), [items])
-
-  const toggleFolder = (id: string) => {
-    setExpandedFolders((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
+  const list = useMemo(() => buildContextList(items), [items])
 
   const toggleSelect = (id: string, event: React.MouseEvent) => {
     setSelectedIds((prev) => {
@@ -364,7 +303,7 @@ function ContextPanel({
     focusChatInput()
   }
 
-  const handleCopyPath = (item: ContextNode) => {
+  const handleCopyPath = (item: ContextFileNode) => {
     void navigator.clipboard.writeText(item.path).catch(() => {})
     toast("Copied path")
   }
@@ -412,17 +351,14 @@ function ContextPanel({
         {isLoading && <div className="px-3 py-2 text-xs text-muted-foreground">Loading…</div>}
         {error && <div className="px-3 py-2 text-xs text-destructive">{error}</div>}
 
-        {tree.length === 0 && !isLoading && !error ? (
+        {list.length === 0 && !isLoading && !error ? (
           <div className="px-3 py-2 text-xs text-muted-foreground">No context yet.</div>
         ) : (
-          tree.map((folder) => (
-            <ContextTreeNode
-              key={folder.id}
-              node={folder}
-              level={0}
+          list.map((file) => (
+            <ContextFileRow
+              key={file.id}
+              file={file}
               selectedIds={selectedIds}
-              expandedFolders={expandedFolders}
-              onToggleFolder={toggleFolder}
               onSelect={toggleSelect}
               onAddToChat={handleAddToChat}
               onDelete={handleDelete}
@@ -453,31 +389,22 @@ function ContextPanel({
   )
 }
 
-function ContextTreeNode({
-  node,
-  level,
+function ContextFileRow({
+  file,
   selectedIds,
-  expandedFolders,
-  onToggleFolder,
   onSelect,
   onAddToChat,
   onDelete,
   onCopyPath,
 }: {
-  node: ContextNode
-  level: number
+  file: ContextFileNode
   selectedIds: Set<string>
-  expandedFolders: Set<string>
-  onToggleFolder: (id: string) => void
   onSelect: (id: string, event: React.MouseEvent) => void
   onAddToChat: (file: ContextFileNode) => void
   onDelete: (file: ContextFileNode) => void
-  onCopyPath: (node: ContextNode) => void
+  onCopyPath: (file: ContextFileNode) => void
 }) {
-  const isSelected = selectedIds.has(node.id)
-  const folder = isFolder(node) ? node : null
-  const file = !isFolder(node) ? node : null
-  const isExpanded = folder ? expandedFolders.has(folder.id) : false
+  const isSelected = selectedIds.has(file.id)
 
   const getFileIcon = (type: ContextFileType) => {
     switch (type) {
@@ -495,113 +422,58 @@ function ContextTreeNode({
   }
 
   return (
-    <>
-      <div
-        data-testid={file ? "context-file-row" : "context-folder-row"}
-        className={cn(
-          "group flex items-center gap-1 py-1 px-2 cursor-pointer transition-colors",
-          isSelected ? "bg-accent text-accent-foreground" : "hover:bg-muted/50",
-        )}
-        style={{ paddingLeft: `${level * 12 + 8}px` }}
-        onClick={(e) => {
-          onSelect(node.id, e)
-          if (folder) onToggleFolder(folder.id)
-        }}
-        draggable={!!file}
-        onDragStart={(e) => {
-          if (!file) return
-          e.dataTransfer.setData("luban-context-attachment", JSON.stringify(file.attachment))
-          e.dataTransfer.setData("context-item", JSON.stringify({ path: file.path }))
-        }}
-      >
-        {folder ? (
-          <span className="w-4 h-4 flex items-center justify-center">
-            {isExpanded ? (
-              <ChevronDown className="w-3 h-3 text-muted-foreground" />
-            ) : (
-              <ChevronRight className="w-3 h-3 text-muted-foreground" />
-            )}
-          </span>
-        ) : (
-          <span className="w-4" />
-        )}
-
-        {folder ? (
-          isExpanded ? (
-            <FolderOpen className="w-4 h-4 text-status-warning" />
-          ) : (
-            <Folder className="w-4 h-4 text-status-warning" />
-          )
-        ) : (
-          getFileIcon(file!.type)
-        )}
-
-        <span className="flex-1 text-xs truncate">
-          {node.name}
-        </span>
-
-        {file && (
-          <button
-            data-testid="context-add-to-chat"
-            onClick={(e) => {
-              e.stopPropagation()
-              onAddToChat(file)
-            }}
-            className="p-0.5 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-primary rounded transition-all"
-            title="Add to chat"
-          >
-            <FilePlus className="w-3.5 h-3.5" />
-          </button>
-        )}
-
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              className="p-0.5 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground rounded transition-all"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <ChevronDown className="w-3.5 h-3.5" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-36">
-            <DropdownMenuItem onClick={() => onCopyPath(node)}>
-              <Copy className="w-3.5 h-3.5 mr-2" />
-              Copy path
-            </DropdownMenuItem>
-            {file ? (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onClick={() => onDelete(file)}
-                  className="text-destructive focus:text-destructive"
-                >
-                  <Trash2 className="w-3.5 h-3.5 mr-2" />
-                  Delete
-                </DropdownMenuItem>
-              </>
-            ) : null}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-
-      {folder && isExpanded && (
-        <>
-          {folder.children.map((child) => (
-            <ContextTreeNode
-              key={child.id}
-              node={child}
-              level={level + 1}
-              selectedIds={selectedIds}
-              expandedFolders={expandedFolders}
-              onToggleFolder={onToggleFolder}
-              onSelect={onSelect}
-              onAddToChat={onAddToChat}
-              onDelete={onDelete}
-              onCopyPath={onCopyPath}
-            />
-          ))}
-        </>
+    <div
+      data-testid="context-file-row"
+      className={cn(
+        "group flex items-center gap-1 py-1 px-2 cursor-pointer transition-colors",
+        isSelected ? "bg-accent text-accent-foreground" : "hover:bg-muted/50",
       )}
-    </>
+      style={{ paddingLeft: "8px" }}
+      onClick={(e) => onSelect(file.id, e)}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData("luban-context-attachment", JSON.stringify(file.attachment))
+        e.dataTransfer.setData("context-item", JSON.stringify({ path: file.path }))
+      }}
+    >
+      <span className="w-4" />
+      {getFileIcon(file.type)}
+
+      <span className="flex-1 text-xs truncate">{file.name}</span>
+
+      <button
+        data-testid="context-add-to-chat"
+        onClick={(e) => {
+          e.stopPropagation()
+          onAddToChat(file)
+        }}
+        className="p-0.5 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-primary rounded transition-all"
+        title="Add to chat"
+      >
+        <FilePlus className="w-3.5 h-3.5" />
+      </button>
+
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            className="p-0.5 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground rounded transition-all"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <ChevronDown className="w-3.5 h-3.5" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-36">
+          <DropdownMenuItem onClick={() => onCopyPath(file)}>
+            <Copy className="w-3.5 h-3.5 mr-2" />
+            Copy path
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={() => onDelete(file)} className="text-destructive focus:text-destructive">
+            <Trash2 className="w-3.5 h-3.5 mr-2" />
+            Delete
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
   )
 }

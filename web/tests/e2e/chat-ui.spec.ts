@@ -101,9 +101,6 @@ test("file attachments upload and render in user messages", async ({ page }) => 
   await expect(attachment).toContainText(/notes-\d+\.txt/)
 
   await page.getByTestId("right-sidebar-tab-context").click()
-  const folder = page.getByTestId("context-folder-row").filter({ hasText: "text" }).first()
-  await expect(folder).toBeVisible({ timeout: 20_000 })
-  await folder.click()
   const row = page.getByTestId("context-file-row").filter({ hasText: "notes-" }).first()
   await expect(row).toBeVisible({ timeout: 20_000 })
   await row.hover()
