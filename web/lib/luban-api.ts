@@ -4,9 +4,24 @@ export type WorkspaceThreadId = number
 
 export type WorkspaceStatus = "active" | "archived"
 
+export type AppearanceTheme = "light" | "dark" | "system"
+
+export type AppearanceFontsSnapshot = {
+  ui_font: string
+  chat_font: string
+  code_font: string
+  terminal_font: string
+}
+
+export type AppearanceSnapshot = {
+  theme: AppearanceTheme
+  fonts: AppearanceFontsSnapshot
+}
+
 export type AppSnapshot = {
   rev: number
   projects: ProjectSnapshot[]
+  appearance: AppearanceSnapshot
 }
 
 export type ProjectSnapshot = {
@@ -257,6 +272,8 @@ export type ClientAction =
       thread_id: WorkspaceThreadId
       to_index: number
     }
+  | { type: "appearance_theme_changed"; theme: AppearanceTheme }
+  | { type: "appearance_fonts_changed"; fonts: AppearanceFontsSnapshot }
 
 export type ServerEvent =
   | { type: "app_changed"; rev: number; snapshot: AppSnapshot }

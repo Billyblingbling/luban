@@ -7,6 +7,8 @@ import { toast } from "sonner"
 
 import type {
   AppSnapshot,
+  AppearanceFontsSnapshot,
+  AppearanceTheme,
   AttachmentRef,
   ConversationSnapshot,
   ServerEvent,
@@ -67,6 +69,8 @@ type LubanContextValue = {
 
   setChatModel: (workspaceId: WorkspaceId, threadId: WorkspaceThreadId, modelId: string) => void
   setThinkingEffort: (workspaceId: WorkspaceId, threadId: WorkspaceThreadId, effort: ThinkingEffort) => void
+  setAppearanceTheme: (theme: AppearanceTheme) => void
+  setAppearanceFonts: (fonts: AppearanceFontsSnapshot) => void
 }
 
 const LubanContext = createContext<LubanContextValue | null>(null)
@@ -144,6 +148,8 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     cancelAgentTurn: actions.cancelAgentTurn,
     setChatModel: actions.setChatModel,
     setThinkingEffort: actions.setThinkingEffort,
+    setAppearanceTheme: actions.setAppearanceTheme,
+    setAppearanceFonts: actions.setAppearanceFonts,
   }
 
   return <LubanContext.Provider value={value}>{children}</LubanContext.Provider>

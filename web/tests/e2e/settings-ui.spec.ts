@@ -30,5 +30,24 @@ test("settings panel updates theme and appearance fonts", async ({ page }) => {
       { timeout: 5_000 },
     )
     .toBe("Roboto")
-})
 
+  await page.evaluate(() => {
+    localStorage.removeItem("theme")
+    localStorage.removeItem("resolvedTheme")
+  })
+  await page.reload()
+
+  await expect
+    .poll(async () => await page.evaluate(() => document.documentElement.classList.contains("dark")), {
+      timeout: 20_000,
+    })
+    .toBeTruthy()
+
+  await expect
+    .poll(
+      async () =>
+        await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--luban-font-ui").trim()),
+      { timeout: 20_000 },
+    )
+    .toBe("Roboto")
+})

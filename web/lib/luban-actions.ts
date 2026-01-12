@@ -1,6 +1,8 @@
 "use client"
 
 import type {
+  AppearanceFontsSnapshot,
+  AppearanceTheme,
   AttachmentRef,
   ClientAction,
   TaskDraft,
@@ -46,6 +48,8 @@ export type LubanActions = {
 
   setChatModel: (workspaceId: WorkspaceId, threadId: WorkspaceThreadId, modelId: string) => void
   setThinkingEffort: (workspaceId: WorkspaceId, threadId: WorkspaceThreadId, effort: ThinkingEffort) => void
+  setAppearanceTheme: (theme: AppearanceTheme) => void
+  setAppearanceFonts: (fonts: AppearanceFontsSnapshot) => void
 }
 
 export type LubanActionsInternal = LubanActions & {
@@ -320,6 +324,14 @@ export function createLubanActions(args: {
     })
   }
 
+  function setAppearanceTheme(theme: AppearanceTheme) {
+    args.sendAction({ type: "appearance_theme_changed", theme })
+  }
+
+  function setAppearanceFonts(fonts: AppearanceFontsSnapshot) {
+    args.sendAction({ type: "appearance_fonts_changed", fonts })
+  }
+
   return {
     pickProjectPath,
     addProject,
@@ -343,5 +355,7 @@ export function createLubanActions(args: {
     cancelAgentTurn,
     setChatModel,
     setThinkingEffort,
+    setAppearanceTheme,
+    setAppearanceFonts,
   }
 }

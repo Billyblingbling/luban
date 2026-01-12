@@ -18,7 +18,9 @@ import {
 } from "lucide-react"
 
 import { useAppearance } from "@/components/appearance-provider"
+import { useLuban } from "@/lib/luban-context"
 import { cn } from "@/lib/utils"
+import type { AppearanceTheme } from "@/lib/luban-api"
 
 interface SettingsPanelProps {
   open: boolean
@@ -44,7 +46,7 @@ const tocItems: TocItem[] = [
   },
 ]
 
-const themeOptions = [
+const themeOptions: { id: AppearanceTheme; label: string; icon: ElementType }[] = [
   { id: "light", label: "Light", icon: Sun },
   { id: "dark", label: "Dark", icon: Moon },
   { id: "system", label: "System", icon: Monitor },
@@ -427,6 +429,7 @@ function WorkspacePreviewWithFonts({
 function AppearanceSettings() {
   const { theme, setTheme } = useTheme()
   const { fonts, setFonts } = useAppearance()
+  const { setAppearanceTheme, setAppearanceFonts } = useLuban()
   const resolvedTheme = theme ?? "system"
 
   return (
@@ -444,7 +447,10 @@ function AppearanceSettings() {
               label={option.label}
               icon={option.icon}
               isSelected={resolvedTheme === option.id}
-              onClick={() => setTheme(option.id)}
+              onClick={() => {
+                setTheme(option.id)
+                setAppearanceTheme(option.id)
+              }}
               testId={`settings-theme-${option.id}`}
             />
           ))}
@@ -461,10 +467,46 @@ function AppearanceSettings() {
           chatFont={fonts.chatFont}
           monoFont={fonts.codeFont}
           terminalFont={fonts.terminalFont}
-          setUiFont={(uiFont) => setFonts({ uiFont })}
-          setChatFont={(chatFont) => setFonts({ chatFont })}
-          setMonoFont={(codeFont) => setFonts({ codeFont })}
-          setTerminalFont={(terminalFont) => setFonts({ terminalFont })}
+          setUiFont={(uiFont) => {
+            const next = { ...fonts, uiFont }
+            setFonts({ uiFont })
+            setAppearanceFonts({
+              ui_font: next.uiFont,
+              chat_font: next.chatFont,
+              code_font: next.codeFont,
+              terminal_font: next.terminalFont,
+            })
+          }}
+          setChatFont={(chatFont) => {
+            const next = { ...fonts, chatFont }
+            setFonts({ chatFont })
+            setAppearanceFonts({
+              ui_font: next.uiFont,
+              chat_font: next.chatFont,
+              code_font: next.codeFont,
+              terminal_font: next.terminalFont,
+            })
+          }}
+          setMonoFont={(codeFont) => {
+            const next = { ...fonts, codeFont }
+            setFonts({ codeFont })
+            setAppearanceFonts({
+              ui_font: next.uiFont,
+              chat_font: next.chatFont,
+              code_font: next.codeFont,
+              terminal_font: next.terminalFont,
+            })
+          }}
+          setTerminalFont={(terminalFont) => {
+            const next = { ...fonts, terminalFont }
+            setFonts({ terminalFont })
+            setAppearanceFonts({
+              ui_font: next.uiFont,
+              chat_font: next.chatFont,
+              code_font: next.codeFont,
+              terminal_font: next.terminalFont,
+            })
+          }}
         />
       </section>
     </div>
