@@ -53,10 +53,42 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
   const pendingAddProjectPathRef = useRef<string | null>(null)
   const [optimisticCreatingProjectId, setOptimisticCreatingProjectId] = useState<number | null>(null)
   const [newlyCreatedWorkspaceId, setNewlyCreatedWorkspaceId] = useState<number | null>(null)
+  const [archiveAnimatingUntilUnixMsByWorkspaceId, setArchiveAnimatingUntilUnixMsByWorkspaceId] = useState<
+    Record<number, number>
+  >({})
   const [newTaskOpen, setNewTaskOpen] = useState(false)
+
+  const archiveAnimationMinMs = 1500
 
   useEffect(() => {
     if (!app) return
+
+    setArchiveAnimatingUntilUnixMsByWorkspaceId((prev) => {
+      const now = Date.now()
+      let changed = false
+      const next: Record<number, number> = { ...prev }
+
+      for (const project of app.projects) {
+        for (const workspace of project.workspaces) {
+          if (workspace.archive_status === "running") {
+            const until = now + archiveAnimationMinMs
+            if ((next[workspace.id] ?? 0) < until) {
+              next[workspace.id] = until
+              changed = true
+            }
+          }
+        }
+      }
+
+      for (const [key, until] of Object.entries(next)) {
+        if (until <= now) {
+          delete next[Number(key)]
+          changed = true
+        }
+      }
+
+      return changed ? next : prev
+    })
 
     const pendingProjectPath = pendingAddProjectPathRef.current
     if (pendingProjectPath) {
@@ -116,7 +148,33 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
     }
   }, [app?.rev])
 
-  const projects: SidebarProjectVm[] = buildSidebarProjects(app)
+  useEffect(() => {
+    const values = Object.values(archiveAnimatingUntilUnixMsByWorkspaceId)
+    if (values.length === 0) return
+
+    const nextExpiry = Math.min(...values)
+    const delay = Math.max(0, nextExpiry - Date.now() + 10)
+    const t = window.setTimeout(() => {
+      setArchiveAnimatingUntilUnixMsByWorkspaceId((prev) => {
+        const now = Date.now()
+        let changed = false
+        const next: Record<number, number> = { ...prev }
+        for (const [key, until] of Object.entries(next)) {
+          if (until <= now) {
+            delete next[Number(key)]
+            changed = true
+          }
+        }
+        return changed ? next : prev
+      })
+    }, delay)
+    return () => window.clearTimeout(t)
+  }, [archiveAnimatingUntilUnixMsByWorkspaceId])
+
+  const projects: SidebarProjectVm[] = buildSidebarProjects(app, {
+    nowUnixMs: Date.now(),
+    archiveAnimatingUntilUnixMsByWorkspaceId,
+  })
 
   const getActiveWorktreeCount = (worktrees: SidebarWorktreeVm[]) => {
     return worktrees.filter((w) => w.agentStatus !== "idle" || w.prStatus !== "none").length
@@ -221,6 +279,7 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
 	                        worktree.workspaceId === activeWorkspaceId && "bg-sidebar-accent/30",
 	                        newlyCreatedWorkspaceId === worktree.workspaceId &&
 	                          "animate-in slide-in-from-left-2 fade-in duration-300 bg-primary/15 ring-1 ring-primary/30",
+                          worktree.isArchiving && "animate-pulse opacity-50 pointer-events-none",
 	                      )}
 	                      style={{
 	                        animationDelay:
@@ -249,7 +308,14 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
                           </span>
 	                      </div>
                         <div className="flex items-center gap-2">
-                          <AgentStatusIcon status={worktree.agentStatus} size="sm" />
+                          {worktree.isArchiving ? (
+                            <Loader2
+                              data-testid="worktree-archiving-spinner"
+                              className="w-3.5 h-3.5 animate-spin text-muted-foreground"
+                            />
+                          ) : (
+                            <AgentStatusIcon status={worktree.agentStatus} size="sm" />
+                          )}
                           <PRBadge
                             status={worktree.prStatus}
                             prNumber={worktree.prNumber}
@@ -266,12 +332,18 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
                         </span>
                       ) : (
                         <button
-                          className="p-0.5 text-muted-foreground hover:text-foreground opacity-0 group-hover/worktree:opacity-100 transition-opacity"
+                          className={cn(
+                            "p-0.5 text-muted-foreground hover:text-foreground transition-opacity",
+                            worktree.isArchiving
+                              ? "opacity-50"
+                              : "opacity-0 group-hover/worktree:opacity-100",
+                          )}
                           title="Archive worktree"
                           onClick={(e) => {
                             e.stopPropagation()
                             archiveWorkspace(worktree.workspaceId)
                           }}
+                          disabled={worktree.isArchiving}
                         >
 	                          <Archive className="w-3 h-3" />
 	                        </button>

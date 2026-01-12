@@ -26,6 +26,7 @@ export type WorkspaceSnapshot = {
   branch_name: string
   worktree_path: string
   status: WorkspaceStatus
+  archive_status: OperationStatus
   agent_run_status: OperationStatus
   has_unread_completion: boolean
   pull_request: PullRequestSnapshot | null

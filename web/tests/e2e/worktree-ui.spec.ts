@@ -1,6 +1,10 @@
 import { expect, test } from "@playwright/test"
+import { execSync } from "node:child_process"
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
 import { PNG } from "pngjs"
-import { ensureWorkspace } from "./helpers"
+import { ensureWorkspace, sendWsAction } from "./helpers"
 
 function parseRgb(color: string): { r: number; g: number; b: number } | null {
   const m = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*[\d.]+\s*)?\)$/.exec(color.trim())
@@ -68,6 +72,105 @@ test("creating a worktree auto-opens its conversation", async ({ page }) => {
     .not.toBe(beforeWorkspaceId)
 
   await expect(page.getByTestId("chat-input")).toBeFocused()
+})
+
+test("archiving a worktree shows an executing animation", async ({ page }) => {
+  await page.goto("/")
+
+  const remoteDir = fs.mkdtempSync(path.join(os.tmpdir(), "luban-e2e-archive-origin-"))
+  execSync("git init --bare", { cwd: remoteDir, stdio: "ignore" })
+
+  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "luban-e2e-archive-"))
+  const projectDir = path.join(repoRoot, "repo")
+  execSync(`git clone "${remoteDir}" "${projectDir}"`, { stdio: "ignore" })
+
+  fs.writeFileSync(path.join(projectDir, "README.md"), "e2e\n", "utf8")
+  execSync("git checkout -b main", { cwd: projectDir, stdio: "ignore" })
+  execSync('git config user.email "e2e@example.com"', { cwd: projectDir, stdio: "ignore" })
+  execSync('git config user.name "e2e"', { cwd: projectDir, stdio: "ignore" })
+  execSync("git add -A", { cwd: projectDir, stdio: "ignore" })
+  execSync('git commit -m "init"', { cwd: projectDir, stdio: "ignore" })
+  execSync("git push -u origin main", { cwd: projectDir, stdio: "ignore" })
+  execSync("git symbolic-ref HEAD refs/heads/main", { cwd: remoteDir, stdio: "ignore" })
+  execSync("git fetch --prune origin", { cwd: projectDir, stdio: "ignore" })
+  execSync("git remote set-head origin -a", { cwd: projectDir, stdio: "ignore" })
+
+  const projectPath = fs.realpathSync(projectDir)
+  await sendWsAction(page, { type: "add_project", path: projectPath })
+
+  const resolveProjectSlug = async () =>
+    await page.evaluate(async (projectDir) => {
+      const res = await fetch("/api/app")
+      if (!res.ok) return null
+      const app = (await res.json()) as { projects: { path: string; slug: string }[] }
+      return app.projects.find((p) => p.path === projectDir)?.slug ?? null
+    }, projectPath)
+
+  await expect.poll(async () => await resolveProjectSlug(), { timeout: 15_000 }).not.toBeNull()
+
+  const projectSlug = await resolveProjectSlug()
+  if (!projectSlug) throw new Error(`project slug not found for ${projectPath}`)
+
+  const projectToggle = page.getByRole("button", { name: projectSlug, exact: true })
+  await projectToggle.waitFor({ state: "visible", timeout: 15_000 })
+
+  const projectContainer = projectToggle.locator("..").locator("..")
+  if ((await projectContainer.getByTestId("worktree-branch-name").count()) === 0) {
+    await projectToggle.click()
+  }
+
+  const projectId = await page.evaluate(async (projectDir) => {
+    const res = await fetch("/api/app")
+    if (!res.ok) return null
+    const app = (await res.json()) as { projects: { id: number; path: string }[] }
+    return app.projects.find((p) => p.path === projectDir)?.id ?? null
+  }, projectPath)
+  if (!projectId) throw new Error(`project id not found for ${projectPath}`)
+
+  const mainBranch = projectContainer.getByTestId("worktree-branch-name").first()
+  await mainBranch.click()
+
+  await expect
+    .poll(async () => (await page.evaluate(() => localStorage.getItem("luban:active_workspace_id"))) ?? "", {
+      timeout: 20_000,
+    })
+    .not.toBe("")
+
+  await sendWsAction(page, { type: "create_workspace", project_id: projectId })
+
+  const resolveWorkspace = async () =>
+    await page.evaluate(async (projectDir) => {
+      const res = await fetch("/api/app")
+      if (!res.ok) return null
+      const app = (await res.json()) as {
+        projects: {
+          path: string
+          workspaces: { id: number; short_id: string; workspace_name: string; status: string }[]
+        }[]
+      }
+      const project = app.projects.find((p) => p.path === projectDir)
+      if (!project) return null
+      const workspace =
+        project.workspaces.find((w) => w.workspace_name !== "main" && w.status === "active") ?? null
+      if (!workspace) return null
+      return { workspaceId: workspace.id, shortId: workspace.short_id }
+    }, projectPath)
+
+  await expect.poll(async () => await resolveWorkspace(), { timeout: 90_000 }).not.toBeNull()
+
+  const resolved = await resolveWorkspace()
+  if (!resolved) throw new Error("workspace not found after creation")
+  const shortId = resolved.shortId
+  const row = projectContainer
+    .getByTestId("worktree-short-id")
+    .filter({ hasText: shortId })
+    .locator("..")
+    .locator("..")
+
+  await sendWsAction(page, { type: "archive_workspace", workspace_id: resolved.workspaceId })
+
+  await expect(row.getByTestId("worktree-archiving-spinner")).toBeVisible({ timeout: 20_000 })
+  await expect(row).toHaveClass(/animate-pulse/, { timeout: 20_000 })
 })
 
 test("sidebar resize gutter does not break header divider line", async ({ page }) => {

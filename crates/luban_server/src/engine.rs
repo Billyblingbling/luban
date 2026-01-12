@@ -1199,6 +1199,10 @@ impl Engine {
                                     luban_api::WorkspaceStatus::Archived
                                 }
                             },
+                            archive_status: match w.archive_status {
+                                OperationStatus::Idle => luban_api::OperationStatus::Idle,
+                                OperationStatus::Running => luban_api::OperationStatus::Running,
+                            },
                             agent_run_status: if running_workspaces.contains(&w.id) {
                                 luban_api::OperationStatus::Running
                             } else {

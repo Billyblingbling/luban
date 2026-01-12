@@ -39,6 +39,7 @@ pub struct WorkspaceSnapshot {
     pub branch_name: String,
     pub worktree_path: String,
     pub status: WorkspaceStatus,
+    pub archive_status: OperationStatus,
     pub agent_run_status: OperationStatus,
     pub has_unread_completion: bool,
     pub pull_request: Option<PullRequestSnapshot>,
