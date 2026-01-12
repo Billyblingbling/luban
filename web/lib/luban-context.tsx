@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { createContext, useContext, useEffect } from "react"
+import { createContext, useContext, useEffect, useRef } from "react"
 import { toast } from "sonner"
 
 import type {
@@ -18,9 +18,9 @@ import type {
 } from "./luban-api"
 import { createLubanActions } from "./luban-actions"
 import { useLubanStore } from "./luban-store"
+import { createLubanServerEventHandler } from "./luban-store-events"
 import { ACTIVE_WORKSPACE_KEY } from "./ui-prefs"
 import { useLubanTransport } from "./luban-transport"
-import { DEFAULT_NEW_THREAD_TIMEOUT_MS, pickCreatedThreadId } from "./luban-thread-flow"
 
 type LubanContextValue = {
   app: AppSnapshot | null
@@ -56,77 +56,10 @@ const LubanContext = createContext<LubanContextValue | null>(null)
 export function LubanProvider({ children }: { children: React.ReactNode }) {
   const store = useLubanStore()
   const { app, activeWorkspaceId, activeThreadId, threads, conversation, activeWorkspace } = store.state
-  const { activeWorkspaceIdRef, activeThreadIdRef, pendingCreateThreadRef } = store.refs
-
-  function handleAppChanged(event: Extract<ServerEvent, { type: "app_changed" }>) {
-    store.setApp(event.snapshot)
-  }
-
-  function handleWorkspaceThreadsChanged(
-    event: Extract<ServerEvent, { type: "workspace_threads_changed" }>,
-  ) {
-    const wid = activeWorkspaceIdRef.current
-    if (wid == null || wid !== event.workspace_id) return
-
-    setThreads(event.threads)
-    const current = activeThreadIdRef.current
-
-    const pending = pendingCreateThreadRef.current
-    if (pending && pending.workspaceId === wid) {
-      const created = pickCreatedThreadId({
-        threads: event.threads,
-        existingThreadIds: pending.existingThreadIds,
-      })
-      if (created != null) {
-        pendingCreateThreadRef.current = null
-        void actions.selectThreadInWorkspace(wid, created)
-        return
-      }
-
-      if (Date.now() - pending.requestedAtUnixMs > DEFAULT_NEW_THREAD_TIMEOUT_MS) {
-        pendingCreateThreadRef.current = null
-      }
-    }
-
-    if (current == null || !event.threads.some((t) => t.thread_id === current)) {
-      const next = event.threads[0]?.thread_id ?? null
-      if (next != null) {
-        void actions.selectThreadInWorkspace(wid, next)
-      }
-    }
-  }
-
-  function handleConversationChanged(event: Extract<ServerEvent, { type: "conversation_changed" }>) {
-    const wid = activeWorkspaceIdRef.current
-    const tid = activeThreadIdRef.current
-    if (wid == null || tid == null) return
-    if (event.snapshot.workspace_id === wid && event.snapshot.thread_id === tid) {
-      store.setConversation(event.snapshot)
-    }
-  }
-
-  function handleToast(event: Extract<ServerEvent, { type: "toast" }>) {
-    console.warn("server toast:", event.message)
-    toast(event.message)
-  }
+  const eventHandlerRef = useRef<(event: ServerEvent) => void>(() => {})
 
   const { wsConnected, sendAction: sendActionTransport, request: requestTransport } = useLubanTransport({
-    onEvent: (event) => {
-      switch (event.type) {
-        case "app_changed":
-          handleAppChanged(event)
-          return
-        case "workspace_threads_changed":
-          handleWorkspaceThreadsChanged(event)
-          return
-        case "conversation_changed":
-          handleConversationChanged(event)
-          return
-        case "toast":
-          handleToast(event)
-          return
-      }
-    },
+    onEvent: (event) => eventHandlerRef.current(event),
     onError: (message) => {
       console.warn("server error:", message)
       toast.error(message)
@@ -137,6 +70,17 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     store,
     sendAction: sendActionTransport,
     request: requestTransport,
+  })
+
+  eventHandlerRef.current = createLubanServerEventHandler({
+    store,
+    onToast: (message) => {
+      console.warn("server toast:", message)
+      toast(message)
+    },
+    onSelectThreadInWorkspace: (workspaceId, threadId) => {
+      void actions.selectThreadInWorkspace(workspaceId, threadId)
+    },
   })
 
   useEffect(() => {
