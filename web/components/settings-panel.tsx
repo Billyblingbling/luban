@@ -75,18 +75,21 @@ function ThemePreviewCard({
   icon: Icon,
   isSelected,
   onClick,
+  testId,
 }: {
   themeId: string
   label: string
   icon: ElementType
   isSelected: boolean
   onClick: () => void
+  testId?: string
 }) {
   const isSystem = themeId === "system"
   const colors = themeColors[themeId as keyof typeof themeColors] || themeColors.light
 
   return (
     <button
+      data-testid={testId}
       onClick={onClick}
       className={cn(
         "flex-1 rounded-xl border-2 overflow-hidden transition-all",
@@ -217,6 +220,7 @@ function InlineFontSelect({
   mono,
   label,
   vertical,
+  testId,
 }: {
   value: string
   onChange: (value: string) => void
@@ -224,6 +228,7 @@ function InlineFontSelect({
   mono?: boolean
   label: string
   vertical?: boolean
+  testId?: string
 }) {
   const [open, setOpen] = useState(false)
 
@@ -231,6 +236,7 @@ function InlineFontSelect({
     <div className={cn("relative", vertical ? "flex flex-col gap-1" : "inline-flex items-center gap-1.5")}>
       <span className="text-[10px] uppercase tracking-wider text-muted-foreground/70">{label}</span>
       <button
+        data-testid={testId}
         onClick={() => setOpen((prev) => !prev)}
         className={cn(
           "inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium transition-all",
@@ -251,7 +257,10 @@ function InlineFontSelect({
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute top-full left-0 mt-1.5 z-50 bg-popover border border-border rounded-lg shadow-xl max-h-52 w-44 overflow-y-auto">
+          <div
+            data-testid={testId ? `${testId}-menu` : undefined}
+            className="absolute top-full left-0 mt-1.5 z-50 bg-popover border border-border rounded-lg shadow-xl max-h-52 w-44 overflow-y-auto"
+          >
             <div className="p-1">
               {fonts.map((font) => {
                 const isSelected = value === font
@@ -315,7 +324,14 @@ function WorkspacePreviewWithFonts({
 
           <div className="flex-1 p-3 space-y-2">
             <div className="mb-3 pointer-events-auto">
-              <InlineFontSelect label="UI Font" value={uiFont} onChange={setUiFont} fonts={mockLocalFonts} vertical />
+              <InlineFontSelect
+                testId="settings-ui-font"
+                label="UI Font"
+                value={uiFont}
+                onChange={setUiFont}
+                fonts={mockLocalFonts}
+                vertical
+              />
             </div>
 
             <div className="px-1" style={{ fontFamily: `"${uiFont}", sans-serif` }}>
@@ -340,7 +356,13 @@ function WorkspacePreviewWithFonts({
             <div className="space-y-4">
               <div className="space-y-2">
                 <div className="pointer-events-auto">
-                  <InlineFontSelect label="Chat Font" value={chatFont} onChange={setChatFont} fonts={mockLocalFonts} />
+                  <InlineFontSelect
+                    testId="settings-chat-font"
+                    label="Chat Font"
+                    value={chatFont}
+                    onChange={setChatFont}
+                    fonts={mockLocalFonts}
+                  />
                 </div>
                 <div className="bg-secondary/50 border border-border rounded-lg p-3" style={{ fontFamily: `"${chatFont}", sans-serif` }}>
                   <p className="text-sm leading-relaxed text-muted-foreground">The quick brown fox jumps over the lazy dog</p>
@@ -349,7 +371,14 @@ function WorkspacePreviewWithFonts({
 
               <div className="space-y-2">
                 <div className="pointer-events-auto">
-                  <InlineFontSelect label="Code Font" value={monoFont} onChange={setMonoFont} fonts={mockMonoFonts} mono />
+                  <InlineFontSelect
+                    testId="settings-code-font"
+                    label="Code Font"
+                    value={monoFont}
+                    onChange={setMonoFont}
+                    fonts={mockMonoFonts}
+                    mono
+                  />
                 </div>
                 <div className="bg-secondary/60 border border-border rounded-lg p-3" style={{ fontFamily: `"${monoFont}", monospace` }}>
                   <pre className="text-sm leading-relaxed">
@@ -376,6 +405,7 @@ function WorkspacePreviewWithFonts({
           <div className="flex-1 bg-secondary/40 flex flex-col">
             <div className="px-3 py-2 pointer-events-auto">
               <InlineFontSelect
+                testId="settings-terminal-font"
                 label="Terminal Font"
                 value={terminalFont}
                 onChange={setTerminalFont}
@@ -415,6 +445,7 @@ function AppearanceSettings() {
               icon={option.icon}
               isSelected={resolvedTheme === option.id}
               onClick={() => setTheme(option.id)}
+              testId={`settings-theme-${option.id}`}
             />
           ))}
         </div>
@@ -549,4 +580,3 @@ export function SettingsPanel({ open, onOpenChange }: SettingsPanelProps) {
     </div>
   )
 }
-
