@@ -27,6 +27,7 @@ import { fetchConversation, fetchThreads } from "@/lib/luban-http"
 import { agentModelLabel, buildMessages, thinkingEffortLabel, type Message } from "@/lib/conversation-ui"
 import type { ConversationEntry, ConversationSnapshot } from "@/lib/luban-api"
 import { ConversationView } from "@/components/conversation-view"
+import { StatusIndicator, getStatusBgColor } from "@/components/shared/status-indicator"
 import { buildKanbanBoardVm, type KanbanWorktreeVm } from "@/lib/kanban-view-model"
 import { kanbanColumns, type KanbanColumn, type WorktreeStatus } from "@/lib/worktree-ui"
 import { activeThreadKey } from "@/lib/ui-prefs"
@@ -34,80 +35,14 @@ import { pickThreadId } from "@/lib/thread-ui"
 
 type Worktree = KanbanWorktreeVm
 
-function StatusBadge({
-  status,
-  prNumber,
-  workspaceId,
-  onOpenPullRequest,
-  onOpenPullRequestFailedAction,
-}: {
-  status: WorktreeStatus
-  prNumber?: number
-  workspaceId: number
-  onOpenPullRequest: (workspaceId: number) => void
-  onOpenPullRequestFailedAction: (workspaceId: number) => void
-}) {
-  const handlePrClick = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    onOpenPullRequest(workspaceId)
-  }
-
-  const handleCiClick = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    onOpenPullRequestFailedAction(workspaceId)
-  }
-
-  switch (status) {
-    case "agent-running":
-      return (
-        <span className="flex items-center gap-1 text-[10px] text-blue-400">
-          <Loader2 className="w-3 h-3 animate-spin" />
-          Agent running
-        </span>
-      )
-    case "agent-done":
-      return (
-        <span className="flex items-center gap-1 text-[10px] text-amber-400">
-          <MessageCircle className="w-3 h-3" />
-          Awaiting review
-        </span>
-      )
-    case "pr-ci-running":
-      return (
-        <button onClick={handlePrClick} className="flex items-center gap-1 text-[10px] text-blue-400 hover:text-blue-300">
-          <GitPullRequest className="w-3 h-3" />#{prNumber}
-          <Loader2 className="w-2.5 h-2.5 animate-spin ml-1" />
-        </button>
-      )
-    case "pr-ci-passed-review":
-      return (
-        <button onClick={handlePrClick} className="flex items-center gap-1 text-[10px] text-purple-400 hover:text-purple-300">
-          <GitPullRequest className="w-3 h-3" />#{prNumber}
-          <Clock className="w-2.5 h-2.5 ml-1" />
-        </button>
-      )
-    case "pr-ci-passed-merge":
-      return (
-        <button onClick={handlePrClick} className="flex items-center gap-1 text-[10px] text-green-400 hover:text-green-300">
-          <GitPullRequest className="w-3 h-3" />#{prNumber}
-          <CheckCircle2 className="w-2.5 h-2.5 ml-1" />
-        </button>
-      )
-    case "pr-ci-failed":
-      return (
-        <div className="flex items-center gap-2">
-          <button onClick={handlePrClick} className="flex items-center gap-1 text-[10px] text-blue-400 hover:text-blue-300">
-            <GitPullRequest className="w-3 h-3" />#{prNumber}
-          </button>
-          <button onClick={handleCiClick} className="flex items-center gap-1 text-[10px] text-red-400 hover:text-red-300">
-            <XCircle className="w-3 h-3" />
-            CI Failed
-          </button>
-        </div>
-      )
-    default:
-      return <span className="text-[10px] text-muted-foreground">Idle</span>
-  }
+const cardBorderColors: Record<WorktreeStatus, string> = {
+  idle: "border-border",
+  "agent-running": "border-status-running/30",
+  "agent-done": "border-status-warning/30",
+  "pr-ci-running": "border-status-info/30",
+  "pr-ci-passed-review": "border-status-info/30",
+  "pr-ci-passed-merge": "border-status-success/30",
+  "pr-ci-failed": "border-status-error/30",
 }
 
 function WorktreeCard({
@@ -123,22 +58,13 @@ function WorktreeCard({
   onOpenPullRequest: (workspaceId: number) => void
   onOpenPullRequestFailedAction: (workspaceId: number) => void
 }) {
-  const statusColors: Record<WorktreeStatus, string> = {
-    idle: "border-border",
-    "agent-running": "border-blue-500/30 bg-blue-500/5",
-    "agent-done": "border-amber-500/30 bg-amber-500/5",
-    "pr-ci-running": "border-purple-500/30 bg-purple-500/5",
-    "pr-ci-passed-review": "border-purple-500/30 bg-purple-500/5",
-    "pr-ci-passed-merge": "border-green-500/30 bg-green-500/5",
-    "pr-ci-failed": "border-red-500/30 bg-red-500/5",
-  }
-
   return (
     <div
       onClick={onClick}
       className={cn(
         "group p-3 rounded-lg border cursor-pointer transition-all",
-        statusColors[worktree.status],
+        cardBorderColors[worktree.status],
+        getStatusBgColor(worktree.status),
         isSelected ? "shadow-lg shadow-primary/20 bg-accent/50 border-primary/50" : "hover:bg-accent/50",
       )}
     >
@@ -154,12 +80,13 @@ function WorktreeCard({
 
       <div className="flex items-center justify-between">
         <span className="text-[10px] text-muted-foreground/50 font-mono">{worktree.id}</span>
-        <StatusBadge
+        <StatusIndicator
           status={worktree.status}
           prNumber={worktree.prNumber}
           workspaceId={worktree.workspaceId}
           onOpenPullRequest={onOpenPullRequest}
           onOpenPullRequestFailedAction={onOpenPullRequestFailedAction}
+          showLabel
         />
       </div>
     </div>

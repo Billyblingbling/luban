@@ -13,12 +13,6 @@ import {
   Layers,
   Archive,
   Loader2,
-  MessageCircle,
-  GitPullRequest,
-  CheckCircle2,
-  XCircle,
-  Clock,
-  Circle,
   Home,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -29,125 +23,7 @@ import type { WorktreeStatus } from "@/lib/worktree-ui"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { NewTaskModal } from "./new-task-modal"
-
-function WorktreeStatusIndicator({
-  status,
-  prNumber,
-  workspaceId,
-  onOpenPullRequest,
-  onOpenPullRequestFailedAction,
-}: Pick<SidebarWorktreeVm, "status" | "prNumber" | "workspaceId"> & {
-  onOpenPullRequest: (workspaceId: number) => void
-  onOpenPullRequestFailedAction: (workspaceId: number) => void
-}) {
-  const handlePrClick = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    onOpenPullRequest(workspaceId)
-  }
-
-  const handleCiClick = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    onOpenPullRequestFailedAction(workspaceId)
-  }
-
-  switch (status) {
-    case "idle":
-      return <Circle className="w-3 h-3 text-muted-foreground/50 flex-shrink-0" />
-
-    case "agent-running":
-      return <Loader2 className="w-3 h-3 text-primary animate-spin flex-shrink-0" />
-
-    case "agent-done":
-      return (
-        <span className="relative flex-shrink-0">
-          <MessageCircle className="w-3 h-3 text-amber-500" />
-          <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-amber-500 rounded-full" />
-        </span>
-      )
-
-    case "pr-ci-running":
-      return (
-        <div className="flex items-center gap-1 flex-shrink-0">
-          <button
-            onClick={handlePrClick}
-            className="flex items-center gap-0.5 text-[10px] text-blue-400 hover:text-blue-300 transition-colors"
-            title={`Open PR #${prNumber}`}
-          >
-            <GitPullRequest className="w-3 h-3" />
-            <span>#{prNumber}</span>
-          </button>
-          <Loader2 className="w-2.5 h-2.5 text-amber-500 animate-spin" />
-        </div>
-      )
-
-    case "pr-ci-passed-review":
-      return (
-        <div className="flex items-center gap-1 flex-shrink-0">
-          <button
-            onClick={handlePrClick}
-            className="flex items-center gap-0.5 text-[10px] text-blue-400 hover:text-blue-300 transition-colors"
-            title={`Open PR #${prNumber}`}
-          >
-            <GitPullRequest className="w-3 h-3" />
-            <span>#{prNumber}</span>
-          </button>
-          <span title="Waiting for review">
-            <Clock className="w-2.5 h-2.5 text-amber-500" />
-          </span>
-        </div>
-      )
-
-    case "pr-ci-passed-merge":
-      return (
-        <div className="flex items-center gap-1 flex-shrink-0">
-          <button
-            onClick={handlePrClick}
-            className="flex items-center gap-0.5 text-[10px] text-green-400 hover:text-green-300 transition-colors"
-            title={`Open PR #${prNumber} - Ready to merge`}
-          >
-            <GitPullRequest className="w-3 h-3" />
-            <span>#{prNumber}</span>
-          </button>
-          <span title="Ready to merge">
-            <CheckCircle2 className="w-2.5 h-2.5 text-green-500" />
-          </span>
-        </div>
-      )
-
-    case "pr-ci-failed":
-      return (
-        <div className="flex items-center gap-1 flex-shrink-0">
-          <button
-            onClick={handlePrClick}
-            className="flex items-center gap-0.5 text-[10px] text-blue-400 hover:text-blue-300 transition-colors"
-            title={`Open PR #${prNumber}`}
-          >
-            <GitPullRequest className="w-3 h-3" />
-            <span>#{prNumber}</span>
-          </button>
-          <button onClick={handleCiClick} title="CI failed - Click to view">
-            <XCircle className="w-2.5 h-2.5 text-red-500 hover:text-red-400 transition-colors" />
-          </button>
-        </div>
-      )
-
-    default:
-      return null
-  }
-}
-
-function getWorktreeStatusBg(status: WorktreeStatus): string {
-  switch (status) {
-    case "agent-running":
-      return "bg-primary/10"
-    case "agent-done":
-      return "bg-amber-500/10"
-    case "pr-ci-failed":
-      return "bg-red-500/5"
-    default:
-      return ""
-  }
-}
+import { StatusIndicator, getStatusBgColor } from "./shared/status-indicator"
 
 interface SidebarProps {
   viewMode: "workspace" | "kanban"
@@ -305,14 +181,14 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
 	                </button>
 	              </div>
 
-	              {project.expanded && (
+	                  {project.expanded && (
 	                <div className="ml-4 pl-3 border-l border-border-subtle">
 	                  {project.worktrees.map((worktree, idx) => (
 	                    <div
 	                      key={worktree.workspaceId}
 	                      className={cn(
 	                        "group/worktree flex items-center gap-2 px-2 py-1.5 hover:bg-sidebar-accent/30 transition-all cursor-pointer rounded-sm mx-1",
-	                        getWorktreeStatusBg(worktree.status),
+	                        getStatusBgColor(worktree.status),
 	                        worktree.workspaceId === activeWorkspaceId && "bg-sidebar-accent/30",
 	                        newlyCreatedWorkspaceId === worktree.workspaceId &&
 	                          "animate-in slide-in-from-left-2 fade-in duration-300 bg-primary/15 ring-1 ring-primary/30",
@@ -343,13 +219,13 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
                             {worktree.id}
                           </span>
 	                      </div>
-	                      <WorktreeStatusIndicator
+	                      <StatusIndicator
 	                        status={worktree.status}
 	                        prNumber={worktree.prNumber}
-                        workspaceId={worktree.workspaceId}
-                        onOpenPullRequest={openWorkspacePullRequest}
-                        onOpenPullRequestFailedAction={openWorkspacePullRequestFailedAction}
-                      />
+	                        workspaceId={worktree.workspaceId}
+	                        onOpenPullRequest={openWorkspacePullRequest}
+	                        onOpenPullRequestFailedAction={openWorkspacePullRequestFailedAction}
+	                      />
                       {/* Archive button only for non-home worktrees */}
                       {worktree.isHome ? (
                         <span className="p-0.5 text-muted-foreground/50" title="Main worktree">

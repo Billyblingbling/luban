@@ -14,11 +14,11 @@ export type WorktreeStatus =
 export type KanbanColumn = "backlog" | "running" | "pending" | "reviewing" | "done"
 
 export const kanbanColumns: { id: KanbanColumn; label: string; color: string }[] = [
-  { id: "backlog", label: "Backlog", color: "text-muted-foreground" },
-  { id: "running", label: "Running", color: "text-blue-400" },
-  { id: "pending", label: "Pending", color: "text-amber-400" },
-  { id: "reviewing", label: "Reviewing", color: "text-purple-400" },
-  { id: "done", label: "Done", color: "text-green-400" },
+  { id: "backlog", label: "Backlog", color: "text-status-idle" },
+  { id: "running", label: "Running", color: "text-status-running" },
+  { id: "pending", label: "Pending", color: "text-status-warning" },
+  { id: "reviewing", label: "Reviewing", color: "text-status-info" },
+  { id: "done", label: "Done", color: "text-status-success" },
 ]
 
 export function kanbanColumnForStatus(status: WorktreeStatus): KanbanColumn {
@@ -56,4 +56,3 @@ export function worktreeStatusFromWorkspace(workspace: WorkspaceSnapshot): {
   if (pr.merge_ready) return { status: "pr-ci-passed-merge", prNumber: pr.number }
   return { status: "pr-ci-passed-review", prNumber: pr.number }
 }
-

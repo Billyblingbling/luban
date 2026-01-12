@@ -47,7 +47,7 @@ function ActivityEventItem({
         className={cn(
           "w-full flex items-center gap-2 py-1 px-2 -mx-2 rounded text-xs transition-colors",
           "hover:bg-muted/50",
-          event.status === "running" ? "text-primary" : "text-muted-foreground",
+          event.status === "running" ? "text-status-running" : "text-muted-foreground",
         )}
       >
         {event.status === "running" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : icon}
@@ -94,13 +94,13 @@ export function ActivityStream({ activities, isStreaming }: { activities: Activi
         className={cn(
           "flex items-center gap-2 py-1.5 px-2 -mx-2 rounded text-xs transition-colors w-full",
           "hover:bg-muted/50",
-          isStreaming ? "text-primary" : "text-muted-foreground",
+          isStreaming ? "text-status-running" : "text-muted-foreground",
         )}
       >
         {isStreaming && latestActivity?.status === "running" ? (
           <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0" />
         ) : (
-          <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0 text-green-500" />
+          <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0 text-status-success" />
         )}
         <span className="flex-1 text-left truncate">
           {isStreaming ? latestActivity?.title : `Completed ${completedCount} steps`}
@@ -125,4 +125,3 @@ export function ActivityStream({ activities, isStreaming }: { activities: Activi
     </div>
   )
 }
-

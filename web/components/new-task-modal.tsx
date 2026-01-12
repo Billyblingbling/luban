@@ -153,17 +153,17 @@ export function NewTaskModal({ open, onOpenChange }: NewTaskModalProps) {
   const intentColor = (kind: TaskIntentKind): string => {
     switch (kind) {
       case "fix_issue":
-        return "text-red-500"
+        return "text-status-error"
       case "implement_feature":
-        return "text-emerald-500"
+        return "text-status-success"
       case "review_pull_request":
-        return "text-blue-500"
+        return "text-status-running"
       case "resolve_pull_request_conflicts":
-        return "text-orange-500"
+        return "text-status-warning"
       case "add_project":
-        return "text-emerald-500"
+        return "text-status-success"
       case "other":
-        return "text-purple-500"
+        return "text-status-info"
     }
   }
 
