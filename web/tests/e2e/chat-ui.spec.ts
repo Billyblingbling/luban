@@ -8,6 +8,7 @@ test("long tokens wrap without horizontal overflow", async ({ page }) => {
   const marker = `e2e-${runId}-`
   const longToken = `${marker}${"a".repeat(600)}`
   await page.getByTestId("chat-input").fill(longToken)
+  await expect(page.getByTestId("chat-send")).toBeEnabled({ timeout: 20_000 })
   await page.getByTestId("chat-send").click()
 
   const bubble = page.getByTestId("user-message-bubble").filter({ hasText: marker }).first()
@@ -26,6 +27,7 @@ test("scroll-to-bottom button appears only when away from bottom", async ({ page
   const runId = Math.random().toString(16).slice(2)
   const payload = Array.from({ length: 160 }, (_, i) => `line ${i + 1} ${runId}`).join("\n")
   await page.getByTestId("chat-input").fill(payload)
+  await expect(page.getByTestId("chat-send")).toBeEnabled({ timeout: 20_000 })
   await page.getByTestId("chat-send").click()
   await expect(page.getByTestId("user-message-bubble").filter({ hasText: `line 160 ${runId}` }).first()).toBeVisible(
     { timeout: 20_000 },
@@ -96,5 +98,5 @@ test("file attachments upload and render in user messages", async ({ page }) => 
 
   const attachment = bubble.getByTestId("user-message-attachment").first()
   await expect(attachment).toBeVisible()
-  await expect(attachment).toContainText(/notes-\\d+\\.txt/)
+  await expect(attachment).toContainText(/notes-\d+\.txt/)
 })

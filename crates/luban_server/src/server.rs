@@ -363,11 +363,8 @@ async fn upload_attachment(
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
-        let tmp_dir = std::env::temp_dir().join(format!(
-            "luban-upload-{}-{}",
-            std::process::id(),
-            unique
-        ));
+        let tmp_dir =
+            std::env::temp_dir().join(format!("luban-upload-{}-{}", std::process::id(), unique));
         if let Err(err) = std::fs::create_dir_all(&tmp_dir) {
             return (
                 axum::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -420,7 +417,11 @@ fn append_timestamp_to_basename(name: &str, unix_ms: u64) -> String {
         .unwrap_or(name)
         .trim();
 
-    let raw_name = if raw_name.is_empty() { "file" } else { raw_name };
+    let raw_name = if raw_name.is_empty() {
+        "file"
+    } else {
+        raw_name
+    };
 
     let path = std::path::Path::new(raw_name);
     let stem = path
@@ -435,6 +436,21 @@ fn append_timestamp_to_basename(name: &str, unix_ms: u64) -> String {
     } else {
         format!("{stem}-{unix_ms}.{ext}")
     }
+}
+
+fn workspace_scope_from_snapshot(
+    snapshot: &Option<AppSnapshot>,
+    workspace_id: u64,
+) -> Option<(String, String)> {
+    let snapshot = snapshot.as_ref()?;
+    for project in &snapshot.projects {
+        for workspace in &project.workspaces {
+            if workspace.id.0 == workspace_id {
+                return Some((project.slug.clone(), workspace.workspace_name.clone()));
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -463,19 +479,4 @@ mod tests {
         assert_eq!(append_timestamp_to_basename("", 9), "file-9");
         assert_eq!(append_timestamp_to_basename("   ", 9), "file-9");
     }
-}
-
-fn workspace_scope_from_snapshot(
-    snapshot: &Option<AppSnapshot>,
-    workspace_id: u64,
-) -> Option<(String, String)> {
-    let snapshot = snapshot.as_ref()?;
-    for project in &snapshot.projects {
-        for workspace in &project.workspaces {
-            if workspace.id.0 == workspace_id {
-                return Some((project.slug.clone(), workspace.workspace_name.clone()));
-            }
-        }
-    }
-    None
 }
