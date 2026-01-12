@@ -43,3 +43,40 @@ test("terminal background matches card background and survives reload", async ({
   await expect(page.getByTestId("thread-tab-title").first()).toBeVisible({ timeout: 60_000 })
   await expect(terminal.locator("canvas")).toHaveCount(1, { timeout: 20_000 })
 })
+
+test("terminal paste sends input frames", async ({ page }) => {
+  const token = `luban-e2e-paste-${Math.random().toString(16).slice(2)}`
+  const payload = `echo ${token}\n`
+
+  const sentFrame = new Promise<string>((resolve) => {
+    page.on("websocket", (ws) => {
+      if (!ws.url().includes("/api/pty/")) return
+      ws.on("framesent", (ev) => {
+        const data = typeof ev.payload === "string" ? ev.payload : String(ev.payload)
+        if (data.includes("\"type\":\"input\"") && data.includes(token)) {
+          resolve(data)
+        }
+      })
+    })
+  })
+
+  await ensureWorkspace(page)
+
+  const terminal = page.getByTestId("pty-terminal")
+  await expect(terminal.locator("canvas")).toHaveCount(1, { timeout: 20_000 })
+
+  await terminal.evaluate(
+    (el, payload) => {
+      const event = new Event("paste", { bubbles: true, cancelable: true }) as any
+      Object.defineProperty(event, "clipboardData", {
+        value: {
+          getData: (t: string) => (t === "text/plain" ? payload : ""),
+        },
+      })
+      el.dispatchEvent(event)
+    },
+    payload,
+  )
+
+  await sentFrame
+})

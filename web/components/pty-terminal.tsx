@@ -6,6 +6,22 @@ import type { ITheme } from "ghostty-web"
 
 import { useLuban } from "@/lib/luban-context"
 
+async function copyToClipboard(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    const el = document.createElement("textarea")
+    el.value = text
+    el.style.position = "fixed"
+    el.style.opacity = "0"
+    document.body.appendChild(el)
+    el.focus()
+    el.select()
+    document.execCommand("copy")
+    document.body.removeChild(el)
+  }
+}
+
 function cssVar(name: string): string | null {
   const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
   return raw.length > 0 ? raw : null
@@ -132,6 +148,14 @@ export function PtyTerminal() {
     let ws: WebSocket | null = null
     let dataDisposable: { dispose: () => void } | null = null
     let resizeDisposable: { dispose: () => void } | null = null
+    let keydownCapture: ((ev: KeyboardEvent) => void) | null = null
+    let pasteCapture: ((ev: Event) => void) | null = null
+    let contextMenuCapture: ((ev: MouseEvent) => void) | null = null
+
+    function sendInput(text: string) {
+      if (ws?.readyState !== WebSocket.OPEN) return
+      ws.send(JSON.stringify({ type: "input", data: text }))
+    }
 
     function sendResizeIfReady(cols: number, rows: number) {
       if (!isValidTerminalSize(cols, rows)) return
@@ -164,6 +188,66 @@ export function PtyTerminal() {
         if (disposed) return
 
         writeOscTheme(term)
+
+        keydownCapture = (ev: KeyboardEvent) => {
+          const code = ev.code
+          const isShortcut = ev.ctrlKey || ev.metaKey
+          if (!isShortcut) return
+
+          if (code === "KeyC") {
+            if (!term.hasSelection()) return
+
+            ev.preventDefault()
+            ev.stopPropagation()
+            ev.stopImmediatePropagation()
+
+            const selection = term.getSelection()
+            if (selection.trim().length === 0) return
+            void copyToClipboard(selection)
+            return
+          }
+        }
+
+        pasteCapture = (ev: Event) => {
+          const clipboard = (ev as any).clipboardData
+          const text = clipboard?.getData?.("text/plain")
+          if (typeof text !== "string" || text.length === 0) return
+
+          ev.preventDefault()
+          ev.stopPropagation()
+          ;(ev as any).stopImmediatePropagation?.()
+
+          sendInput(text)
+        }
+
+        contextMenuCapture = (ev: MouseEvent) => {
+          ev.preventDefault()
+          ev.stopPropagation()
+          ev.stopImmediatePropagation()
+
+          if (term.hasSelection()) {
+            const selection = term.getSelection()
+            if (selection.trim().length === 0) return
+            void copyToClipboard(selection)
+            return
+          }
+
+          if (!navigator.clipboard?.readText) return
+          void navigator.clipboard
+            .readText()
+            .then((text) => {
+              if (disposed) return
+              if (text.length === 0) return
+              sendInput(text)
+            })
+            .catch(() => {
+              // Ignore clipboard errors (permissions, etc.).
+            })
+        }
+
+        container.addEventListener("keydown", keydownCapture, true)
+        container.addEventListener("paste", pasteCapture, true)
+        container.addEventListener("contextmenu", contextMenuCapture, true)
 
         resizeDisposable = term.onResize(({ cols, rows }) => {
           sendResizeIfReady(cols, rows)
@@ -201,6 +285,9 @@ export function PtyTerminal() {
 
     return () => {
       disposed = true
+      if (keydownCapture) container.removeEventListener("keydown", keydownCapture, true)
+      if (pasteCapture) container.removeEventListener("paste", pasteCapture, true)
+      if (contextMenuCapture) container.removeEventListener("contextmenu", contextMenuCapture, true)
       dataDisposable?.dispose()
       resizeDisposable?.dispose()
       ws?.close()
