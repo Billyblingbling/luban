@@ -1271,8 +1271,16 @@ impl SqliteDatabase {
                 )?;
             }
 
-            upsert_text(&tx, APPEARANCE_THEME_KEY, snapshot.appearance_theme.as_deref())?;
-            upsert_text(&tx, APPEARANCE_UI_FONT_KEY, snapshot.appearance_ui_font.as_deref())?;
+            upsert_text(
+                &tx,
+                APPEARANCE_THEME_KEY,
+                snapshot.appearance_theme.as_deref(),
+            )?;
+            upsert_text(
+                &tx,
+                APPEARANCE_UI_FONT_KEY,
+                snapshot.appearance_ui_font.as_deref(),
+            )?;
             upsert_text(
                 &tx,
                 APPEARANCE_CHAT_FONT_KEY,

@@ -1750,19 +1750,23 @@ fn map_client_action(action: luban_api::ClientAction) -> Option<Action> {
             thread_id: WorkspaceThreadId::from_u64(thread_id.0),
             to_index,
         }),
-        luban_api::ClientAction::AppearanceThemeChanged { theme } => Some(Action::AppearanceThemeChanged {
-            theme: match theme {
-                luban_api::AppearanceTheme::Light => luban_domain::AppearanceTheme::Light,
-                luban_api::AppearanceTheme::Dark => luban_domain::AppearanceTheme::Dark,
-                luban_api::AppearanceTheme::System => luban_domain::AppearanceTheme::System,
-            },
-        }),
-        luban_api::ClientAction::AppearanceFontsChanged { fonts } => Some(Action::AppearanceFontsChanged {
-            ui_font: fonts.ui_font,
-            chat_font: fonts.chat_font,
-            code_font: fonts.code_font,
-            terminal_font: fonts.terminal_font,
-        }),
+        luban_api::ClientAction::AppearanceThemeChanged { theme } => {
+            Some(Action::AppearanceThemeChanged {
+                theme: match theme {
+                    luban_api::AppearanceTheme::Light => luban_domain::AppearanceTheme::Light,
+                    luban_api::AppearanceTheme::Dark => luban_domain::AppearanceTheme::Dark,
+                    luban_api::AppearanceTheme::System => luban_domain::AppearanceTheme::System,
+                },
+            })
+        }
+        luban_api::ClientAction::AppearanceFontsChanged { fonts } => {
+            Some(Action::AppearanceFontsChanged {
+                ui_font: fonts.ui_font,
+                chat_font: fonts.chat_font,
+                code_font: fonts.code_font,
+                terminal_font: fonts.terminal_font,
+            })
+        }
     }
 }
 

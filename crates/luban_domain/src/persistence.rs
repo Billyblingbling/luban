@@ -1,8 +1,8 @@
 use crate::agent_settings::parse_thinking_effort;
 use crate::{
-    AppState, AppearanceFonts, AppearanceTheme, Effect, MainPane, OperationStatus, PersistedAppState,
-    PersistedProject, PersistedWorkspace, Project, ProjectId, RightPane, Workspace, WorkspaceId,
-    WorkspaceStatus, WorkspaceTabs, WorkspaceThreadId,
+    AppState, AppearanceFonts, AppearanceTheme, Effect, MainPane, OperationStatus,
+    PersistedAppState, PersistedProject, PersistedWorkspace, Project, ProjectId, RightPane,
+    Workspace, WorkspaceId, WorkspaceStatus, WorkspaceTabs, WorkspaceThreadId,
 };
 use crate::{default_agent_model_id, default_thinking_effort, normalize_thinking_effort};
 use std::collections::{HashMap, HashSet};
@@ -52,8 +52,14 @@ pub(crate) fn apply_persisted_app_state(
     let defaults = AppearanceFonts::default();
     state.appearance_fonts = AppearanceFonts {
         ui_font: normalize_font(persisted.appearance_ui_font.as_deref(), &defaults.ui_font),
-        chat_font: normalize_font(persisted.appearance_chat_font.as_deref(), &defaults.chat_font),
-        code_font: normalize_font(persisted.appearance_code_font.as_deref(), &defaults.code_font),
+        chat_font: normalize_font(
+            persisted.appearance_chat_font.as_deref(),
+            &defaults.chat_font,
+        ),
+        code_font: normalize_font(
+            persisted.appearance_code_font.as_deref(),
+            &defaults.code_font,
+        ),
         terminal_font: normalize_font(
             persisted.appearance_terminal_font.as_deref(),
             &defaults.terminal_font,
