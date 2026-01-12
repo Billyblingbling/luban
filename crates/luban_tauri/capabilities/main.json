@@ -5,7 +5,8 @@
     "main"
   ],
   "permissions": [
-    "core:default"
+    "core:default",
+    "webview:allow-set-webview-zoom"
   ],
   "remote": {
     "urls": [
