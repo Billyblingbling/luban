@@ -169,6 +169,7 @@ export function buildMessages(conversation: ConversationSnapshot | null): Messag
   let assistantToolCalls = 0
   let assistantThinkingSteps = 0
   let assistantDurationMs: number | null = null
+  const seenAgentItemIds = new Set<string>()
 
   function flushAssistant() {
     if (assistantContent.trim().length === 0 && assistantActivities.length === 0) return
@@ -207,6 +208,7 @@ export function buildMessages(conversation: ConversationSnapshot | null): Messag
     }
 
     if (entry.type === "agent_item") {
+      seenAgentItemIds.add(entry.id)
       if (entry.kind === "agent_message") {
         const payload = entry.payload as any
         const text = typeof payload?.text === "string" ? payload.text : ""
@@ -255,6 +257,17 @@ export function buildMessages(conversation: ConversationSnapshot | null): Messag
 
   if (conversation.run_status === "running" && conversation.in_progress_items.length > 0) {
     for (const item of conversation.in_progress_items) {
+      if (seenAgentItemIds.has(item.id)) continue
+
+      if (item.kind === "agent_message") {
+        const payload = item.payload as any
+        const text = typeof payload?.text === "string" ? payload.text : ""
+        if (text.length > 0) {
+          assistantContent = assistantContent.length === 0 ? text : `${assistantContent}\n\n${text}`
+        }
+        continue
+      }
+
       assistantActivities.push(
         activityFromAgentItemLike({
           id: item.id,
@@ -285,4 +298,3 @@ export function buildMessages(conversation: ConversationSnapshot | null): Messag
   }
   return out
 }
-

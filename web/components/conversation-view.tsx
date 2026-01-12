@@ -33,9 +33,9 @@ export function ConversationView({
   messages: Message[]
   emptyState?: React.ReactNode
   className?: string
-}) {
+}): React.ReactElement | null {
   if (messages.length === 0) {
-    return emptyState ?? null
+    return emptyState ? <>{emptyState}</> : null
   }
 
   return (
