@@ -314,7 +314,7 @@ export function PtyTerminal() {
       ref={containerRef}
       data-testid="pty-terminal"
       tabIndex={0}
-      className="h-full w-full p-3 font-mono text-xs overflow-auto bg-card text-card-foreground"
+      className="h-full w-full p-3 font-mono text-xs overflow-auto bg-card text-card-foreground focus:outline-none"
     />
   )
 }
