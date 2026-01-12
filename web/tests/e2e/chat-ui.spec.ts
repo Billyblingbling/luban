@@ -74,3 +74,27 @@ test("external links open without navigating current page", async ({ page }) => 
 
   expect(page.url()).toBe(startUrl)
 })
+
+test("file attachments upload and render in user messages", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  const runId = Math.random().toString(16).slice(2)
+  const marker = `e2e-attach-${runId}`
+
+  await page.getByTestId("chat-attach-input").setInputFiles({
+    name: "notes.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from(`hello ${runId}\n`, "utf8"),
+  })
+
+  await page.getByTestId("chat-input").fill(marker)
+  await expect(page.getByTestId("chat-send")).toBeEnabled({ timeout: 20_000 })
+  await page.getByTestId("chat-send").click()
+
+  const bubble = page.getByTestId("user-message-bubble").filter({ hasText: marker }).first()
+  await expect(bubble).toBeVisible({ timeout: 20_000 })
+
+  const attachment = bubble.getByTestId("user-message-attachment").first()
+  await expect(attachment).toBeVisible()
+  await expect(attachment).toContainText(/notes-\\d+\\.txt/)
+})

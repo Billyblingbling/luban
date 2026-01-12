@@ -2,10 +2,11 @@
 
 import type React from "react"
 
-import { Brain, Clock, Copy, FileCode, Wrench } from "lucide-react"
+import { Brain, Clock, Copy, FileCode, FileText, Wrench } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import type { Message } from "@/lib/conversation-ui"
+import type { AttachmentRef } from "@/lib/luban-api"
 import { Markdown } from "@/components/markdown"
 import { ActivityStream } from "@/components/activity-stream"
 
@@ -25,14 +26,21 @@ async function copyToClipboard(text: string): Promise<void> {
   }
 }
 
+function attachmentHref(workspaceId: number, attachment: AttachmentRef): string {
+  const params = new URLSearchParams({ ext: attachment.extension })
+  return `/api/workspaces/${workspaceId}/attachments/${attachment.id}?${params.toString()}`
+}
+
 export function ConversationView({
   messages,
   emptyState,
   className,
+  workspaceId,
 }: {
   messages: Message[]
   emptyState?: React.ReactNode
   className?: string
+  workspaceId?: number
 }): React.ReactElement | null {
   if (messages.length === 0) {
     return emptyState ? <>{emptyState}</> : null
@@ -100,6 +108,47 @@ export function ConversationView({
                 data-testid="user-message-bubble"
                 className="max-w-[85%] border border-border rounded-lg px-3 py-2.5 bg-muted/30"
               >
+                {message.attachments && message.attachments.length > 0 && (
+                  <div className="mb-2 flex flex-wrap gap-2">
+                    {message.attachments.map((attachment) => {
+                      const href = workspaceId != null ? attachmentHref(workspaceId, attachment) : null
+                      return (
+                        <a
+                          key={`${attachment.kind}:${attachment.id}`}
+                          data-testid="user-message-attachment"
+                          href={href ?? undefined}
+                          target={href ? "_blank" : undefined}
+                          rel={href ? "noreferrer" : undefined}
+                          className="group/att block w-20"
+                        >
+                          <div className="w-20 h-20 rounded-lg overflow-hidden border border-border/50 hover:border-border transition-colors bg-muted/40 flex items-center justify-center">
+                            {attachment.kind === "image" && href ? (
+                              <img
+                                src={href}
+                                alt={attachment.name}
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <div className="flex flex-col items-center gap-1.5 px-2">
+                                {attachment.extension.toLowerCase() === "json" ? (
+                                  <FileCode className="w-6 h-6 text-amber-500" />
+                                ) : (
+                                  <FileText className="w-6 h-6 text-muted-foreground" />
+                                )}
+                                <span className="text-[9px] text-muted-foreground uppercase font-medium tracking-wide truncate w-full text-center">
+                                  {attachment.extension}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                          <div className="mt-1 text-[10px] text-muted-foreground truncate">
+                            {attachment.name}
+                          </div>
+                        </a>
+                      )
+                    })}
+                  </div>
+                )}
                 <div className="text-[13px] text-foreground space-y-1 break-words overflow-hidden">
                   {message.content.split("\n").map((line, idx) => (
                     <p key={idx} className="flex items-start gap-2 min-w-0">

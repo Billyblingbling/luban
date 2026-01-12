@@ -1,6 +1,7 @@
 "use client"
 
 import type {
+  AttachmentRef,
   ClientAction,
   TaskDraft,
   TaskExecuteMode,
@@ -33,8 +34,13 @@ export type LubanActions = {
   closeThreadTab: (threadId: number) => Promise<void>
   restoreThreadTab: (threadId: number) => Promise<void>
 
-  sendAgentMessage: (text: string) => void
-  sendAgentMessageTo: (workspaceId: WorkspaceId, threadId: number, text: string) => void
+  sendAgentMessage: (text: string, attachments?: AttachmentRef[]) => void
+  sendAgentMessageTo: (
+    workspaceId: WorkspaceId,
+    threadId: number,
+    text: string,
+    attachments?: AttachmentRef[],
+  ) => void
   cancelAgentTurn: () => void
 
   setChatModel: (workspaceId: WorkspaceId, threadId: WorkspaceThreadId, modelId: string) => void
@@ -254,7 +260,7 @@ export function createLubanActions(args: {
     return { workspaceId: wid, threadId: tid }
   }
 
-  function sendAgentMessage(text: string) {
+  function sendAgentMessage(text: string, attachments: AttachmentRef[] = []) {
     const ids = activeWorkspaceThread()
     if (!ids) return
     args.sendAction({
@@ -262,17 +268,22 @@ export function createLubanActions(args: {
       workspace_id: ids.workspaceId,
       thread_id: ids.threadId,
       text,
-      attachments: [],
+      attachments,
     })
   }
 
-  function sendAgentMessageTo(workspaceId: WorkspaceId, threadId: number, text: string) {
+  function sendAgentMessageTo(
+    workspaceId: WorkspaceId,
+    threadId: number,
+    text: string,
+    attachments: AttachmentRef[] = [],
+  ) {
     args.sendAction({
       type: "send_agent_message",
       workspace_id: workspaceId,
       thread_id: threadId,
       text,
-      attachments: [],
+      attachments,
     })
   }
 

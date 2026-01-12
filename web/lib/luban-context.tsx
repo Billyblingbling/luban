@@ -7,6 +7,7 @@ import { toast } from "sonner"
 
 import type {
   AppSnapshot,
+  AttachmentRef,
   ConversationSnapshot,
   ServerEvent,
   ThreadMeta,
@@ -54,8 +55,13 @@ type LubanContextValue = {
   closeThreadTab: (threadId: number) => Promise<void>
   restoreThreadTab: (threadId: number) => Promise<void>
 
-  sendAgentMessage: (text: string) => void
-  sendAgentMessageTo: (workspaceId: WorkspaceId, threadId: number, text: string) => void
+  sendAgentMessage: (text: string, attachments?: AttachmentRef[]) => void
+  sendAgentMessageTo: (
+    workspaceId: WorkspaceId,
+    threadId: number,
+    text: string,
+    attachments?: AttachmentRef[],
+  ) => void
   cancelAgentTurn: () => void
 
   setChatModel: (workspaceId: WorkspaceId, threadId: WorkspaceThreadId, modelId: string) => void

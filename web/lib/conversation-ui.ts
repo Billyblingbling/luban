@@ -1,6 +1,7 @@
 "use client"
 
 import type {
+  AttachmentRef,
   ConversationEntry,
   ConversationSnapshot,
   ThinkingEffort,
@@ -19,6 +20,7 @@ export interface Message {
   id: string
   type: "user" | "assistant"
   content: string
+  attachments?: AttachmentRef[]
   timestamp?: string
   isStreaming?: boolean
   activities?: ActivityEvent[]
@@ -203,6 +205,7 @@ export function buildMessages(conversation: ConversationSnapshot | null): Messag
         id: `u_${out.length}`,
         type: "user",
         content: entry.text,
+        attachments: entry.attachments,
       })
       continue
     }

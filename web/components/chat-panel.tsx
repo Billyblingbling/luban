@@ -21,6 +21,10 @@ import {
   Pencil,
   CheckCircle2,
   Loader2,
+  Paperclip,
+  ImageIcon,
+  FileText,
+  FileCode,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useLuban } from "@/lib/luban-context"
@@ -31,6 +35,8 @@ import {
 } from "@/lib/conversation-ui"
 import { AGENT_MODELS, supportedThinkingEffortsForModel } from "@/lib/agent-settings"
 import { ConversationView } from "@/components/conversation-view"
+import { uploadAttachment } from "@/lib/luban-http"
+import type { AttachmentRef } from "@/lib/luban-api"
 import {
   draftKey,
   followTailKey,
@@ -49,11 +55,22 @@ interface ArchivedTab {
   title: string
 }
 
+type ComposerAttachment = {
+  id: string
+  type: "image" | "file"
+  name: string
+  size: number
+  preview?: string
+  status: "uploading" | "ready" | "failed"
+  attachment?: AttachmentRef
+}
+
 export function ChatPanel() {
   const [showTabDropdown, setShowTabDropdown] = useState(false)
 
   const scrollContainerRef = useRef<HTMLDivElement | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const {
     app,
@@ -78,6 +95,11 @@ export function ChatPanel() {
   const [showEffortDropdown, setShowEffortDropdown] = useState(false)
   const [followTail, setFollowTail] = useState(true)
   const programmaticScrollRef = useRef(false)
+
+  const [attachments, setAttachments] = useState<ComposerAttachment[]>([])
+  const [isDragging, setIsDragging] = useState(false)
+  const attachmentScopeRef = useRef<string>("")
+  const attachmentScope = `${activeWorkspaceId ?? "none"}:${activeThreadId ?? "none"}`
 
   useEffect(() => {
     const el = textareaRef.current
@@ -164,6 +186,7 @@ export function ChatPanel() {
   useEffect(() => {
     if (activeWorkspaceId == null || activeThreadId == null) {
       setDraftText("")
+      setAttachments([])
       return
     }
 
@@ -172,6 +195,9 @@ export function ChatPanel() {
 
     const saved = loadJson<{ text: string }>(draftKey(activeWorkspaceId, activeThreadId))
     setDraftText(saved?.text ?? "")
+    setAttachments([])
+    setIsDragging(false)
+    attachmentScopeRef.current = attachmentScope
   }, [activeWorkspaceId, activeThreadId])
 
   function scheduleScrollToBottom() {
@@ -231,14 +257,91 @@ export function ChatPanel() {
   const handleSend = () => {
     if (activeWorkspaceId == null || activeThreadId == null) return
     const text = draftText.trim()
-    if (text.length === 0) return
-    sendAgentMessage(text)
+    const ready = attachments
+      .filter((a) => a.status === "ready" && a.attachment != null)
+      .map((a) => a.attachment!)
+    const hasUploading = attachments.some((a) => a.status === "uploading")
+    if (hasUploading) return
+    if (text.length === 0 && ready.length === 0) return
+    sendAgentMessage(text, ready)
     setDraftText("")
     persistDraft("")
+    setAttachments([])
     setFollowTail(true)
     localStorage.setItem(followTailKey(activeWorkspaceId, activeThreadId), "true")
     scheduleScrollToBottom()
   }
+
+  const handleFileSelect = (files: FileList | null) => {
+    if (!files) return
+    if (activeWorkspaceId == null || activeThreadId == null) return
+
+    const scopeAtStart = attachmentScopeRef.current
+
+    for (const file of Array.from(files)) {
+      const isImage = file.type.startsWith("image/")
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+      const initial: ComposerAttachment = {
+        id,
+        type: isImage ? "image" : "file",
+        name: file.name,
+        size: file.size,
+        status: "uploading",
+      }
+
+      if (isImage) {
+        const reader = new FileReader()
+        reader.onload = (e) => {
+          const preview = typeof e.target?.result === "string" ? e.target.result : undefined
+          setAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, preview } : a)))
+        }
+        reader.readAsDataURL(file)
+      }
+
+      setAttachments((prev) => [...prev, initial])
+
+      void uploadAttachment({ workspaceId: activeWorkspaceId, file, kind: isImage ? "image" : "file" })
+        .then((attachment) => {
+          if (attachmentScopeRef.current !== scopeAtStart) return
+          setAttachments((prev) =>
+            prev.map((a) => (a.id === id ? { ...a, status: "ready", attachment, name: attachment.name } : a)),
+          )
+        })
+        .catch(() => {
+          if (attachmentScopeRef.current !== scopeAtStart) return
+          setAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, status: "failed" } : a)))
+        })
+    }
+  }
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    if (activeWorkspaceId == null || activeThreadId == null) return
+    const items = e.clipboardData?.items
+    if (!items) return
+
+    const imageItems = Array.from(items).filter((item) => item.type.startsWith("image/"))
+    if (imageItems.length === 0) return
+
+    e.preventDefault()
+    const dt = new DataTransfer()
+    for (const item of imageItems) {
+      const file = item.getAsFile()
+      if (file) dt.items.add(file)
+    }
+    handleFileSelect(dt.files)
+  }
+
+  const removeAttachment = (id: string) => {
+    setAttachments((prev) => prev.filter((a) => a.id !== id))
+  }
+
+  const canSend = useMemo(() => {
+    if (activeWorkspaceId == null || activeThreadId == null) return false
+    const hasUploading = attachments.some((a) => a.status === "uploading")
+    if (hasUploading) return false
+    const hasReady = attachments.some((a) => a.status === "ready" && a.attachment != null)
+    return draftText.trim().length > 0 || hasReady
+  }, [activeWorkspaceId, activeThreadId, attachments, draftText])
 
   return (
     <div className="flex-1 flex flex-col min-w-0 bg-background">
@@ -395,6 +498,7 @@ export function ChatPanel() {
       >
         <ConversationView
           messages={messages}
+          workspaceId={activeWorkspaceId ?? undefined}
           className="max-w-3xl mx-auto py-4 px-4 pb-20"
           emptyState={
             <div className="max-w-3xl mx-auto py-4 px-4 text-sm text-muted-foreground">
@@ -429,8 +533,88 @@ export function ChatPanel() {
                 className={cn(
                   "relative bg-background border rounded-lg shadow-lg transition-all",
                   isComposerFocused ? "border-primary/50 ring-1 ring-primary/20 shadow-xl" : "border-border",
+                  isDragging && "border-primary ring-2 ring-primary/30 bg-primary/5",
                 )}
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  if (activeWorkspaceId == null || activeThreadId == null) return
+                  setIsDragging(true)
+                }}
+                onDragLeave={(e) => {
+                  e.preventDefault()
+                  setIsDragging(false)
+                }}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  setIsDragging(false)
+                  handleFileSelect(e.dataTransfer.files)
+                }}
               >
+                {isDragging && (
+                  <div className="absolute inset-0 z-10 flex items-center justify-center bg-primary/5 rounded-lg border-2 border-dashed border-primary">
+                    <div className="flex flex-col items-center gap-2 text-primary">
+                      <ImageIcon className="w-8 h-8" />
+                      <span className="text-sm font-medium">Drop files here</span>
+                    </div>
+                  </div>
+                )}
+
+                {attachments.length > 0 && (
+                  <div className="px-3 pt-3 pb-1 flex flex-wrap gap-3">
+                    {attachments.map((attachment) => (
+                      <div key={attachment.id} className="group relative">
+                        <div className="relative">
+                          <div className="w-20 h-20 rounded-lg overflow-hidden border border-border/50 hover:border-border transition-colors bg-muted/40 flex items-center justify-center">
+                            {attachment.type === "image" && attachment.preview ? (
+                              <img
+                                src={attachment.preview}
+                                alt={attachment.name}
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <div className="flex flex-col items-center gap-1.5">
+                                {attachment.name.toLowerCase().endsWith(".json") ? (
+                                  <FileCode className="w-6 h-6 text-amber-500" />
+                                ) : attachment.name.toLowerCase().endsWith(".pdf") ? (
+                                  <FileText className="w-6 h-6 text-red-500" />
+                                ) : (
+                                  <FileText className="w-6 h-6 text-muted-foreground" />
+                                )}
+                                <span className="text-[9px] text-muted-foreground uppercase font-medium tracking-wide">
+                                  {attachment.name.split(".").pop()}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                          {attachment.status === "uploading" && (
+                            <div className="absolute inset-0 flex items-center justify-center bg-background/60">
+                              <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+                            </div>
+                          )}
+                          <button
+                            onClick={() => removeAttachment(attachment.id)}
+                            className={cn(
+                              "absolute -top-1.5 -right-1.5 p-1 bg-background border border-border rounded-full shadow-sm transition-opacity hover:bg-destructive hover:border-destructive hover:text-destructive-foreground",
+                              attachment.status === "uploading" ? "opacity-0 pointer-events-none" : "opacity-0 group-hover:opacity-100",
+                            )}
+                            aria-label="Remove attachment"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                          <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 px-1.5 py-0.5 bg-popover border border-border rounded text-[9px] text-muted-foreground truncate max-w-[90px] opacity-0 group-hover:opacity-100 transition-opacity shadow-sm pointer-events-none">
+                            {attachment.name}
+                          </div>
+                          {attachment.status === "failed" && (
+                            <div className="absolute inset-x-0 bottom-0 px-1 py-0.5 text-[9px] text-destructive bg-background/80 text-center">
+                              Upload failed
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 <div className="px-2.5 pt-2">
                   <textarea
                     ref={textareaRef}
@@ -442,6 +626,7 @@ export function ChatPanel() {
                     }}
                     onFocus={() => setIsComposerFocused(true)}
                     onBlur={() => setIsComposerFocused(false)}
+                    onPaste={handlePaste}
                     placeholder="Message... (⌘↵ to send)"
                     className="w-full bg-transparent text-sm leading-5 text-foreground placeholder:text-muted-foreground resize-none focus:outline-none min-h-[20px] max-h-[160px]"
                     rows={1}
@@ -456,6 +641,27 @@ export function ChatPanel() {
                 </div>
 
                 <div className="flex items-center px-2 pb-2 pt-1">
+                  <input
+                    ref={fileInputRef}
+                    data-testid="chat-attach-input"
+                    type="file"
+                    multiple
+                    accept="image/*,.pdf,.txt,.md,.json,.csv,.xml,.yaml,.yml"
+                    className="hidden"
+                    onChange={(e) => handleFileSelect(e.target.files)}
+                  />
+                  <button
+                    data-testid="chat-attach"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="inline-flex items-center gap-1 p-1.5 hover:bg-muted rounded text-muted-foreground hover:text-foreground transition-colors"
+                    title="Attach files"
+                    disabled={activeWorkspaceId == null || activeThreadId == null}
+                  >
+                    <Paperclip className="w-4 h-4" />
+                  </button>
+
+                  <div className="w-px h-4 bg-border mx-1" />
+
                   <div className="relative">
                     <button
                       onMouseDown={(e) => e.preventDefault()}
@@ -576,12 +782,12 @@ export function ChatPanel() {
                     aria-label="Send message"
                     className={cn(
                       "p-1.5 rounded-md transition-all flex-shrink-0 disabled:opacity-50",
-                      draftText.trim().length > 0 && activeWorkspaceId != null && activeThreadId != null
+                      canSend
                         ? "bg-primary text-primary-foreground hover:bg-primary/90"
                         : "bg-muted text-muted-foreground",
                     )}
                     onClick={handleSend}
-                    disabled={draftText.trim().length === 0 || activeWorkspaceId == null || activeThreadId == null}
+                    disabled={!canSend}
                   >
                     <Send className="w-3.5 h-3.5" />
                   </button>
