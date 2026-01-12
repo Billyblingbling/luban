@@ -1780,8 +1780,9 @@ pub fn new_default_services() -> anyhow::Result<Arc<dyn ProjectWorkspaceService>
 mod tests {
     use super::*;
     use luban_domain::{
-        CodexThreadEvent, ContextImage, ConversationSnapshot as DomainConversationSnapshot,
-        ContextItem, ConversationThreadMeta, PersistedAppState,
+        CodexThreadEvent, ContextImage, ContextItem,
+        ConversationSnapshot as DomainConversationSnapshot, ConversationThreadMeta,
+        PersistedAppState,
     };
     use std::collections::HashMap;
     use std::sync::atomic::AtomicBool;

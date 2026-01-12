@@ -409,8 +409,8 @@ async fn upload_attachment(
 
     let stored = if resolved_kind.starts_with("image") {
         state.services.store_context_image(
-            project_slug,
-            workspace_name,
+            project_slug.clone(),
+            workspace_name.clone(),
             ContextImage { extension, bytes },
         )
     } else if resolved_kind.starts_with("text") {
@@ -424,9 +424,12 @@ async fn upload_attachment(
                     .into_response();
             }
         };
-        state
-            .services
-            .store_context_text(project_slug, workspace_name, text, extension)
+        state.services.store_context_text(
+            project_slug.clone(),
+            workspace_name.clone(),
+            text,
+            extension,
+        )
     } else {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -452,9 +455,11 @@ async fn upload_attachment(
                 .into_response();
         }
 
-        let stored = state
-            .services
-            .store_context_file(project_slug, workspace_name, tmp_path);
+        let stored = state.services.store_context_file(
+            project_slug.clone(),
+            workspace_name.clone(),
+            tmp_path,
+        );
         let _ = std::fs::remove_dir_all(&tmp_dir);
         stored
     };
@@ -468,11 +473,7 @@ async fn upload_attachment(
                 att.clone(),
                 uploaded_at_ms,
             ) {
-                return (
-                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                    message,
-                )
-                    .into_response();
+                return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, message).into_response();
             }
 
             let api = luban_api::AttachmentRef {
