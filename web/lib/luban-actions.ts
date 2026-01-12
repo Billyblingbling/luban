@@ -5,7 +5,9 @@ import type {
   TaskDraft,
   TaskExecuteMode,
   TaskExecuteResult,
+  ThinkingEffort,
   WorkspaceId,
+  WorkspaceThreadId,
 } from "./luban-api"
 import { fetchConversation, fetchThreads } from "./luban-http"
 import type { LubanStore } from "./luban-store"
@@ -31,6 +33,9 @@ export type LubanActions = {
   sendAgentMessage: (text: string) => void
   sendAgentMessageTo: (workspaceId: WorkspaceId, threadId: number, text: string) => void
   cancelAgentTurn: () => void
+
+  setChatModel: (workspaceId: WorkspaceId, threadId: WorkspaceThreadId, modelId: string) => void
+  setThinkingEffort: (workspaceId: WorkspaceId, threadId: WorkspaceThreadId, effort: ThinkingEffort) => void
 }
 
 export type LubanActionsInternal = LubanActions & {
@@ -209,6 +214,28 @@ export function createLubanActions(args: {
     args.sendAction({ type: "cancel_agent_turn", workspace_id: ids.workspaceId, thread_id: ids.threadId })
   }
 
+  function setChatModel(workspaceId: WorkspaceId, threadId: WorkspaceThreadId, modelId: string) {
+    args.sendAction({
+      type: "chat_model_changed",
+      workspace_id: workspaceId,
+      thread_id: threadId,
+      model_id: modelId,
+    })
+  }
+
+  function setThinkingEffort(
+    workspaceId: WorkspaceId,
+    threadId: WorkspaceThreadId,
+    effort: ThinkingEffort,
+  ) {
+    args.sendAction({
+      type: "thinking_effort_changed",
+      workspace_id: workspaceId,
+      thread_id: threadId,
+      thinking_effort: effort,
+    })
+  }
+
   return {
     pickProjectPath,
     addProject,
@@ -226,5 +253,7 @@ export function createLubanActions(args: {
     sendAgentMessage,
     sendAgentMessageTo,
     cancelAgentTurn,
+    setChatModel,
+    setThinkingEffort,
   }
 }

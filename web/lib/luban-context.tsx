@@ -13,7 +13,9 @@ import type {
   TaskDraft,
   TaskExecuteMode,
   TaskExecuteResult,
+  ThinkingEffort,
   WorkspaceId,
+  WorkspaceThreadId,
   WorkspaceSnapshot,
 } from "./luban-api"
 import { createLubanActions } from "./luban-actions"
@@ -49,6 +51,9 @@ type LubanContextValue = {
   sendAgentMessage: (text: string) => void
   sendAgentMessageTo: (workspaceId: WorkspaceId, threadId: number, text: string) => void
   cancelAgentTurn: () => void
+
+  setChatModel: (workspaceId: WorkspaceId, threadId: WorkspaceThreadId, modelId: string) => void
+  setThinkingEffort: (workspaceId: WorkspaceId, threadId: WorkspaceThreadId, effort: ThinkingEffort) => void
 }
 
 const LubanContext = createContext<LubanContextValue | null>(null)
@@ -117,6 +122,8 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     sendAgentMessage: actions.sendAgentMessage,
     sendAgentMessageTo: actions.sendAgentMessageTo,
     cancelAgentTurn: actions.cancelAgentTurn,
+    setChatModel: actions.setChatModel,
+    setThinkingEffort: actions.setThinkingEffort,
   }
 
   return <LubanContext.Provider value={value}>{children}</LubanContext.Provider>

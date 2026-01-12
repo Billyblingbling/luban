@@ -29,6 +29,7 @@ import {
   buildMessages,
   thinkingEffortLabel,
 } from "@/lib/conversation-ui"
+import { AGENT_MODELS, supportedThinkingEffortsForModel } from "@/lib/agent-settings"
 import { ConversationView } from "@/components/conversation-view"
 import {
   closedAtKey,
@@ -76,10 +77,14 @@ export function ChatPanel() {
     selectThread,
     createThread,
     sendAgentMessage,
+    setChatModel,
+    setThinkingEffort,
   } = useLuban()
 
   const [draftText, setDraftText] = useState("")
   const [isComposerFocused, setIsComposerFocused] = useState(false)
+  const [showModelDropdown, setShowModelDropdown] = useState(false)
+  const [showEffortDropdown, setShowEffortDropdown] = useState(false)
   const [hiddenThreadIds, setHiddenThreadIds] = useState<number[]>([])
   const [threadOrderIds, setThreadOrderIds] = useState<number[]>([])
   const [closedAtByThreadId, setClosedAtByThreadId] = useState<Record<number, number>>({})
@@ -101,6 +106,10 @@ export function ChatPanel() {
   const effortLabel = useMemo(
     () => thinkingEffortLabel(conversation?.thinking_effort),
     [conversation?.thinking_effort],
+  )
+  const supportedEfforts = useMemo(
+    () => supportedThinkingEffortsForModel(conversation?.agent_model_id),
+    [conversation?.agent_model_id],
   )
 
   const projectInfo = useMemo(() => {
@@ -543,22 +552,119 @@ export function ChatPanel() {
                 </div>
 
                 <div className="flex items-center px-2 pb-2 pt-1">
-                  <button
-                    onMouseDown={(e) => e.preventDefault()}
-                    className="inline-flex items-center gap-1 px-1.5 py-0.5 hover:bg-muted rounded text-xs text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    <Brain className="w-3 h-3" />
-                    <span>{modelLabel}</span>
-                    <ChevronDown className="w-2.5 h-2.5" />
-                  </button>
-                  <button
-                    onMouseDown={(e) => e.preventDefault()}
-                    className="inline-flex items-center gap-1 px-1.5 py-0.5 hover:bg-muted rounded text-xs text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    <Settings2 className="w-3 h-3" />
-                    <span>{effortLabel}</span>
-                    <ChevronDown className="w-2.5 h-2.5" />
-                  </button>
+                  <div className="relative">
+                    <button
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        if (activeWorkspaceId == null || activeThreadId == null) return
+                        setShowEffortDropdown(false)
+                        setShowModelDropdown((v) => !v)
+                      }}
+                      className="inline-flex items-center gap-1 px-1.5 py-0.5 hover:bg-muted rounded text-xs text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      <Brain className="w-3 h-3" />
+                      <span>{modelLabel}</span>
+                      <ChevronDown className="w-2.5 h-2.5" />
+                    </button>
+                    {showModelDropdown && (
+                      <>
+                        <div
+                          className="fixed inset-0 z-40"
+                          onClick={() => setShowModelDropdown(false)}
+                        />
+                        <div className="absolute left-0 bottom-full mb-1 w-56 bg-card border border-border rounded-lg shadow-xl z-50 overflow-hidden">
+                          <div className="p-2 border-b border-border">
+                            <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium px-2">
+                              Model
+                            </span>
+                          </div>
+                          <div className="py-1">
+                            {AGENT_MODELS.map((m) => {
+                              const selected = m.id === (conversation?.agent_model_id ?? "")
+                              return (
+                                <button
+                                  key={m.id}
+                                  className={cn(
+                                    "w-full flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-muted transition-colors",
+                                    selected && "bg-primary/10 text-primary",
+                                  )}
+                                  onClick={() => {
+                                    if (activeWorkspaceId == null || activeThreadId == null) return
+                                    setChatModel(activeWorkspaceId, activeThreadId, m.id)
+                                    setShowModelDropdown(false)
+                                  }}
+                                >
+                                  {selected ? (
+                                    <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />
+                                  ) : (
+                                    <div className="w-3.5 h-3.5 flex-shrink-0" />
+                                  )}
+                                  <span className="truncate">{m.label}</span>
+                                </button>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  <div className="relative">
+                    <button
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        if (activeWorkspaceId == null || activeThreadId == null) return
+                        setShowModelDropdown(false)
+                        setShowEffortDropdown((v) => !v)
+                      }}
+                      className="inline-flex items-center gap-1 px-1.5 py-0.5 hover:bg-muted rounded text-xs text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      <Settings2 className="w-3 h-3" />
+                      <span>{effortLabel}</span>
+                      <ChevronDown className="w-2.5 h-2.5" />
+                    </button>
+                    {showEffortDropdown && (
+                      <>
+                        <div
+                          className="fixed inset-0 z-40"
+                          onClick={() => setShowEffortDropdown(false)}
+                        />
+                        <div className="absolute left-0 bottom-full mb-1 w-40 bg-card border border-border rounded-lg shadow-xl z-50 overflow-hidden">
+                          <div className="p-2 border-b border-border">
+                            <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium px-2">
+                              Effort
+                            </span>
+                          </div>
+                          <div className="py-1">
+                            {supportedEfforts.map((effort) => {
+                              const selected = effort === (conversation?.thinking_effort ?? "")
+                              return (
+                                <button
+                                  key={effort}
+                                  className={cn(
+                                    "w-full flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-muted transition-colors",
+                                    selected && "bg-primary/10 text-primary",
+                                  )}
+                                  onClick={() => {
+                                    if (activeWorkspaceId == null || activeThreadId == null) return
+                                    setThinkingEffort(activeWorkspaceId, activeThreadId, effort)
+                                    setShowEffortDropdown(false)
+                                  }}
+                                >
+                                  {selected ? (
+                                    <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />
+                                  ) : (
+                                    <div className="w-3.5 h-3.5 flex-shrink-0" />
+                                  )}
+                                  <span className="truncate">{thinkingEffortLabel(effort)}</span>
+                                </button>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
 
                   <div className="flex-1" />
                   <button
