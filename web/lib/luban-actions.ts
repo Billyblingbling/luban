@@ -33,11 +33,15 @@ export type LubanActions = {
   cancelAgentTurn: () => void
 }
 
+export type LubanActionsInternal = LubanActions & {
+  selectThreadInWorkspace: (workspaceId: WorkspaceId, threadId: number) => Promise<void>
+}
+
 export function createLubanActions(args: {
   store: LubanStore
   sendAction: (action: ClientAction, requestId?: string) => void
   request: <T>(action: ClientAction) => Promise<T>
-}): LubanActions {
+}): LubanActionsInternal {
   const store = args.store
 
   function addProject(path: string) {
@@ -83,7 +87,7 @@ export function createLubanActions(args: {
     return args.request<TaskExecuteResult>({ type: "task_execute", draft, mode })
   }
 
-  async function selectThreadInternal(workspaceId: WorkspaceId, threadId: number) {
+  async function selectThreadInWorkspace(workspaceId: WorkspaceId, threadId: number) {
     store.setActiveThreadId(threadId)
     localStorage.setItem(activeThreadKey(workspaceId), String(threadId))
 
@@ -114,7 +118,7 @@ export function createLubanActions(args: {
 
     store.refs.pendingCreateThreadRef.current = null
     store.setThreads(created.threads)
-    await selectThreadInternal(args2.workspaceId, created.createdThreadId)
+    await selectThreadInWorkspace(args2.workspaceId, created.createdThreadId)
     return true
   }
 
@@ -144,7 +148,7 @@ export function createLubanActions(args: {
         return
       }
 
-      await selectThreadInternal(workspaceId, initial)
+      await selectThreadInWorkspace(workspaceId, initial)
     } catch (err) {
       console.warn("fetchThreads failed", err)
     }
@@ -153,7 +157,7 @@ export function createLubanActions(args: {
   async function selectThread(threadId: number) {
     const wid = store.refs.activeWorkspaceIdRef.current
     if (wid == null) return
-    await selectThreadInternal(wid, threadId)
+    await selectThreadInWorkspace(wid, threadId)
   }
 
   function createThread() {
@@ -217,10 +221,10 @@ export function createLubanActions(args: {
     executeTask,
     openWorkspace,
     selectThread,
+    selectThreadInWorkspace,
     createThread,
     sendAgentMessage,
     sendAgentMessageTo,
     cancelAgentTurn,
   }
 }
-
