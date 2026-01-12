@@ -1,5 +1,8 @@
 "use client"
 
+import { isTauri } from "@tauri-apps/api/core"
+import { getCurrentWebview } from "@tauri-apps/api/webview"
+
 import { GLOBAL_ZOOM_KEY } from "./ui-prefs"
 
 export const DEFAULT_GLOBAL_ZOOM = 1
@@ -29,12 +32,13 @@ export function saveGlobalZoom(zoom: number) {
 
 export function applyGlobalZoom(zoom: number) {
   const clamped = clampGlobalZoom(zoom)
-  const px = 16 * clamped
-  document.documentElement.style.fontSize = `${px}px`
+  if (!isTauri()) return
+  void getCurrentWebview()
+    .setZoom(clamped)
+    .catch((err: unknown) => console.warn("setZoom failed", err))
 }
 
 export function stepGlobalZoom(current: number, dir: -1 | 1): number {
   const next = clampGlobalZoom(current + dir * GLOBAL_ZOOM_STEP)
   return Math.round(next * 100) / 100
 }
-

@@ -2,6 +2,8 @@
 
 import { useLayoutEffect, useState } from "react"
 
+import { isTauri } from "@tauri-apps/api/core"
+
 import {
   applyGlobalZoom,
   DEFAULT_GLOBAL_ZOOM,
@@ -21,12 +23,14 @@ export function GlobalZoomShortcuts() {
   const [zoom, setZoom] = useState<number>(DEFAULT_GLOBAL_ZOOM)
 
   useLayoutEffect(() => {
+    if (!isTauri()) return
     const initial = loadGlobalZoom()
     setZoom(initial)
     applyGlobalZoom(initial)
   }, [])
 
   useLayoutEffect(() => {
+    if (!isTauri()) return
     const handler = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || e.altKey) return
       if (e.defaultPrevented) return
@@ -62,4 +66,3 @@ export function GlobalZoomShortcuts() {
 
   return null
 }
-
