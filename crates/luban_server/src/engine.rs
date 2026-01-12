@@ -1019,6 +1019,49 @@ impl Engine {
                     }
                 }
             }
+            Effect::ArchiveWorkspace { workspace_id } => {
+                let mut project_path: Option<PathBuf> = None;
+                let mut worktree_path: Option<PathBuf> = None;
+
+                for project in &self.state.projects {
+                    for workspace in &project.workspaces {
+                        if workspace.id == workspace_id {
+                            project_path = Some(project.path.clone());
+                            worktree_path = Some(workspace.worktree_path.clone());
+                            break;
+                        }
+                    }
+                    if project_path.is_some() {
+                        break;
+                    }
+                }
+
+                let (Some(project_path), Some(worktree_path)) = (project_path, worktree_path)
+                else {
+                    return Ok(VecDeque::from([Action::WorkspaceArchiveFailed {
+                        workspace_id,
+                        message: "workspace not found".to_owned(),
+                    }]));
+                };
+
+                let services = self.services.clone();
+                let result = tokio::task::spawn_blocking(move || {
+                    services.archive_workspace(project_path, worktree_path)
+                })
+                .await
+                .ok()
+                .unwrap_or_else(|| Err("failed to join archive workspace task".to_owned()));
+
+                let action = match result {
+                    Ok(()) => Action::WorkspaceArchived { workspace_id },
+                    Err(message) => Action::WorkspaceArchiveFailed {
+                        workspace_id,
+                        message,
+                    },
+                };
+
+                Ok(VecDeque::from([action]))
+            }
             _ => Ok(VecDeque::new()),
         }
     }
@@ -2034,5 +2077,221 @@ mod tests {
         let snapshot = engine.app_snapshot().await.expect("snapshot should work");
         assert_eq!(snapshot.projects.len(), 1);
         assert_eq!(snapshot.projects[0].path, "/tmp/repo-a");
+    }
+
+    struct ArchiveOkServices {
+        calls: Arc<std::sync::Mutex<Vec<(PathBuf, PathBuf)>>>,
+    }
+
+    impl ProjectWorkspaceService for ArchiveOkServices {
+        fn load_app_state(&self) -> Result<PersistedAppState, String> {
+            Ok(PersistedAppState {
+                projects: Vec::new(),
+                sidebar_width: None,
+                terminal_pane_width: None,
+                agent_default_model_id: None,
+                agent_default_thinking_effort: None,
+                last_open_workspace_id: None,
+                workspace_active_thread_id: HashMap::new(),
+                workspace_open_tabs: HashMap::new(),
+                workspace_archived_tabs: HashMap::new(),
+                workspace_next_thread_id: HashMap::new(),
+                workspace_chat_scroll_y10: HashMap::new(),
+                workspace_chat_scroll_anchor: HashMap::new(),
+                workspace_unread_completions: HashMap::new(),
+            })
+        }
+
+        fn save_app_state(&self, _snapshot: PersistedAppState) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn create_workspace(
+            &self,
+            _project_path: PathBuf,
+            _project_slug: String,
+        ) -> Result<luban_domain::CreatedWorkspace, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn open_workspace_in_ide(&self, _worktree_path: PathBuf) -> Result<(), String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn archive_workspace(
+            &self,
+            project_path: PathBuf,
+            worktree_path: PathBuf,
+        ) -> Result<(), String> {
+            self.calls
+                .lock()
+                .expect("mutex poisoned")
+                .push((project_path, worktree_path));
+            Ok(())
+        }
+
+        fn ensure_conversation(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+            _thread_id: u64,
+        ) -> Result<(), String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn list_conversation_threads(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+        ) -> Result<Vec<ConversationThreadMeta>, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn load_conversation(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+            _thread_id: u64,
+        ) -> Result<DomainConversationSnapshot, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn store_context_image(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+            _image: ContextImage,
+        ) -> Result<AttachmentRef, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn store_context_text(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+            _text: String,
+            _extension: String,
+        ) -> Result<AttachmentRef, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn store_context_file(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+            _source_path: PathBuf,
+        ) -> Result<AttachmentRef, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn run_agent_turn_streamed(
+            &self,
+            _request: luban_domain::RunAgentTurnRequest,
+            _cancel: Arc<AtomicBool>,
+            _on_event: Arc<dyn Fn(CodexThreadEvent) + Send + Sync>,
+        ) -> Result<(), String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn gh_is_authorized(&self) -> Result<bool, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn gh_pull_request_info(
+            &self,
+            _worktree_path: PathBuf,
+        ) -> Result<Option<PullRequestInfo>, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn gh_open_pull_request(&self, _worktree_path: PathBuf) -> Result<(), String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn gh_open_pull_request_failed_action(
+            &self,
+            _worktree_path: PathBuf,
+        ) -> Result<(), String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn task_preview(&self, _input: String) -> Result<luban_domain::TaskDraft, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn task_prepare_project(
+            &self,
+            _spec: luban_domain::TaskProjectSpec,
+        ) -> Result<PathBuf, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn project_identity(
+            &self,
+            _path: PathBuf,
+        ) -> Result<luban_domain::ProjectIdentity, String> {
+            Err("unimplemented".to_owned())
+        }
+    }
+
+    #[tokio::test]
+    async fn archive_workspace_runs_effect_and_marks_archived() {
+        let calls = Arc::new(std::sync::Mutex::new(Vec::<(PathBuf, PathBuf)>::new()));
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(ArchiveOkServices {
+            calls: calls.clone(),
+        });
+
+        let mut state = AppState::new();
+        let project_path = PathBuf::from("/tmp/luban-server-archive-test");
+        let _ = state.apply(Action::AddProject {
+            path: project_path.clone(),
+        });
+        let project_id = state.projects[0].id;
+
+        let worktree_path = PathBuf::from("/tmp/luban-server-archive-test-wt");
+        let _ = state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "wt".to_owned(),
+            branch_name: "feature".to_owned(),
+            worktree_path: worktree_path.clone(),
+        });
+
+        let workspace_id = state
+            .projects
+            .iter()
+            .flat_map(|p| p.workspaces.iter())
+            .find(|w| w.worktree_path == worktree_path)
+            .expect("workspace should exist")
+            .id;
+
+        let (events, _) = broadcast::channel::<WsServerMessage>(16);
+        let (tx, _rx) = mpsc::channel::<EngineCommand>(16);
+        let mut engine = Engine {
+            state,
+            rev: 1,
+            services,
+            events,
+            tx,
+            cancel_flags: HashMap::new(),
+            pull_requests: HashMap::new(),
+            pull_requests_in_flight: HashSet::new(),
+        };
+
+        engine
+            .process_action_queue(Action::ArchiveWorkspace { workspace_id })
+            .await;
+
+        let workspace = engine
+            .state
+            .workspace(workspace_id)
+            .expect("workspace should still exist after archive");
+        assert_eq!(workspace.status, luban_domain::WorkspaceStatus::Archived);
+        assert_eq!(engine.state.main_pane, luban_domain::MainPane::None);
+        assert_eq!(engine.state.right_pane, luban_domain::RightPane::None);
+
+        let calls = calls.lock().expect("mutex poisoned");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, project_path);
+        assert_eq!(calls[0].1, worktree_path);
     }
 }
