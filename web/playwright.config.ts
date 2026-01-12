@@ -71,7 +71,7 @@ export default defineConfig({
     }
     // The luban server is shared across workers via `webServer`, so parallel UI tests
     // share a DB and mutate global state. Default to a single worker for determinism.
-    return process.env.CI ? 1 : undefined
+    return 1
   })(),
   reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : [["list"]],
   use: {
