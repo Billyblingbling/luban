@@ -184,7 +184,26 @@ pub struct TaskExecuteResult {
 pub struct ThreadsSnapshot {
     pub rev: u64,
     pub workspace_id: WorkspaceId,
+    #[serde(default)]
+    pub tabs: WorkspaceTabsSnapshot,
     pub threads: Vec<ThreadMeta>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WorkspaceTabsSnapshot {
+    pub open_tabs: Vec<WorkspaceThreadId>,
+    pub archived_tabs: Vec<WorkspaceThreadId>,
+    pub active_tab: WorkspaceThreadId,
+}
+
+impl Default for WorkspaceTabsSnapshot {
+    fn default() -> Self {
+        Self {
+            open_tabs: Vec::new(),
+            archived_tabs: Vec::new(),
+            active_tab: WorkspaceThreadId(1),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -373,6 +392,8 @@ pub enum ServerEvent {
     },
     WorkspaceThreadsChanged {
         workspace_id: WorkspaceId,
+        #[serde(default)]
+        tabs: WorkspaceTabsSnapshot,
         threads: Vec<ThreadMeta>,
     },
     ConversationChanged {

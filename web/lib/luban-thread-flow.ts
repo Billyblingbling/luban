@@ -1,6 +1,6 @@
 "use client"
 
-import type { ThreadMeta, WorkspaceId } from "./luban-api"
+import type { ThreadMeta, WorkspaceId, WorkspaceTabsSnapshot } from "./luban-api"
 
 export const DEFAULT_NEW_THREAD_TIMEOUT_MS = 5_000
 export const DEFAULT_NEW_THREAD_POLL_MS = 250
@@ -20,10 +20,10 @@ export function pickCreatedThreadId(args: {
 export async function waitForNewThread(args: {
   workspaceId: WorkspaceId
   existingThreadIds: Set<number>
-  fetchThreads: (workspaceId: WorkspaceId) => Promise<{ threads: ThreadMeta[] }>
+  fetchThreads: (workspaceId: WorkspaceId) => Promise<{ threads: ThreadMeta[]; tabs: WorkspaceTabsSnapshot }>
   timeoutMs?: number
   pollMs?: number
-}): Promise<{ threads: ThreadMeta[]; createdThreadId: number | null }> {
+}): Promise<{ threads: ThreadMeta[]; tabs: WorkspaceTabsSnapshot; createdThreadId: number | null }> {
   const timeoutMs = args.timeoutMs ?? DEFAULT_NEW_THREAD_TIMEOUT_MS
   const pollMs = args.pollMs ?? DEFAULT_NEW_THREAD_POLL_MS
 
@@ -35,11 +35,11 @@ export async function waitForNewThread(args: {
         threads: snap.threads,
         existingThreadIds: args.existingThreadIds,
       })
-      return { threads: snap.threads, createdThreadId }
+      return { threads: snap.threads, tabs: snap.tabs, createdThreadId }
     } catch {
       // ignore and retry
     }
     await new Promise((r) => setTimeout(r, pollMs))
   }
-  return { threads: [], createdThreadId: null }
+  return { threads: [], tabs: { open_tabs: [], archived_tabs: [], active_tab: 1 }, createdThreadId: null }
 }

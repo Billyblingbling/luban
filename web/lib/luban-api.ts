@@ -46,7 +46,14 @@ export type PullRequestSnapshot = {
 export type ThreadsSnapshot = {
   rev: number
   workspace_id: WorkspaceId
+  tabs: WorkspaceTabsSnapshot
   threads: ThreadMeta[]
+}
+
+export type WorkspaceTabsSnapshot = {
+  open_tabs: WorkspaceThreadId[]
+  archived_tabs: WorkspaceThreadId[]
+  active_tab: WorkspaceThreadId
 }
 
 export type ThreadMeta = {
@@ -205,7 +212,7 @@ export type ClientAction =
 
 export type ServerEvent =
   | { type: "app_changed"; rev: number; snapshot: AppSnapshot }
-  | { type: "workspace_threads_changed"; workspace_id: WorkspaceId; threads: ThreadMeta[] }
+  | { type: "workspace_threads_changed"; workspace_id: WorkspaceId; tabs: WorkspaceTabsSnapshot; threads: ThreadMeta[] }
   | { type: "conversation_changed"; snapshot: ConversationSnapshot }
   | { type: "toast"; message: string }
   | { type: "project_path_picked"; request_id: string; path: string | null }

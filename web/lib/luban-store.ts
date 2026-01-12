@@ -2,7 +2,14 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 
-import type { AppSnapshot, ConversationSnapshot, ThreadMeta, WorkspaceId, WorkspaceSnapshot } from "./luban-api"
+import type {
+  AppSnapshot,
+  ConversationSnapshot,
+  ThreadMeta,
+  WorkspaceId,
+  WorkspaceSnapshot,
+  WorkspaceTabsSnapshot,
+} from "./luban-api"
 import { fetchApp } from "./luban-http"
 
 export type PendingCreateThread = {
@@ -16,6 +23,7 @@ export type LubanStoreState = {
   activeWorkspaceId: WorkspaceId | null
   activeThreadId: number | null
   threads: ThreadMeta[]
+  workspaceTabs: WorkspaceTabsSnapshot | null
   conversation: ConversationSnapshot | null
   activeWorkspace: WorkspaceSnapshot | null
 }
@@ -34,6 +42,7 @@ export type LubanStore = {
   setActiveWorkspaceId: React.Dispatch<React.SetStateAction<WorkspaceId | null>>
   setActiveThreadId: React.Dispatch<React.SetStateAction<number | null>>
   setThreads: React.Dispatch<React.SetStateAction<ThreadMeta[]>>
+  setWorkspaceTabs: React.Dispatch<React.SetStateAction<WorkspaceTabsSnapshot | null>>
   setConversation: React.Dispatch<React.SetStateAction<ConversationSnapshot | null>>
   markPendingCreateThread: (args: { workspaceId: WorkspaceId; existingThreadIds: Set<number> }) => void
 }
@@ -55,6 +64,7 @@ export function useLubanStore(): LubanStore {
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<WorkspaceId | null>(null)
   const [activeThreadId, setActiveThreadId] = useState<number | null>(null)
   const [threads, setThreads] = useState<ThreadMeta[]>([])
+  const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceTabsSnapshot | null>(null)
   const [conversation, setConversation] = useState<ConversationSnapshot | null>(null)
 
   const activeWorkspaceIdRef = useRef<WorkspaceId | null>(null)
@@ -99,6 +109,7 @@ export function useLubanStore(): LubanStore {
       activeWorkspaceId,
       activeThreadId,
       threads,
+      workspaceTabs,
       conversation,
       activeWorkspace,
     },
@@ -112,8 +123,8 @@ export function useLubanStore(): LubanStore {
     setActiveWorkspaceId,
     setActiveThreadId,
     setThreads,
+    setWorkspaceTabs,
     setConversation,
     markPendingCreateThread,
   }
 }
-

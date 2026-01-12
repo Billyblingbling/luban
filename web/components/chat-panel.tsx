@@ -32,23 +32,11 @@ import {
 import { AGENT_MODELS, supportedThinkingEffortsForModel } from "@/lib/agent-settings"
 import { ConversationView } from "@/components/conversation-view"
 import {
-  closedAtKey,
   draftKey,
   followTailKey,
-  hiddenThreadsKey,
   loadJson,
   saveJson,
-  threadOrderKey,
 } from "@/lib/ui-prefs"
-
-function arraysEqual<T>(a: T[], b: T[]): boolean {
-  if (a === b) return true
-  if (a.length !== b.length) return false
-  for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) return false
-  }
-  return true
-}
 
 interface ChatTab {
   id: string
@@ -56,10 +44,9 @@ interface ChatTab {
   isActive: boolean
 }
 
-interface ClosedTab {
+interface ArchivedTab {
   id: string
   title: string
-  closedAt: Date
 }
 
 export function ChatPanel() {
@@ -73,9 +60,12 @@ export function ChatPanel() {
     activeWorkspaceId,
     activeThreadId,
     threads,
+    workspaceTabs,
     conversation,
     selectThread,
     createThread,
+    closeThreadTab,
+    restoreThreadTab,
     sendAgentMessage,
     openWorkspaceInIde,
     setChatModel,
@@ -86,9 +76,6 @@ export function ChatPanel() {
   const [isComposerFocused, setIsComposerFocused] = useState(false)
   const [showModelDropdown, setShowModelDropdown] = useState(false)
   const [showEffortDropdown, setShowEffortDropdown] = useState(false)
-  const [hiddenThreadIds, setHiddenThreadIds] = useState<number[]>([])
-  const [threadOrderIds, setThreadOrderIds] = useState<number[]>([])
-  const [closedAtByThreadId, setClosedAtByThreadId] = useState<Record<number, number>>({})
   const [followTail, setFollowTail] = useState(true)
   const programmaticScrollRef = useRef(false)
 
@@ -130,15 +117,13 @@ export function ChatPanel() {
     return out
   }, [threads])
 
-  const hiddenThreadIdSet = useMemo(() => new Set(hiddenThreadIds), [hiddenThreadIds])
-
   const openThreadIds = useMemo(() => {
     if (threads.length === 0) return []
-    if (threadOrderIds.length === 0) {
-      return threads.map((t) => t.thread_id).filter((id) => !hiddenThreadIdSet.has(id))
-    }
-    return threadOrderIds.filter((id) => !hiddenThreadIdSet.has(id))
-  }, [threads, threadOrderIds, hiddenThreadIdSet])
+    const ordered = workspaceTabs?.open_tabs ?? []
+    const fromTabs = ordered.filter((id) => threadsById.has(id))
+    if (fromTabs.length > 0) return fromTabs
+    return threads.map((t) => t.thread_id)
+  }, [threads, threadsById, workspaceTabs?.open_tabs])
 
   const openThreads = useMemo(() => {
     const out: (typeof threads)[number][] = []
@@ -149,13 +134,20 @@ export function ChatPanel() {
     return out
   }, [openThreadIds, threadsById])
 
-  const closedThreads = useMemo(
-    () =>
-      threads
-        .filter((t) => hiddenThreadIdSet.has(t.thread_id))
-        .sort((a, b) => (closedAtByThreadId[b.thread_id] ?? 0) - (closedAtByThreadId[a.thread_id] ?? 0)),
-    [threads, hiddenThreadIdSet, closedAtByThreadId],
-  )
+  const archivedTabs: ArchivedTab[] = useMemo(() => {
+    const archived = workspaceTabs?.archived_tabs ?? []
+    const out: ArchivedTab[] = []
+    for (const id of [...archived].reverse()) {
+      const t = threadsById.get(id)
+      if (t) {
+        out.push({ id: String(id), title: t.title })
+      } else {
+        out.push({ id: String(id), title: `Thread ${id}` })
+      }
+      if (out.length >= 20) break
+    }
+    return out
+  }, [threadsById, workspaceTabs?.archived_tabs])
 
   const tabs: ChatTab[] = useMemo(
     () =>
@@ -168,75 +160,6 @@ export function ChatPanel() {
   )
 
   const activeTabId = activeThreadId != null ? String(activeThreadId) : ""
-
-  const closedTabs: ClosedTab[] = useMemo(
-    () =>
-      closedThreads.map((t) => ({
-        id: String(t.thread_id),
-        title: t.title,
-        closedAt: new Date(closedAtByThreadId[t.thread_id] ?? Date.now()),
-      })),
-    [closedThreads, closedAtByThreadId],
-  )
-
-  useEffect(() => {
-    if (activeWorkspaceId == null) {
-      setHiddenThreadIds([])
-      setClosedAtByThreadId({})
-      setThreadOrderIds([])
-      return
-    }
-    const hidden = loadJson<number[]>(hiddenThreadsKey(activeWorkspaceId)) ?? []
-    setHiddenThreadIds(Array.isArray(hidden) ? hidden.filter((x) => Number.isFinite(x)) : [])
-    const closedAt = loadJson<Record<string, number>>(closedAtKey(activeWorkspaceId)) ?? {}
-    const parsed: Record<number, number> = {}
-    for (const [k, v] of Object.entries(closedAt)) {
-      const id = Number(k)
-      if (!Number.isFinite(id) || !Number.isFinite(v)) continue
-      parsed[id] = v
-    }
-    setClosedAtByThreadId(parsed)
-
-    const storedOrder = loadJson<number[]>(threadOrderKey(activeWorkspaceId)) ?? []
-    const nextOrder: number[] = []
-    const seen = new Set<number>()
-    for (const raw of storedOrder) {
-      if (!Number.isFinite(raw)) continue
-      const id = Number(raw)
-      if (!Number.isFinite(id) || seen.has(id)) continue
-      nextOrder.push(id)
-      seen.add(id)
-    }
-    setThreadOrderIds(nextOrder)
-  }, [activeWorkspaceId])
-
-  useEffect(() => {
-    if (activeWorkspaceId == null) return
-    if (threads.length === 0) return
-
-    const hidden = new Set(hiddenThreadIds)
-
-    const presentIds = threads.map((t) => t.thread_id)
-    const presentSet = new Set(presentIds)
-
-    let next = threadOrderIds.filter((id) => presentSet.has(id) && !hidden.has(id))
-    if (next.length === 0) {
-      next = presentIds.filter((id) => !hidden.has(id))
-    } else {
-      const seen = new Set(next)
-      for (const id of presentIds) {
-        if (hidden.has(id)) continue
-        if (seen.has(id)) continue
-        next.push(id)
-        seen.add(id)
-      }
-    }
-
-    if (arraysEqual(next, threadOrderIds)) return
-
-    setThreadOrderIds(next)
-    saveJson(threadOrderKey(activeWorkspaceId), next)
-  }, [activeWorkspaceId, threads, hiddenThreadIds, threadOrderIds])
 
   useEffect(() => {
     if (activeWorkspaceId == null || activeThreadId == null) {
@@ -284,35 +207,12 @@ export function ChatPanel() {
     void selectThread(id)
   }
 
-  function closeThread(threadId: number) {
-    if (activeWorkspaceId == null) return
-    const openIds = openThreadIds
-    if (openIds.length <= 1) return
-
-    const nextHidden = Array.from(new Set([...hiddenThreadIds, threadId]))
-    const closedAt = { ...closedAtByThreadId, [threadId]: Date.now() }
-    setHiddenThreadIds(nextHidden)
-    setClosedAtByThreadId(closedAt)
-    saveJson(hiddenThreadsKey(activeWorkspaceId), nextHidden)
-    saveJson(closedAtKey(activeWorkspaceId), Object.fromEntries(Object.entries(closedAt)))
-
-    const nextOrder = threadOrderIds.filter((id) => id !== threadId)
-    if (!arraysEqual(nextOrder, threadOrderIds)) {
-      setThreadOrderIds(nextOrder)
-      saveJson(threadOrderKey(activeWorkspaceId), nextOrder)
-    }
-
-    if (activeThreadId === threadId) {
-      const next = nextOrder[0] ?? openIds.find((id) => id !== threadId) ?? null
-      if (next != null) void selectThread(next)
-    }
-  }
-
   const handleCloseTab = (tabId: string, e: React.MouseEvent) => {
     e.stopPropagation()
     const id = Number(tabId)
     if (!Number.isFinite(id)) return
-    closeThread(id)
+    if (openThreadIds.length <= 1) return
+    void closeThreadTab(id)
   }
 
   const handleAddTab = () => {
@@ -320,20 +220,12 @@ export function ChatPanel() {
     createThread()
   }
 
-  const handleRestoreTab = (closedTab: ClosedTab) => {
+  const handleRestoreTab = (tab: ArchivedTab) => {
     if (activeWorkspaceId == null) return
-    const id = Number(closedTab.id)
+    const id = Number(tab.id)
     if (!Number.isFinite(id)) return
-    const nextHidden = hiddenThreadIds.filter((x) => x !== id)
-    setHiddenThreadIds(nextHidden)
-    saveJson(hiddenThreadsKey(activeWorkspaceId), nextHidden)
-
-    const nextOrder = [...threadOrderIds.filter((x) => x !== id), id]
-    setThreadOrderIds(nextOrder)
-    saveJson(threadOrderKey(activeWorkspaceId), nextOrder)
-
     setShowTabDropdown(false)
-    void selectThread(id)
+    void restoreThreadTab(id)
   }
 
   const handleSend = () => {
@@ -451,7 +343,7 @@ export function ChatPanel() {
                     ))}
                   </div>
 
-                  {closedTabs.length > 0 && (
+                  {archivedTabs.length > 0 && (
                     <>
                       <div className="p-2 border-t border-border">
                         <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium px-2">
@@ -459,7 +351,7 @@ export function ChatPanel() {
                         </span>
                       </div>
                       <div className="max-h-32 overflow-y-auto">
-                        {closedTabs.map((tab) => (
+                        {archivedTabs.map((tab) => (
                           <button
                             key={tab.id}
                             onClick={() => handleRestoreTab(tab)}

@@ -315,12 +315,12 @@ impl WorkspaceTabs {
         id
     }
 
-    pub fn reorder_tab(&mut self, thread_id: WorkspaceThreadId, to_index: usize) {
+    pub fn reorder_tab(&mut self, thread_id: WorkspaceThreadId, to_index: usize) -> bool {
         let Some(from_index) = self.open_tabs.iter().position(|id| *id == thread_id) else {
-            return;
+            return false;
         };
         if from_index == to_index {
-            return;
+            return false;
         }
         let tab = self.open_tabs.remove(from_index);
         let mut target = to_index.min(self.open_tabs.len());
@@ -328,6 +328,7 @@ impl WorkspaceTabs {
             target = target.saturating_sub(1);
         }
         self.open_tabs.insert(target, tab);
+        true
     }
 }
 

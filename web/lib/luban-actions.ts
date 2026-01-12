@@ -11,7 +11,7 @@ import type {
 } from "./luban-api"
 import { fetchConversation, fetchThreads } from "./luban-http"
 import type { LubanStore } from "./luban-store"
-import { ACTIVE_WORKSPACE_KEY, activeThreadKey } from "./ui-prefs"
+import { ACTIVE_WORKSPACE_KEY } from "./ui-prefs"
 import { waitForNewThread } from "./luban-thread-flow"
 
 export type LubanActions = {
@@ -30,6 +30,8 @@ export type LubanActions = {
   openWorkspace: (workspaceId: WorkspaceId) => Promise<void>
   selectThread: (threadId: number) => Promise<void>
   createThread: () => void
+  closeThreadTab: (threadId: number) => Promise<void>
+  restoreThreadTab: (threadId: number) => Promise<void>
 
   sendAgentMessage: (text: string) => void
   sendAgentMessageTo: (workspaceId: WorkspaceId, threadId: number, text: string) => void
@@ -99,7 +101,6 @@ export function createLubanActions(args: {
 
   async function selectThreadInWorkspace(workspaceId: WorkspaceId, threadId: number) {
     store.setActiveThreadId(threadId)
-    localStorage.setItem(activeThreadKey(workspaceId), String(threadId))
 
     args.sendAction({
       type: "activate_workspace_thread",
@@ -115,6 +116,35 @@ export function createLubanActions(args: {
     }
   }
 
+  async function refreshThreads(workspaceId: WorkspaceId): Promise<{
+    threadId: number | null
+  }> {
+    const snap = await fetchThreads(workspaceId)
+    store.setThreads(snap.threads)
+    store.setWorkspaceTabs(snap.tabs)
+
+    const preferred = snap.tabs.active_tab
+    const initial =
+      (snap.threads.some((t) => t.thread_id === preferred) ? preferred : null) ??
+      snap.threads[0]?.thread_id ??
+      null
+
+    store.setActiveThreadId(initial)
+    if (initial == null) {
+      store.setConversation(null)
+      return { threadId: null }
+    }
+
+    try {
+      const convo = await fetchConversation(workspaceId, initial)
+      store.setConversation(convo)
+    } catch (err) {
+      console.warn("fetchConversation failed", err)
+    }
+
+    return { threadId: initial }
+  }
+
   async function waitAndActivateNewThread(args2: {
     workspaceId: WorkspaceId
     existingThreadIds: Set<number>
@@ -128,6 +158,7 @@ export function createLubanActions(args: {
 
     store.refs.pendingCreateThreadRef.current = null
     store.setThreads(created.threads)
+    store.setWorkspaceTabs(created.tabs)
     await selectThreadInWorkspace(args2.workspaceId, created.createdThreadId)
     return true
   }
@@ -136,6 +167,7 @@ export function createLubanActions(args: {
     store.setActiveWorkspaceId(workspaceId)
     localStorage.setItem(ACTIVE_WORKSPACE_KEY, String(workspaceId))
     store.setThreads([])
+    store.setWorkspaceTabs(null)
     store.setConversation(null)
 
     args.sendAction({ type: "open_workspace", workspace_id: workspaceId })
@@ -143,10 +175,13 @@ export function createLubanActions(args: {
     try {
       const snap = await fetchThreads(workspaceId)
       store.setThreads(snap.threads)
+      store.setWorkspaceTabs(snap.tabs)
 
-      const saved = Number(localStorage.getItem(activeThreadKey(workspaceId)) ?? "")
+      const preferred = snap.tabs.active_tab
       const initial =
-        snap.threads.find((t) => t.thread_id === saved)?.thread_id ?? snap.threads[0]?.thread_id ?? null
+        (snap.threads.some((t) => t.thread_id === preferred) ? preferred : null) ??
+        snap.threads[0]?.thread_id ??
+        null
 
       if (initial == null) {
         const existing = new Set<number>()
@@ -158,7 +193,13 @@ export function createLubanActions(args: {
         return
       }
 
-      await selectThreadInWorkspace(workspaceId, initial)
+      store.setActiveThreadId(initial)
+      try {
+        const convo = await fetchConversation(workspaceId, initial)
+        store.setConversation(convo)
+      } catch (err) {
+        console.warn("fetchConversation failed", err)
+      }
     } catch (err) {
       console.warn("fetchThreads failed", err)
     }
@@ -182,6 +223,28 @@ export function createLubanActions(args: {
 
       await waitAndActivateNewThread({ workspaceId: wid, existingThreadIds })
     })()
+  }
+
+  async function closeThreadTab(threadId: number) {
+    const wid = store.refs.activeWorkspaceIdRef.current
+    if (wid == null) return
+    args.sendAction({ type: "close_workspace_thread_tab", workspace_id: wid, thread_id: threadId })
+    try {
+      await refreshThreads(wid)
+    } catch (err) {
+      console.warn("fetchThreads failed", err)
+    }
+  }
+
+  async function restoreThreadTab(threadId: number) {
+    const wid = store.refs.activeWorkspaceIdRef.current
+    if (wid == null) return
+    args.sendAction({ type: "restore_workspace_thread_tab", workspace_id: wid, thread_id: threadId })
+    try {
+      await refreshThreads(wid)
+    } catch (err) {
+      console.warn("fetchThreads failed", err)
+    }
   }
 
   function activeWorkspaceThread(): { workspaceId: WorkspaceId; threadId: number } | null {
@@ -256,6 +319,8 @@ export function createLubanActions(args: {
     selectThread,
     selectThreadInWorkspace,
     createThread,
+    closeThreadTab,
+    restoreThreadTab,
     sendAgentMessage,
     sendAgentMessageTo,
     cancelAgentTurn,

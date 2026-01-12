@@ -20,6 +20,7 @@ export function createLubanServerEventHandler(args: {
         if (wid == null || wid !== event.workspace_id) return
 
         args.store.setThreads(event.threads)
+        args.store.setWorkspaceTabs(event.tabs)
         const current = args.store.refs.activeThreadIdRef.current
 
         const pending = args.store.refs.pendingCreateThreadRef.current
@@ -40,7 +41,11 @@ export function createLubanServerEventHandler(args: {
         }
 
         if (current == null || !event.threads.some((t) => t.thread_id === current)) {
-          const next = event.threads[0]?.thread_id ?? null
+          const preferred = event.tabs.active_tab
+          const next =
+            (event.threads.some((t) => t.thread_id === preferred) ? preferred : null) ??
+            event.threads[0]?.thread_id ??
+            null
           if (next != null) {
             args.onSelectThreadInWorkspace(wid, next)
           }
@@ -67,4 +72,3 @@ export function createLubanServerEventHandler(args: {
     }
   }
 }
-

@@ -30,7 +30,6 @@ import { ConversationView } from "@/components/conversation-view"
 import { StatusIndicator, getStatusBgColor } from "@/components/shared/status-indicator"
 import { buildKanbanBoardVm, type KanbanWorktreeVm } from "@/lib/kanban-view-model"
 import { kanbanColumns, type KanbanColumn, type WorktreeStatus } from "@/lib/worktree-ui"
-import { activeThreadKey } from "@/lib/ui-prefs"
 import { pickThreadId } from "@/lib/thread-ui"
 
 type Worktree = KanbanWorktreeVm
@@ -129,9 +128,7 @@ function WorktreePreviewPanel({
         if (seqRef.current !== seq) return null
         const threads = snap.threads ?? []
         if (threads.length === 0) return null
-
-        const stored = Number(localStorage.getItem(activeThreadKey(workspaceId)) ?? "")
-        const preferred = Number.isFinite(stored) ? stored : null
+        const preferred = snap.tabs?.active_tab ?? null
         return pickThreadId({ threads, preferredThreadId: preferred })
       })
       .then(async (pickedThreadId) => {

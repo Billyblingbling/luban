@@ -767,8 +767,11 @@ impl AppState {
                 to_index,
             } => {
                 let tabs = self.ensure_workspace_tabs_mut(workspace_id);
-                tabs.reorder_tab(thread_id, to_index);
-                Vec::new()
+                if tabs.reorder_tab(thread_id, to_index) {
+                    vec![Effect::SaveAppState]
+                } else {
+                    Vec::new()
+                }
             }
             Action::WorkspaceThreadsLoaded {
                 workspace_id,
@@ -1834,15 +1837,28 @@ mod tests {
             "activating a thread should not reorder tabs"
         );
 
-        state.apply(Action::ReorderWorkspaceThreadTab {
+        let effects = state.apply(Action::ReorderWorkspaceThreadTab {
             workspace_id,
             thread_id: thread_ids[3],
             to_index: 1,
         });
+        assert_eq!(effects.len(), 1);
+        assert!(matches!(effects[0], Effect::SaveAppState));
         let tabs = state.workspace_tabs(workspace_id).unwrap();
         assert_eq!(
             tabs.open_tabs,
             vec![thread_ids[0], thread_ids[3], thread_ids[1], thread_ids[2]]
+        );
+
+        let persisted = state.to_persisted();
+        assert_eq!(
+            persisted.workspace_open_tabs.get(&workspace_id.0).cloned(),
+            Some(vec![
+                thread_ids[0].0,
+                thread_ids[3].0,
+                thread_ids[1].0,
+                thread_ids[2].0
+            ])
         );
 
         let closed_thread = thread_ids[3];

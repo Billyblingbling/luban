@@ -17,6 +17,7 @@ import type {
   WorkspaceId,
   WorkspaceThreadId,
   WorkspaceSnapshot,
+  WorkspaceTabsSnapshot,
 } from "./luban-api"
 import { createLubanActions } from "./luban-actions"
 import { useLubanStore } from "./luban-store"
@@ -30,6 +31,7 @@ type LubanContextValue = {
   activeWorkspace: WorkspaceSnapshot | null
   activeThreadId: number | null
   threads: ThreadMeta[]
+  workspaceTabs: WorkspaceTabsSnapshot | null
   conversation: ConversationSnapshot | null
   wsConnected: boolean
 
@@ -48,6 +50,8 @@ type LubanContextValue = {
   openWorkspace: (workspaceId: WorkspaceId) => Promise<void>
   selectThread: (threadId: number) => Promise<void>
   createThread: () => void
+  closeThreadTab: (threadId: number) => Promise<void>
+  restoreThreadTab: (threadId: number) => Promise<void>
 
   sendAgentMessage: (text: string) => void
   sendAgentMessageTo: (workspaceId: WorkspaceId, threadId: number, text: string) => void
@@ -61,7 +65,7 @@ const LubanContext = createContext<LubanContextValue | null>(null)
 
 export function LubanProvider({ children }: { children: React.ReactNode }) {
   const store = useLubanStore()
-  const { app, activeWorkspaceId, activeThreadId, threads, conversation, activeWorkspace } = store.state
+  const { app, activeWorkspaceId, activeThreadId, threads, workspaceTabs, conversation, activeWorkspace } = store.state
   const eventHandlerRef = useRef<(event: ServerEvent) => void>(() => {})
 
   const { wsConnected, sendAction: sendActionTransport, request: requestTransport } = useLubanTransport({
@@ -106,6 +110,7 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     activeWorkspace,
     activeThreadId,
     threads,
+    workspaceTabs,
     conversation,
     wsConnected,
     pickProjectPath: actions.pickProjectPath,
@@ -121,6 +126,8 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     openWorkspace: actions.openWorkspace,
     selectThread: actions.selectThread,
     createThread: actions.createThread,
+    closeThreadTab: actions.closeThreadTab,
+    restoreThreadTab: actions.restoreThreadTab,
     sendAgentMessage: actions.sendAgentMessage,
     sendAgentMessageTo: actions.sendAgentMessageTo,
     cancelAgentTurn: actions.cancelAgentTurn,

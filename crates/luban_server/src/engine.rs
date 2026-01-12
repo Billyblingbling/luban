@@ -1,7 +1,7 @@
 use anyhow::Context as _;
 use luban_api::{
     AppSnapshot, ConversationSnapshot, PullRequestCiState, PullRequestSnapshot, PullRequestState,
-    ThreadsSnapshot, WsServerMessage,
+    ThreadsSnapshot, WorkspaceTabsSnapshot, WsServerMessage,
 };
 use luban_backend::{GitWorkspaceService, SqliteStoreOptions};
 use luban_domain::{
@@ -242,9 +242,15 @@ impl Engine {
                 .ok()
                 .unwrap_or_else(|| Err("failed to join list threads task".to_owned()));
 
+                let tabs = self
+                    .state
+                    .workspace_tabs(wid)
+                    .map(map_workspace_tabs_snapshot)
+                    .unwrap_or_default();
                 let snapshot = threads.map(|threads| ThreadsSnapshot {
                     rev: self.rev,
                     workspace_id,
+                    tabs,
                     threads: threads
                         .into_iter()
                         .map(|t| luban_api::ThreadMeta {
@@ -1110,6 +1116,11 @@ impl Engine {
         threads: &[luban_domain::ConversationThreadMeta],
     ) {
         let api_id = luban_api::WorkspaceId(workspace_id.as_u64());
+        let tabs = self
+            .state
+            .workspace_tabs(workspace_id)
+            .map(map_workspace_tabs_snapshot)
+            .unwrap_or_default();
         let threads = threads
             .iter()
             .map(|t| luban_api::ThreadMeta {
@@ -1124,6 +1135,7 @@ impl Engine {
             rev: self.rev,
             event: Box::new(luban_api::ServerEvent::WorkspaceThreadsChanged {
                 workspace_id: api_id,
+                tabs,
                 threads,
             }),
         });
@@ -1513,6 +1525,22 @@ fn to_base36(mut n: u64) -> String {
     }
     out.reverse();
     String::from_utf8(out).unwrap_or_else(|_| "0".to_owned())
+}
+
+fn map_workspace_tabs_snapshot(tabs: &luban_domain::WorkspaceTabs) -> WorkspaceTabsSnapshot {
+    WorkspaceTabsSnapshot {
+        open_tabs: tabs
+            .open_tabs
+            .iter()
+            .map(|id| luban_api::WorkspaceThreadId(id.as_u64()))
+            .collect(),
+        archived_tabs: tabs
+            .archived_tabs
+            .iter()
+            .map(|id| luban_api::WorkspaceThreadId(id.as_u64()))
+            .collect(),
+        active_tab: luban_api::WorkspaceThreadId(tabs.active_tab.as_u64()),
+    }
 }
 
 fn map_conversation_entry(entry: &ConversationEntry) -> luban_api::ConversationEntry {
@@ -2082,6 +2110,90 @@ mod tests {
                 ci_state: Some(PullRequestCiState::Pending),
                 merge_ready: false,
             })
+        );
+    }
+
+    #[test]
+    fn workspace_threads_changed_includes_tabs_snapshot() {
+        let mut state = AppState::new();
+        let _ = state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/luban-server-test"),
+        });
+
+        let workspace_id = state.projects[0].workspaces[0].id;
+        state.apply(Action::OpenWorkspace { workspace_id });
+
+        state.apply(Action::CreateWorkspaceThread { workspace_id });
+        state.apply(Action::CreateWorkspaceThread { workspace_id });
+
+        let open_tabs = state
+            .workspace_tabs(workspace_id)
+            .expect("workspace tabs exist after opening workspace")
+            .open_tabs
+            .clone();
+
+        let archived_thread = open_tabs[0];
+        state.apply(Action::CloseWorkspaceThreadTab {
+            workspace_id,
+            thread_id: archived_thread,
+        });
+
+        let tabs = state.workspace_tabs(workspace_id).unwrap();
+        assert!(tabs.archived_tabs.contains(&archived_thread));
+
+        let mut meta_ids = Vec::new();
+        meta_ids.extend(tabs.open_tabs.iter().copied());
+        meta_ids.extend(tabs.archived_tabs.iter().copied());
+        let metas = meta_ids
+            .iter()
+            .map(|id| ConversationThreadMeta {
+                thread_id: *id,
+                remote_thread_id: None,
+                title: format!("thread-{}", id.as_u64()),
+                updated_at_unix_seconds: 0,
+            })
+            .collect::<Vec<_>>();
+
+        let (events, _) = broadcast::channel::<WsServerMessage>(4);
+        let mut rx = events.subscribe();
+        let (tx, _rx_cmd) = mpsc::channel::<EngineCommand>(1);
+        let engine = Engine {
+            state,
+            rev: 1,
+            services: Arc::new(TestServices),
+            events,
+            tx,
+            cancel_flags: HashMap::new(),
+            pull_requests: HashMap::new(),
+            pull_requests_in_flight: HashSet::new(),
+        };
+
+        engine.publish_threads_event(workspace_id, &metas);
+
+        let message = rx.try_recv().expect("expected a threads event");
+        let WsServerMessage::Event { event, .. } = message else {
+            panic!("expected WsServerMessage::Event");
+        };
+
+        let luban_api::ServerEvent::WorkspaceThreadsChanged {
+            workspace_id: wid,
+            tabs,
+            ..
+        } = *event
+        else {
+            panic!("expected workspace_threads_changed");
+        };
+
+        assert_eq!(wid.0, workspace_id.as_u64());
+        assert_eq!(
+            tabs.open_tabs.len() + tabs.archived_tabs.len(),
+            metas.len(),
+            "tabs snapshot should match the set of known thread ids"
+        );
+        assert!(
+            tabs.archived_tabs
+                .iter()
+                .any(|id| id.0 == archived_thread.as_u64())
         );
     }
 
