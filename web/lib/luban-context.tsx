@@ -238,6 +238,23 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
+  async function waitAndActivateNewThread(args: {
+    workspaceId: WorkspaceId
+    existingThreadIds: Set<number>
+  }): Promise<boolean> {
+    const created = await waitForNewThread({
+      workspaceId: args.workspaceId,
+      existingThreadIds: args.existingThreadIds,
+      fetchThreads,
+    })
+    if (created.createdThreadId == null) return false
+
+    pendingCreateThreadRef.current = null
+    setThreads(created.threads)
+    await selectThreadInternal(args.workspaceId, created.createdThreadId)
+    return true
+  }
+
   async function openWorkspace(workspaceId: WorkspaceId) {
     setActiveWorkspaceId(workspaceId)
     localStorage.setItem(ACTIVE_WORKSPACE_KEY, String(workspaceId))
@@ -266,16 +283,7 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
         sendAction({ type: "create_workspace_thread", workspace_id: workspaceId })
         setActiveThreadId(null)
 
-        const created = await waitForNewThread({
-          workspaceId,
-          existingThreadIds: existing,
-          fetchThreads,
-        })
-        if (created.createdThreadId != null) {
-          pendingCreateThreadRef.current = null
-          setThreads(created.threads)
-          await selectThreadInternal(workspaceId, created.createdThreadId)
-        }
+        await waitAndActivateNewThread({ workspaceId, existingThreadIds: existing })
         return
       }
 
@@ -305,16 +313,7 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
       sendAction({ type: "open_workspace", workspace_id: wid })
       sendAction({ type: "create_workspace_thread", workspace_id: wid })
 
-      const created = await waitForNewThread({
-        workspaceId: wid,
-        existingThreadIds,
-        fetchThreads,
-      })
-      if (created.createdThreadId != null) {
-        pendingCreateThreadRef.current = null
-        setThreads(created.threads)
-        await selectThreadInternal(wid, created.createdThreadId)
-      }
+      await waitAndActivateNewThread({ workspaceId: wid, existingThreadIds })
     })()
   }
 
