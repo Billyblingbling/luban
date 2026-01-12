@@ -248,6 +248,19 @@ pub enum AttachmentKind {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ContextItemSnapshot {
+    pub context_id: u64,
+    pub attachment: AttachmentRef,
+    pub created_at_unix_ms: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ContextSnapshot {
+    pub workspace_id: WorkspaceId,
+    pub items: Vec<ContextItemSnapshot>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AgentItem {
     pub id: String,
     pub kind: AgentItemKind,

@@ -4,7 +4,7 @@ use axum::{
     Json, Router,
     extract::{Multipart, Path, Query, State, ws::WebSocketUpgrade},
     response::IntoResponse,
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 use luban_api::AppSnapshot;
 use luban_api::{PROTOCOL_VERSION, WsClientMessage, WsServerMessage};
@@ -40,6 +40,11 @@ pub async fn router() -> anyhow::Result<Router> {
         .route(
             "/workspaces/{workspace_id}/attachments/{attachment_id}",
             get(download_attachment),
+        )
+        .route("/workspaces/{workspace_id}/context", get(get_context))
+        .route(
+            "/workspaces/{workspace_id}/context/{context_id}",
+            delete(delete_context_item),
         )
         .route("/events", get(ws_events))
         .route("/pty/{workspace_id}/{thread_id}", get(ws_pty))
@@ -275,6 +280,70 @@ async fn download_attachment(
     ([(axum::http::header::CONTENT_TYPE, content_type)], bytes).into_response()
 }
 
+async fn get_context(
+    State(state): State<AppStateHolder>,
+    Path(workspace_id): Path<u64>,
+) -> impl IntoResponse {
+    let Some((project_slug, workspace_name)) =
+        workspace_scope_from_snapshot(&state.engine.app_snapshot().await.ok(), workspace_id)
+    else {
+        return (axum::http::StatusCode::NOT_FOUND, "workspace not found").into_response();
+    };
+
+    match state
+        .services
+        .list_context_items(project_slug, workspace_name)
+    {
+        Ok(items) => {
+            let api_items = items
+                .into_iter()
+                .map(|item| luban_api::ContextItemSnapshot {
+                    context_id: item.id,
+                    attachment: luban_api::AttachmentRef {
+                        id: item.attachment.id,
+                        kind: match item.attachment.kind {
+                            luban_domain::AttachmentKind::Image => luban_api::AttachmentKind::Image,
+                            luban_domain::AttachmentKind::Text => luban_api::AttachmentKind::Text,
+                            luban_domain::AttachmentKind::File => luban_api::AttachmentKind::File,
+                        },
+                        name: item.attachment.name,
+                        extension: item.attachment.extension,
+                        mime: item.attachment.mime,
+                        byte_len: item.attachment.byte_len,
+                    },
+                    created_at_unix_ms: item.created_at_unix_ms,
+                })
+                .collect();
+
+            Json(luban_api::ContextSnapshot {
+                workspace_id: luban_api::WorkspaceId(workspace_id),
+                items: api_items,
+            })
+            .into_response()
+        }
+        Err(message) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, message).into_response(),
+    }
+}
+
+async fn delete_context_item(
+    State(state): State<AppStateHolder>,
+    Path((workspace_id, context_id)): Path<(u64, u64)>,
+) -> impl IntoResponse {
+    let Some((project_slug, workspace_name)) =
+        workspace_scope_from_snapshot(&state.engine.app_snapshot().await.ok(), workspace_id)
+    else {
+        return (axum::http::StatusCode::NOT_FOUND, "workspace not found").into_response();
+    };
+
+    match state
+        .services
+        .delete_context_item(project_slug, workspace_name, context_id)
+    {
+        Ok(()) => axum::http::StatusCode::NO_CONTENT.into_response(),
+        Err(message) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, message).into_response(),
+    }
+}
+
 async fn upload_attachment(
     State(state): State<AppStateHolder>,
     Path(workspace_id): Path<u64>,
@@ -332,6 +401,12 @@ async fn upload_attachment(
         .map(|(_, ext)| ext.to_ascii_lowercase())
         .unwrap_or_else(|| "bin".to_owned());
 
+    let uploaded_at_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    let display_name = append_timestamp_to_basename(&name, uploaded_at_ms);
+
     let stored = if resolved_kind.starts_with("image") {
         state.services.store_context_image(
             project_slug,
@@ -353,12 +428,6 @@ async fn upload_attachment(
             .services
             .store_context_text(project_slug, workspace_name, text, extension)
     } else {
-        let uploaded_at_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
-        let display_name = append_timestamp_to_basename(&name, uploaded_at_ms);
-
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -373,7 +442,7 @@ async fn upload_attachment(
                 .into_response();
         }
 
-        let tmp_path = tmp_dir.join(display_name);
+        let tmp_path = tmp_dir.join(display_name.clone());
         if let Err(err) = std::fs::write(&tmp_path, &bytes) {
             let _ = std::fs::remove_dir_all(&tmp_dir);
             return (
@@ -391,7 +460,21 @@ async fn upload_attachment(
     };
 
     match stored {
-        Ok(att) => {
+        Ok(mut att) => {
+            att.name = display_name;
+            if let Err(message) = state.services.record_context_item(
+                project_slug.clone(),
+                workspace_name.clone(),
+                att.clone(),
+                uploaded_at_ms,
+            ) {
+                return (
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    message,
+                )
+                    .into_response();
+            }
+
             let api = luban_api::AttachmentRef {
                 id: att.id,
                 kind: match att.kind {

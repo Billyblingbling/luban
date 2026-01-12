@@ -1,14 +1,15 @@
 use anyhow::{Context as _, anyhow};
 use luban_domain::{
-    ChatScrollAnchor, ConversationEntry, ConversationSnapshot, ConversationThreadMeta,
-    PersistedAppState, WorkspaceStatus, WorkspaceThreadId,
+    AttachmentKind, AttachmentRef, ChatScrollAnchor, ContextItem, ConversationEntry,
+    ConversationSnapshot, ConversationThreadMeta, PersistedAppState, WorkspaceStatus,
+    WorkspaceThreadId,
 };
 use rusqlite::{Connection, OptionalExtension as _, params, params_from_iter};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
-const LATEST_SCHEMA_VERSION: u32 = 7;
+const LATEST_SCHEMA_VERSION: u32 = 8;
 const WORKSPACE_CHAT_SCROLL_PREFIX: &str = "workspace_chat_scroll_y10_";
 const WORKSPACE_CHAT_SCROLL_ANCHOR_PREFIX: &str = "workspace_chat_scroll_anchor_";
 const WORKSPACE_ACTIVE_THREAD_PREFIX: &str = "workspace_active_thread_id_";
@@ -68,6 +69,13 @@ const MIGRATIONS: &[(u32, &str)] = &[
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/migrations/0007_project_archived.sql"
+        )),
+    ),
+    (
+        8,
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/migrations/0008_context_items.sql"
         )),
     ),
 ];
@@ -148,6 +156,24 @@ enum DbCommand {
         workspace_name: String,
         thread_local_id: u64,
         reply: mpsc::Sender<anyhow::Result<ConversationSnapshot>>,
+    },
+    InsertContextItem {
+        project_slug: String,
+        workspace_name: String,
+        attachment: AttachmentRef,
+        created_at_unix_ms: u64,
+        reply: mpsc::Sender<anyhow::Result<u64>>,
+    },
+    ListContextItems {
+        project_slug: String,
+        workspace_name: String,
+        reply: mpsc::Sender<anyhow::Result<Vec<ContextItem>>>,
+    },
+    DeleteContextItem {
+        project_slug: String,
+        workspace_name: String,
+        context_id: u64,
+        reply: mpsc::Sender<anyhow::Result<()>>,
     },
 }
 
@@ -276,6 +302,49 @@ impl SqliteStore {
                                 &project_slug,
                                 &workspace_name,
                                 thread_local_id,
+                            ));
+                        }
+                        (
+                            Ok(db),
+                            DbCommand::InsertContextItem {
+                                project_slug,
+                                workspace_name,
+                                attachment,
+                                created_at_unix_ms,
+                                reply,
+                            },
+                        ) => {
+                            let _ = reply.send(db.insert_context_item(
+                                &project_slug,
+                                &workspace_name,
+                                &attachment,
+                                created_at_unix_ms,
+                            ));
+                        }
+                        (
+                            Ok(db),
+                            DbCommand::ListContextItems {
+                                project_slug,
+                                workspace_name,
+                                reply,
+                            },
+                        ) => {
+                            let _ =
+                                reply.send(db.list_context_items(&project_slug, &workspace_name));
+                        }
+                        (
+                            Ok(db),
+                            DbCommand::DeleteContextItem {
+                                project_slug,
+                                workspace_name,
+                                context_id,
+                                reply,
+                            },
+                        ) => {
+                            let _ = reply.send(db.delete_context_item(
+                                &project_slug,
+                                &workspace_name,
+                                context_id,
                             ));
                         }
                         (Err(err), cmd) => {
@@ -437,6 +506,60 @@ impl SqliteStore {
             .context("sqlite worker is not running")?;
         reply_rx.recv().context("sqlite worker terminated")?
     }
+
+    pub fn insert_context_item(
+        &self,
+        project_slug: String,
+        workspace_name: String,
+        attachment: AttachmentRef,
+        created_at_unix_ms: u64,
+    ) -> anyhow::Result<u64> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(DbCommand::InsertContextItem {
+                project_slug,
+                workspace_name,
+                attachment,
+                created_at_unix_ms,
+                reply: reply_tx,
+            })
+            .context("sqlite worker is not running")?;
+        reply_rx.recv().context("sqlite worker terminated")?
+    }
+
+    pub fn list_context_items(
+        &self,
+        project_slug: String,
+        workspace_name: String,
+    ) -> anyhow::Result<Vec<ContextItem>> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(DbCommand::ListContextItems {
+                project_slug,
+                workspace_name,
+                reply: reply_tx,
+            })
+            .context("sqlite worker is not running")?;
+        reply_rx.recv().context("sqlite worker terminated")?
+    }
+
+    pub fn delete_context_item(
+        &self,
+        project_slug: String,
+        workspace_name: String,
+        context_id: u64,
+    ) -> anyhow::Result<()> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(DbCommand::DeleteContextItem {
+                project_slug,
+                workspace_name,
+                context_id,
+                reply: reply_tx,
+            })
+            .context("sqlite worker is not running")?;
+        reply_rx.recv().context("sqlite worker terminated")?
+    }
 }
 
 fn respond_db_open_error(err: &anyhow::Error, cmd: DbCommand) {
@@ -467,6 +590,15 @@ fn respond_db_open_error(err: &anyhow::Error, cmd: DbCommand) {
             let _ = reply.send(Err(anyhow!(message)));
         }
         DbCommand::LoadConversation { reply, .. } => {
+            let _ = reply.send(Err(anyhow!(message)));
+        }
+        DbCommand::InsertContextItem { reply, .. } => {
+            let _ = reply.send(Err(anyhow!(message)));
+        }
+        DbCommand::ListContextItems { reply, .. } => {
+            let _ = reply.send(Err(anyhow!(message)));
+        }
+        DbCommand::DeleteContextItem { reply, .. } => {
             let _ = reply.send(Err(anyhow!(message)));
         }
     }
@@ -1530,6 +1662,102 @@ impl SqliteDatabase {
 
         Ok(ConversationSnapshot { thread_id, entries })
     }
+
+    fn insert_context_item(
+        &mut self,
+        project_slug: &str,
+        workspace_name: &str,
+        attachment: &AttachmentRef,
+        created_at_unix_ms: u64,
+    ) -> anyhow::Result<u64> {
+        let kind = match attachment.kind {
+            AttachmentKind::Image => "image",
+            AttachmentKind::Text => "text",
+            AttachmentKind::File => "file",
+        };
+
+        self.conn.execute(
+            "INSERT INTO context_items
+             (project_slug, workspace_name, attachment_id, kind, name, extension, mime, byte_len, created_at_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                project_slug,
+                workspace_name,
+                attachment.id,
+                kind,
+                attachment.name,
+                attachment.extension,
+                attachment.mime,
+                attachment.byte_len as i64,
+                created_at_unix_ms as i64,
+            ],
+        )?;
+
+        Ok(self.conn.last_insert_rowid() as u64)
+    }
+
+    fn list_context_items(
+        &mut self,
+        project_slug: &str,
+        workspace_name: &str,
+    ) -> anyhow::Result<Vec<ContextItem>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, attachment_id, kind, name, extension, mime, byte_len, created_at_ms
+             FROM context_items
+             WHERE project_slug = ?1 AND workspace_name = ?2
+             ORDER BY created_at_ms DESC, id DESC",
+        )?;
+        let rows = stmt.query_map(params![project_slug, workspace_name], |row| {
+            let id = row.get::<_, i64>(0)? as u64;
+            let attachment_id = row.get::<_, String>(1)?;
+            let kind_str = row.get::<_, String>(2)?;
+            let name = row.get::<_, String>(3)?;
+            let extension = row.get::<_, String>(4)?;
+            let mime = row.get::<_, Option<String>>(5)?;
+            let byte_len = row.get::<_, i64>(6)? as u64;
+            let created_at_unix_ms = row.get::<_, i64>(7)? as u64;
+
+            let kind = match kind_str.as_str() {
+                "image" => AttachmentKind::Image,
+                "text" => AttachmentKind::Text,
+                "file" => AttachmentKind::File,
+                _ => AttachmentKind::File,
+            };
+
+            Ok(ContextItem {
+                id,
+                attachment: AttachmentRef {
+                    id: attachment_id,
+                    kind,
+                    name,
+                    extension,
+                    mime,
+                    byte_len,
+                },
+                created_at_unix_ms,
+            })
+        })?;
+
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    fn delete_context_item(
+        &mut self,
+        project_slug: &str,
+        workspace_name: &str,
+        context_id: u64,
+    ) -> anyhow::Result<()> {
+        self.conn.execute(
+            "DELETE FROM context_items
+             WHERE project_slug = ?1 AND workspace_name = ?2 AND id = ?3",
+            params![project_slug, workspace_name, context_id as i64],
+        )?;
+        Ok(())
+    }
 }
 
 fn configure_connection(conn: &mut Connection) -> anyhow::Result<()> {
@@ -1656,12 +1884,12 @@ mod tests {
         let count: i64 = db
             .conn
             .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('projects','workspaces','conversations','conversation_entries','app_settings','app_settings_text')",
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('projects','workspaces','conversations','conversation_entries','app_settings','app_settings_text','context_items')",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(count, 6);
+        assert_eq!(count, 7);
     }
 
     #[test]

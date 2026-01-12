@@ -1,5 +1,5 @@
 use crate::{
-    AttachmentRef, CodexThreadEvent, ConversationSnapshot, ConversationThreadMeta,
+    AttachmentRef, CodexThreadEvent, ContextItem, ConversationSnapshot, ConversationThreadMeta,
     PersistedAppState,
 };
 use std::{path::PathBuf, sync::Arc, sync::atomic::AtomicBool};
@@ -178,6 +178,27 @@ pub trait ProjectWorkspaceService: Send + Sync {
         workspace_name: String,
         source_path: PathBuf,
     ) -> Result<AttachmentRef, String>;
+
+    fn record_context_item(
+        &self,
+        project_slug: String,
+        workspace_name: String,
+        attachment: AttachmentRef,
+        created_at_unix_ms: u64,
+    ) -> Result<u64, String>;
+
+    fn list_context_items(
+        &self,
+        project_slug: String,
+        workspace_name: String,
+    ) -> Result<Vec<ContextItem>, String>;
+
+    fn delete_context_item(
+        &self,
+        project_slug: String,
+        workspace_name: String,
+        context_id: u64,
+    ) -> Result<(), String>;
 
     fn run_agent_turn_streamed(
         &self,

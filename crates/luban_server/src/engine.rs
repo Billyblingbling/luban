@@ -1781,7 +1781,7 @@ mod tests {
     use super::*;
     use luban_domain::{
         CodexThreadEvent, ContextImage, ConversationSnapshot as DomainConversationSnapshot,
-        ConversationThreadMeta, PersistedAppState,
+        ContextItem, ConversationThreadMeta, PersistedAppState,
     };
     use std::collections::HashMap;
     use std::sync::atomic::AtomicBool;
@@ -1868,6 +1868,33 @@ mod tests {
             _workspace_name: String,
             _source_path: PathBuf,
         ) -> Result<AttachmentRef, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn record_context_item(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+            _attachment: AttachmentRef,
+            _created_at_unix_ms: u64,
+        ) -> Result<u64, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn list_context_items(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+        ) -> Result<Vec<ContextItem>, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn delete_context_item(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+            _context_id: u64,
+        ) -> Result<(), String> {
             Err("unimplemented".to_owned())
         }
 
@@ -2011,6 +2038,33 @@ mod tests {
             _source_path: PathBuf,
         ) -> Result<AttachmentRef, String> {
             Err("unimplemented".to_owned())
+        }
+
+        fn record_context_item(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+            _attachment: AttachmentRef,
+            _created_at_unix_ms: u64,
+        ) -> Result<u64, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn list_context_items(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+        ) -> Result<Vec<ContextItem>, String> {
+            Ok(Vec::new())
+        }
+
+        fn delete_context_item(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+            _context_id: u64,
+        ) -> Result<(), String> {
+            Ok(())
         }
 
         fn run_agent_turn_streamed(
@@ -2379,6 +2433,33 @@ mod tests {
             Err("unimplemented".to_owned())
         }
 
+        fn record_context_item(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+            _attachment: AttachmentRef,
+            _created_at_unix_ms: u64,
+        ) -> Result<u64, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn list_context_items(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+        ) -> Result<Vec<ContextItem>, String> {
+            Ok(Vec::new())
+        }
+
+        fn delete_context_item(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+            _context_id: u64,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+
         fn run_agent_turn_streamed(
             &self,
             _request: luban_domain::RunAgentTurnRequest,
@@ -2593,6 +2674,33 @@ mod tests {
             _source_path: PathBuf,
         ) -> Result<AttachmentRef, String> {
             Err("unimplemented".to_owned())
+        }
+
+        fn record_context_item(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+            _attachment: AttachmentRef,
+            _created_at_unix_ms: u64,
+        ) -> Result<u64, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn list_context_items(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+        ) -> Result<Vec<ContextItem>, String> {
+            Ok(Vec::new())
+        }
+
+        fn delete_context_item(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+            _context_id: u64,
+        ) -> Result<(), String> {
+            Ok(())
         }
 
         fn run_agent_turn_streamed(

@@ -111,6 +111,13 @@ pub struct AttachmentRef {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ContextItem {
+    pub id: u64,
+    pub attachment: AttachmentRef,
+    pub created_at_unix_ms: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ChatScrollAnchor {
     FollowTail,

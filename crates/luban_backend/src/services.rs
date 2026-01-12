@@ -487,6 +487,39 @@ impl ProjectWorkspaceService for GitWorkspaceService {
         })
     }
 
+    fn record_context_item(
+        &self,
+        project_slug: String,
+        workspace_name: String,
+        attachment: AttachmentRef,
+        created_at_unix_ms: u64,
+    ) -> Result<u64, String> {
+        self.sqlite
+            .insert_context_item(project_slug, workspace_name, attachment, created_at_unix_ms)
+            .map_err(|e| format!("{e:#}"))
+    }
+
+    fn list_context_items(
+        &self,
+        project_slug: String,
+        workspace_name: String,
+    ) -> Result<Vec<luban_domain::ContextItem>, String> {
+        self.sqlite
+            .list_context_items(project_slug, workspace_name)
+            .map_err(|e| format!("{e:#}"))
+    }
+
+    fn delete_context_item(
+        &self,
+        project_slug: String,
+        workspace_name: String,
+        context_id: u64,
+    ) -> Result<(), String> {
+        self.sqlite
+            .delete_context_item(project_slug, workspace_name, context_id)
+            .map_err(|e| format!("{e:#}"))
+    }
+
     fn run_agent_turn_streamed(
         &self,
         request: RunAgentTurnRequest,
