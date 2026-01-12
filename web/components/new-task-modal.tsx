@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button"
 import { useLuban } from "@/lib/luban-context"
 import type { TaskDraft, TaskExecuteMode, TaskIntentKind } from "@/lib/luban-api"
 import { draftKey } from "@/lib/ui-prefs"
+import { focusChatInput } from "@/lib/focus-chat-input"
 
 interface NewTaskModalProps {
   open: boolean
@@ -111,6 +112,7 @@ export function NewTaskModal({ open, onOpenChange }: NewTaskModalProps) {
       }
 
       await openWorkspace(result.workspace_id)
+      focusChatInput()
 
       toast(mode === "create" ? "Draft created" : "Task started")
 

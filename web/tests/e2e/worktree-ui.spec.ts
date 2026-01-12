@@ -48,6 +48,28 @@ test("new tab is appended to the end", async ({ page }) => {
   expect(afterLast).not.toBe(beforeLast)
 })
 
+test("creating a worktree auto-opens its conversation", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  const beforeWorkspaceId =
+    (await page.evaluate(() => localStorage.getItem("luban:active_workspace_id"))) ?? ""
+  expect(beforeWorkspaceId.length).toBeGreaterThan(0)
+
+  const projectToggle = page.getByRole("button", { name: "e2e-project", exact: true })
+  const projectContainer = projectToggle.locator("..").locator("..")
+
+  const addWorktree = projectContainer.getByTitle("Add worktree")
+  await addWorktree.click()
+
+  await expect
+    .poll(async () => (await page.evaluate(() => localStorage.getItem("luban:active_workspace_id"))) ?? "", {
+      timeout: 90_000,
+    })
+    .not.toBe(beforeWorkspaceId)
+
+  await expect(page.getByTestId("chat-input")).toBeFocused()
+})
+
 test("sidebar resize gutter does not break header divider line", async ({ page }) => {
   await ensureWorkspace(page)
 

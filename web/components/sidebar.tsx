@@ -24,11 +24,16 @@ import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { NewTaskModal } from "./new-task-modal"
 import { StatusIndicator, getStatusBgColor } from "./shared/status-indicator"
+import { focusChatInput } from "@/lib/focus-chat-input"
 
 interface SidebarProps {
   viewMode: "workspace" | "kanban"
   onViewModeChange: (mode: "workspace" | "kanban") => void
   widthPx: number
+}
+
+function normalizePathLike(raw: string): string {
+  return raw.trim().replace(/\/+$/, "")
 }
 
 export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
@@ -46,12 +51,35 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
   } = useLuban()
 
   const pendingCreateRef = useRef<{ projectId: number; existingWorkspaceIds: Set<number> } | null>(null)
+  const pendingAddProjectPathRef = useRef<string | null>(null)
   const [optimisticCreatingProjectId, setOptimisticCreatingProjectId] = useState<number | null>(null)
   const [newlyCreatedWorkspaceId, setNewlyCreatedWorkspaceId] = useState<number | null>(null)
   const [newTaskOpen, setNewTaskOpen] = useState(false)
 
   useEffect(() => {
     if (!app) return
+
+    const pendingProjectPath = pendingAddProjectPathRef.current
+    if (pendingProjectPath) {
+      const match = app.projects.find(
+        (p) => normalizePathLike(p.path) === normalizePathLike(pendingProjectPath),
+      )
+      if (match) {
+        pendingAddProjectPathRef.current = null
+
+        if (!match.expanded) {
+          toggleProjectExpanded(match.id)
+        }
+
+        const main =
+          match.workspaces.find((w) => w.workspace_name === "main" && w.worktree_path === match.path) ??
+          match.workspaces[0] ??
+          null
+        if (main) {
+          void openWorkspace(main.id).then(() => focusChatInput())
+        }
+      }
+    }
 
     if (optimisticCreatingProjectId != null) {
       const confirmed = app.projects.some(
@@ -62,29 +90,31 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
       }
     }
 
-    const running = app.projects.find((p) => p.create_workspace_status === "running")
-    if (running) {
-      if (!pendingCreateRef.current || pendingCreateRef.current.projectId !== running.id) {
-        pendingCreateRef.current = {
-          projectId: running.id,
-          existingWorkspaceIds: new Set(running.workspaces.map((w) => w.id)),
-        }
+    const pending = pendingCreateRef.current
+    if (pending) {
+      const pendingProject = app.projects.find((p) => p.id === pending.projectId)
+      if (pendingProject?.create_workspace_status === "running") {
+        return
       }
-      return
+
+      pendingCreateRef.current = null
+      setOptimisticCreatingProjectId(null)
+
+      const created = pendingProject?.workspaces.find((w) => !pending.existingWorkspaceIds.has(w.id))?.id
+      if (created == null) return
+
+      setNewlyCreatedWorkspaceId(created)
+      void openWorkspace(created).then(() => focusChatInput())
+      const t = window.setTimeout(() => setNewlyCreatedWorkspaceId(null), 1500)
+      return () => window.clearTimeout(t)
     }
 
-    const pending = pendingCreateRef.current
-    if (!pending) return
-    const proj = app.projects.find((p) => p.id === pending.projectId)
-    pendingCreateRef.current = null
-    setOptimisticCreatingProjectId(null)
-
-    const created = proj?.workspaces.find((w) => !pending.existingWorkspaceIds.has(w.id))?.id
-    if (created == null) return
-
-    setNewlyCreatedWorkspaceId(created)
-    const t = window.setTimeout(() => setNewlyCreatedWorkspaceId(null), 1500)
-    return () => window.clearTimeout(t)
+    const running = app.projects.find((p) => p.create_workspace_status === "running")
+    if (!running) return
+    pendingCreateRef.current = {
+      projectId: running.id,
+      existingWorkspaceIds: new Set(running.workspaces.map((w) => w.id)),
+    }
   }, [app?.rev])
 
   const projects: SidebarProjectVm[] = buildSidebarProjects(app)
@@ -97,6 +127,7 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
     try {
       const picked = await pickProjectPath()
       if (!picked) return
+      pendingAddProjectPathRef.current = picked
       addProject(picked)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))

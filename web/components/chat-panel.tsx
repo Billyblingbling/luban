@@ -244,10 +244,14 @@ export function ChatPanel() {
     <div className="flex-1 flex flex-col min-w-0 bg-background">
       <div className="flex items-center h-11 border-b border-border bg-card px-4">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="text-sm font-medium text-foreground truncate">{projectInfo.name}</span>
+          <span data-testid="active-project-name" className="text-sm font-medium text-foreground truncate">
+            {projectInfo.name}
+          </span>
           <div className="flex items-center gap-1 text-muted-foreground">
             <GitBranch className="w-3.5 h-3.5" />
-            <span className="text-xs">{projectInfo.branch}</span>
+            <span data-testid="active-workspace-branch" className="text-xs">
+              {projectInfo.branch}
+            </span>
           </div>
           <button
             className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded transition-colors"
