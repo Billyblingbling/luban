@@ -31,6 +31,18 @@ This repository treats postmortems as a first-class engineering artifact.
      - reproduction and verification steps
      - prevention/action items
 
+## 0.2 User-Facing Prompt Templates (required)
+
+Luban ships prompt templates as a user-facing feature for tasks across *any* repository.
+
+- Prompts must be **repository-agnostic**:
+  - Do not hardcode Luban-specific commands, tools, or workflows.
+  - Always instruct the code agent to discover and follow the target repository's own practices
+    (README/CONTRIBUTING/CI).
+- For code agents (Claude Code/Codex), prefer actionable guidance:
+  - Encourage direct investigation and implementation in the worktree.
+  - Avoid requiring "patch/diff" artifacts as the primary output, unless the user explicitly asks.
+
 ## 1. Project context and goals (first-screen context for agents)
 - Tech stack: Rust server + web frontend (optionally wrapped by Tauri)
 - All engineering commands are managed via `justfile` (prefer `just` over invoking `cargo` directly)

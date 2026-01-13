@@ -342,6 +342,7 @@ fn compose_agent_prompt(
     out.push_str("\nGlobal constraints:\n");
     out.push_str("- Do NOT commit, push, open a pull request, create a PR review, or comment on the upstream issue/PR unless the user explicitly asks.\n");
     out.push_str("- You MAY run commands, inspect files, search the web, and modify code directly in this worktree.\n");
+    out.push_str("- Discover and follow the target repository's own practices (README/CONTRIBUTING/CI). Do not assume a specific toolchain or workflow.\n");
     out.push_str("- Prefer the smallest correct change that addresses the root cause and follows the target repository's conventions.\n");
     out.push_str("- If you are about to do anything destructive or irreversible (delete data, rewrite history, force push, etc.), stop and ask the user first.\n");
     out.push_str("- When you change behavior, run the repository's existing checks/tests and report what you ran and what passed.\n");
@@ -785,8 +786,20 @@ mod tests {
             "prompt must not require patch/diff output for code agents"
         );
         assert!(
+            prompt.contains("target repository's own practices")
+                || prompt.contains("target repository's conventions"),
+            "prompt must instruct the agent to follow the target repository's practices"
+        );
+        assert!(
             !prompt.contains("`just") && !prompt.contains("\njust "),
             "prompt must not include luban-specific just commands"
+        );
+        assert!(
+            !prompt.contains("pnpm")
+                && !prompt.contains("npm")
+                && !prompt.contains("yarn")
+                && !prompt.contains("cargo"),
+            "prompt must not hardcode specific build/test tools"
         );
     }
 

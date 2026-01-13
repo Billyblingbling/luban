@@ -34,6 +34,8 @@ This directory contains engineering postmortems for user-visible bugs, CI regres
   - Related fix commits: `c3eed50`, `1a2981e`
 - `2026-01-task-intent-inference-output.md`
   - Related fix commits: `ba8c800`
+- `2026-01-task-prompts-repo-specific-assumptions.md`
+  - Related fix commits: `7611c8b`, `9189cfd`
 - `2026-01-thinking-steps-miscount.md`
   - Related fix commits: `5555663`, `bc6d13d`
 - `2026-01-gpui-blocks-reflow.md`
