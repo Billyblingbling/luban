@@ -465,6 +465,7 @@ pub struct Project {
     pub name: String,
     pub path: PathBuf,
     pub slug: String,
+    pub is_git: bool,
     pub expanded: bool,
     pub create_workspace_status: OperationStatus,
     pub workspaces: Vec<Workspace>,
@@ -522,6 +523,7 @@ pub struct PersistedProject {
     pub name: String,
     pub path: PathBuf,
     pub slug: String,
+    pub is_git: bool,
     pub expanded: bool,
     pub workspaces: Vec<PersistedWorkspace>,
 }

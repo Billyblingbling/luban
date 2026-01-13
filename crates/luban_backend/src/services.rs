@@ -1046,21 +1046,34 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                 return Ok(luban_domain::ProjectIdentity {
                     root_path: path,
                     github_repo: None,
+                    is_git: false,
                 });
             }
 
-            let root = self.repo_root(&path).unwrap_or(path);
-            let remote = self.select_remote_best_effort(&root).unwrap_or(None);
+            let root = self.repo_root(&path);
+            let (root_path, is_git) = match root {
+                Ok(root_path) => (root_path, true),
+                Err(_) => (path, false),
+            };
+
+            let remote = if is_git {
+                self.select_remote_best_effort(&root_path).unwrap_or(None)
+            } else {
+                None
+            };
             let github_repo = if let Some(remote) = remote {
-                let url = self.run_git(&root, ["remote", "get-url", &remote]).ok();
+                let url = self
+                    .run_git(&root_path, ["remote", "get-url", &remote])
+                    .ok();
                 url.and_then(|u| Self::github_repo_id_from_remote_url(&u))
             } else {
                 None
             };
 
             Ok(luban_domain::ProjectIdentity {
-                root_path: root,
+                root_path,
                 github_repo,
+                is_git,
             })
         })();
 

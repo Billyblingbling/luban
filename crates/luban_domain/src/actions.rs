@@ -17,6 +17,7 @@ pub enum Action {
 
     AddProject {
         path: PathBuf,
+        is_git: bool,
     },
     ToggleProjectExpanded {
         project_id: ProjectId,

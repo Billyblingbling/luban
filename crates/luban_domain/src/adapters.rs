@@ -116,6 +116,7 @@ pub struct TaskDraft {
 pub struct ProjectIdentity {
     pub root_path: PathBuf,
     pub github_repo: Option<String>,
+    pub is_git: bool,
 }
 
 pub trait ProjectWorkspaceService: Send + Sync {
@@ -226,6 +227,7 @@ pub trait ProjectWorkspaceService: Send + Sync {
         Ok(ProjectIdentity {
             root_path: path,
             github_repo: None,
+            is_git: false,
         })
     }
 }

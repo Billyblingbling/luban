@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
-const LATEST_SCHEMA_VERSION: u32 = 8;
+const LATEST_SCHEMA_VERSION: u32 = 9;
 const WORKSPACE_CHAT_SCROLL_PREFIX: &str = "workspace_chat_scroll_y10_";
 const WORKSPACE_CHAT_SCROLL_ANCHOR_PREFIX: &str = "workspace_chat_scroll_anchor_";
 const WORKSPACE_ACTIVE_THREAD_PREFIX: &str = "workspace_active_thread_id_";
@@ -81,6 +81,13 @@ const MIGRATIONS: &[(u32, &str)] = &[
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/migrations/0008_context_items.sql"
+        )),
+    ),
+    (
+        9,
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/migrations/0009_project_is_git.sql"
         )),
     ),
 ];
@@ -636,9 +643,9 @@ impl SqliteDatabase {
     fn load_app_state(&mut self) -> anyhow::Result<PersistedAppState> {
         let mut projects = Vec::new();
         {
-            let mut stmt = self
-                .conn
-                .prepare("SELECT id, slug, name, path, expanded FROM projects ORDER BY id ASC")?;
+            let mut stmt = self.conn.prepare(
+                "SELECT id, slug, name, path, expanded, is_git FROM projects ORDER BY id ASC",
+            )?;
             let rows = stmt.query_map([], |row| {
                 Ok((
                     row.get::<_, i64>(0)? as u64,
@@ -646,15 +653,17 @@ impl SqliteDatabase {
                     row.get::<_, String>(2)?,
                     row.get::<_, String>(3)?,
                     row.get::<_, i64>(4)?,
+                    row.get::<_, i64>(5)?,
                 ))
             })?;
             for row in rows {
-                let (id, slug, name, path, expanded) = row?;
+                let (id, slug, name, path, expanded, is_git) = row?;
                 projects.push(luban_domain::PersistedProject {
                     id,
                     slug,
                     name,
                     path: PathBuf::from(path),
+                    is_git: is_git != 0,
                     expanded: expanded != 0,
                     workspaces: Vec::new(),
                 });
@@ -1102,13 +1111,14 @@ impl SqliteDatabase {
         for project in &snapshot.projects {
             let path = project.path.to_string_lossy().into_owned();
             tx.execute(
-                "INSERT INTO projects (id, slug, name, path, expanded, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, COALESCE((SELECT created_at FROM projects WHERE id = ?1), ?6), ?6)
+                "INSERT INTO projects (id, slug, name, path, expanded, is_git, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, COALESCE((SELECT created_at FROM projects WHERE id = ?1), ?7), ?7)
                  ON CONFLICT(id) DO UPDATE SET
                    slug = excluded.slug,
                    name = excluded.name,
                    path = excluded.path,
                    expanded = excluded.expanded,
+                   is_git = excluded.is_git,
                    updated_at = excluded.updated_at",
                 params![
                     project.id as i64,
@@ -1116,6 +1126,7 @@ impl SqliteDatabase {
                     project.name,
                     path,
                     if project.expanded { 1i64 } else { 0i64 },
+                    if project.is_git { 1i64 } else { 0i64 },
                     now,
                 ],
             )?;
@@ -2010,6 +2021,7 @@ mod tests {
                 slug: "my-project".to_owned(),
                 name: "My Project".to_owned(),
                 path: PathBuf::from("/tmp/my-project"),
+                is_git: true,
                 expanded: true,
                 workspaces: vec![PersistedWorkspace {
                     id: 10,
@@ -2062,6 +2074,7 @@ mod tests {
                 slug: "p".to_owned(),
                 name: "P".to_owned(),
                 path: PathBuf::from("/tmp/p"),
+                is_git: true,
                 expanded: false,
                 workspaces: vec![PersistedWorkspace {
                     id: 2,
@@ -2127,6 +2140,7 @@ mod tests {
                 slug: "p".to_owned(),
                 name: "P".to_owned(),
                 path: PathBuf::from("/tmp/p"),
+                is_git: true,
                 expanded: false,
                 workspaces: vec![PersistedWorkspace {
                     id: 2,
@@ -2209,6 +2223,7 @@ mod tests {
                     slug: "p1".to_owned(),
                     name: "P1".to_owned(),
                     path: PathBuf::from("/tmp/p1"),
+                    is_git: true,
                     expanded: false,
                     workspaces: vec![PersistedWorkspace {
                         id: 10,
@@ -2224,6 +2239,7 @@ mod tests {
                     slug: "p2".to_owned(),
                     name: "P2".to_owned(),
                     path: PathBuf::from("/tmp/p2"),
+                    is_git: true,
                     expanded: false,
                     workspaces: vec![PersistedWorkspace {
                         id: 20,
@@ -2270,6 +2286,7 @@ mod tests {
                 slug: "p1".to_owned(),
                 name: "P1".to_owned(),
                 path: PathBuf::from("/tmp/p1"),
+                is_git: true,
                 expanded: false,
                 workspaces: vec![
                     PersistedWorkspace {
@@ -2334,6 +2351,7 @@ mod tests {
                 slug: "p".to_owned(),
                 name: "P".to_owned(),
                 path: PathBuf::from("/tmp/p"),
+                is_git: true,
                 expanded: false,
                 workspaces: vec![PersistedWorkspace {
                     id: 2,

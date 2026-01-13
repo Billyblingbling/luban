@@ -307,7 +307,7 @@ impl Engine {
                 if let luban_api::ClientAction::AddProject { path } = &action {
                     enum AddProjectDecision {
                         ReuseExisting,
-                        Add { root_path: PathBuf },
+                        Add { root_path: PathBuf, is_git: bool },
                     }
 
                     let services = self.services.clone();
@@ -335,6 +335,7 @@ impl Engine {
 
                         Ok::<AddProjectDecision, String>(AddProjectDecision::Add {
                             root_path: requested.root_path,
+                            is_git: requested.is_git,
                         })
                     })
                     .await
@@ -346,9 +347,12 @@ impl Engine {
                             let _ = reply.send(Ok(self.rev));
                             return;
                         }
-                        Ok(AddProjectDecision::Add { root_path }) => {
-                            self.process_action_queue(Action::AddProject { path: root_path })
-                                .await;
+                        Ok(AddProjectDecision::Add { root_path, is_git }) => {
+                            self.process_action_queue(Action::AddProject {
+                                path: root_path,
+                                is_git,
+                            })
+                            .await;
                             let _ = reply.send(Ok(self.rev));
                             return;
                         }
@@ -494,8 +498,27 @@ impl Engine {
                     if let Ok(Some(path)) = reuse_path {
                         local_project_path = path;
                     } else {
+                        let services = self.services.clone();
+                        let candidate = local_project_path.clone();
+                        let identity = tokio::task::spawn_blocking(move || {
+                            services.project_identity(candidate)
+                        })
+                        .await
+                        .ok()
+                        .unwrap_or_else(|| Err("failed to join project identity task".to_owned()));
+
+                        let identity = match identity {
+                            Ok(v) => v,
+                            Err(message) => {
+                                let _ = reply.send(Err(message));
+                                return;
+                            }
+                        };
+
+                        local_project_path = identity.root_path.clone();
                         self.process_action_queue(Action::AddProject {
-                            path: local_project_path.clone(),
+                            path: identity.root_path,
+                            is_git: identity.is_git,
                         })
                         .await;
                     }
@@ -1177,6 +1200,7 @@ impl Engine {
                     name: p.name.clone(),
                     slug: p.slug.clone(),
                     path: p.path.to_string_lossy().to_string(),
+                    is_git: p.is_git,
                     expanded: p.expanded,
                     create_workspace_status: match p.create_workspace_status {
                         OperationStatus::Idle => luban_api::OperationStatus::Idle,
@@ -1637,6 +1661,7 @@ fn map_client_action(action: luban_api::ClientAction) -> Option<Action> {
         luban_api::ClientAction::PickProjectPath => None,
         luban_api::ClientAction::AddProject { path } => Some(Action::AddProject {
             path: expand_user_path(&path),
+            is_git: true,
         }),
         luban_api::ClientAction::TaskPreview { .. } => None,
         luban_api::ClientAction::TaskExecute { .. } => None,
@@ -2153,6 +2178,7 @@ mod tests {
             Ok(luban_domain::ProjectIdentity {
                 root_path: path,
                 github_repo: Some("github.com/example/repo".to_owned()),
+                is_git: true,
             })
         }
     }
@@ -2162,6 +2188,15 @@ mod tests {
         let mut state = AppState::new();
         let _ = state.apply(Action::AddProject {
             path: PathBuf::from("/tmp/luban-server-test"),
+            is_git: true,
+        });
+
+        let project_id = state.projects[0].id;
+        let _ = state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "main".to_owned(),
+            branch_name: "main".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban-server-test"),
         });
 
         let workspace_id = state.projects[0].workspaces[0].id;
@@ -2212,6 +2247,15 @@ mod tests {
         let mut state = AppState::new();
         let _ = state.apply(Action::AddProject {
             path: PathBuf::from("/tmp/luban-server-test"),
+            is_git: true,
+        });
+
+        let project_id = state.projects[0].id;
+        let _ = state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "main".to_owned(),
+            branch_name: "main".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban-server-test"),
         });
 
         let workspace_id = state.projects[0].workspaces[0].id;
@@ -2262,6 +2306,15 @@ mod tests {
         let mut state = AppState::new();
         let _ = state.apply(Action::AddProject {
             path: PathBuf::from("/tmp/luban-server-test"),
+            is_git: true,
+        });
+
+        let project_id = state.projects[0].id;
+        let _ = state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "main".to_owned(),
+            branch_name: "main".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban-server-test"),
         });
 
         let workspace_id = state.projects[0].workspaces[0].id;
@@ -2566,6 +2619,7 @@ mod tests {
         let project_path = PathBuf::from("/tmp/luban-server-archive-test");
         let _ = state.apply(Action::AddProject {
             path: project_path.clone(),
+            is_git: true,
         });
         let project_id = state.projects[0].id;
 
@@ -2813,6 +2867,14 @@ mod tests {
         let mut state = AppState::new();
         let _ = state.apply(Action::AddProject {
             path: PathBuf::from("/tmp/luban-server-open-ide-test"),
+            is_git: true,
+        });
+        let project_id = state.projects[0].id;
+        let _ = state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "main".to_owned(),
+            branch_name: "main".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban-server-open-ide-test"),
         });
         let workspace_id = state.projects[0].workspaces[0].id;
         let worktree_path = state.projects[0].workspaces[0].worktree_path.clone();

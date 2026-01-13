@@ -46,8 +46,8 @@ impl AppState {
 
     pub fn demo() -> Self {
         let mut this = Self::new();
-        let p1 = this.add_project(PathBuf::from("/Users/example/luban"));
-        let p2 = this.add_project(PathBuf::from("/Users/example/scratch"));
+        let p1 = this.add_project(PathBuf::from("/Users/example/luban"), true);
+        let p2 = this.add_project(PathBuf::from("/Users/example/scratch"), true);
 
         this.projects
             .iter_mut()
@@ -140,13 +140,8 @@ impl AppState {
                 Vec::new()
             }
 
-            Action::AddProject { path } => {
-                let (project_id, created) = self.upsert_project(path);
-                if created {
-                    self.insert_main_workspace(project_id);
-                } else {
-                    self.ensure_main_workspace(project_id);
-                }
+            Action::AddProject { path, is_git } => {
+                self.upsert_project(path, is_git);
                 vec![Effect::SaveAppState]
             }
             Action::ToggleProjectExpanded { project_id } => {
@@ -165,10 +160,18 @@ impl AppState {
 
             Action::CreateWorkspace { project_id } => {
                 if let Some(project) = self.projects.iter_mut().find(|p| p.id == project_id) {
+                    if !project.is_git {
+                        self.last_error =
+                            Some("Cannot create worktrees for a non-git project".to_owned());
+                        return Vec::new();
+                    }
                     if project.create_workspace_status == OperationStatus::Running {
                         return Vec::new();
                     }
                     project.create_workspace_status = OperationStatus::Running;
+                    if project.workspaces.is_empty() {
+                        self.insert_main_workspace(project_id);
+                    }
                 }
                 vec![Effect::CreateWorkspace { project_id }]
             }
@@ -1048,7 +1051,7 @@ impl AppState {
         )
     }
 
-    fn add_project(&mut self, path: PathBuf) -> ProjectId {
+    fn add_project(&mut self, path: PathBuf, is_git: bool) -> ProjectId {
         let normalized_path = normalize_project_path(&path);
 
         if let Some(project) = self
@@ -1056,6 +1059,7 @@ impl AppState {
             .iter_mut()
             .find(|p| normalize_project_path(&p.path) == normalized_path)
         {
+            project.is_git = is_git;
             return project.id;
         }
 
@@ -1076,6 +1080,7 @@ impl AppState {
             name,
             path: normalized_path,
             slug,
+            is_git,
             expanded: false,
             create_workspace_status: OperationStatus::Idle,
             workspaces: Vec::new(),
@@ -1084,9 +1089,9 @@ impl AppState {
         id
     }
 
-    fn upsert_project(&mut self, path: PathBuf) -> (ProjectId, bool) {
+    fn upsert_project(&mut self, path: PathBuf, is_git: bool) -> (ProjectId, bool) {
         let before = self.projects.len();
-        let id = self.add_project(path);
+        let id = self.add_project(path, is_git);
         (id, self.projects.len() != before)
     }
 
@@ -1159,39 +1164,6 @@ impl AppState {
         });
 
         workspace_id
-    }
-
-    fn ensure_main_workspace(&mut self, project_id: ProjectId) -> Option<WorkspaceId> {
-        let has_main = self
-            .projects
-            .iter()
-            .find(|p| p.id == project_id)
-            .map(|project| {
-                project.workspaces.iter().any(|w| {
-                    w.status == WorkspaceStatus::Active
-                        && w.workspace_name == Self::MAIN_WORKSPACE_NAME
-                })
-            })
-            .unwrap_or(false);
-
-        if has_main {
-            return None;
-        }
-
-        Some(self.insert_main_workspace(project_id))
-    }
-
-    pub(crate) fn ensure_main_workspaces(&mut self) -> bool {
-        let mut upgraded = false;
-
-        let project_ids: Vec<ProjectId> = self.projects.iter().map(|p| p.id).collect();
-        for project_id in project_ids {
-            if self.ensure_main_workspace(project_id).is_some() {
-                upgraded = true;
-            }
-        }
-
-        upgraded
     }
 
     fn workspace_is_main(project: &Project, workspace: &Workspace) -> bool {
@@ -1409,8 +1381,10 @@ mod tests {
         let mut state = AppState::new();
         state.apply(Action::AddProject {
             path: PathBuf::from("/tmp/repo"),
+            is_git: true,
         });
         let project_id = state.projects[0].id;
+        state.apply(Action::CreateWorkspace { project_id });
         state.apply(Action::WorkspaceCreated {
             project_id,
             workspace_name: "w1".to_owned(),
@@ -1456,8 +1430,10 @@ mod tests {
         let mut state = AppState::new();
         state.apply(Action::AddProject {
             path: PathBuf::from("/tmp/repo"),
+            is_git: true,
         });
         let project_id = state.projects[0].id;
+        state.apply(Action::CreateWorkspace { project_id });
         state.apply(Action::WorkspaceCreated {
             project_id,
             workspace_name: "w1".to_owned(),
@@ -1517,8 +1493,10 @@ mod tests {
         let mut state = AppState::new();
         state.apply(Action::AddProject {
             path: PathBuf::from("/tmp/repo"),
+            is_git: true,
         });
         let project_id = state.projects[0].id;
+        state.apply(Action::CreateWorkspace { project_id });
         state.apply(Action::WorkspaceCreated {
             project_id,
             workspace_name: "w1".to_owned(),
@@ -1604,8 +1582,10 @@ mod tests {
         let mut state = AppState::new();
         state.apply(Action::AddProject {
             path: PathBuf::from("/tmp/repo"),
+            is_git: true,
         });
         let project_id = state.projects[0].id;
+        state.apply(Action::CreateWorkspace { project_id });
         state.apply(Action::WorkspaceCreated {
             project_id,
             workspace_name: "w1".to_owned(),
@@ -1639,6 +1619,7 @@ mod tests {
         let mut state = AppState::new();
         state.apply(Action::AddProject {
             path: PathBuf::from("/tmp/repo"),
+            is_git: true,
         });
         let project_id = state.projects[0].id;
         state.apply(Action::WorkspaceCreated {
@@ -1661,6 +1642,7 @@ mod tests {
         let mut state = AppState::new();
         state.apply(Action::AddProject {
             path: PathBuf::from("/tmp/repo"),
+            is_git: true,
         });
         let project_id = state.projects[0].id;
         state.apply(Action::WorkspaceCreated {
@@ -1689,6 +1671,7 @@ mod tests {
 
         state.apply(Action::AddProject {
             path: PathBuf::from("/tmp/repo"),
+            is_git: true,
         });
         let project_id = state.projects[0].id;
         state.apply(Action::OpenProjectSettings { project_id });
@@ -1938,6 +1921,7 @@ mod tests {
         let mut state = AppState::new();
         state.apply(Action::AddProject {
             path: PathBuf::from("/tmp/repo"),
+            is_git: true,
         });
         let project_id = state.projects[0].id;
         state.apply(Action::WorkspaceCreated {
@@ -2034,6 +2018,7 @@ mod tests {
         let mut state = AppState::new();
         state.apply(Action::AddProject {
             path: PathBuf::from("/tmp/repo"),
+            is_git: true,
         });
         let project_id = state.projects[0].id;
 
@@ -2058,6 +2043,7 @@ mod tests {
         let mut state = AppState::new();
         state.apply(Action::AddProject {
             path: PathBuf::from("/tmp/repo"),
+            is_git: true,
         });
         let project_id = state.projects[0].id;
         state.apply(Action::WorkspaceCreated {
@@ -2149,6 +2135,7 @@ mod tests {
         let mut state = AppState::new();
         let effects = state.apply(Action::AddProject {
             path: PathBuf::from("/tmp/repo"),
+            is_git: true,
         });
         assert_eq!(effects.len(), 1);
         assert!(matches!(effects[0], Effect::SaveAppState));
@@ -2159,7 +2146,10 @@ mod tests {
         let mut state = AppState::new();
         state.apply(Action::AddProject {
             path: PathBuf::from("/tmp/repo"),
+            is_git: true,
         });
+        let project_id = state.projects[0].id;
+        state.apply(Action::CreateWorkspace { project_id });
 
         let workspace_id = main_workspace_id(&state);
         let effects = state.apply(Action::ArchiveWorkspace { workspace_id });
@@ -2188,9 +2178,11 @@ mod tests {
         let mut state = AppState::new();
         state.apply(Action::AddProject {
             path: PathBuf::from("/tmp/My Project"),
+            is_git: true,
         });
         state.apply(Action::AddProject {
             path: PathBuf::from("/home/My Project"),
+            is_git: true,
         });
 
         assert_eq!(state.projects.len(), 2);
@@ -2203,9 +2195,11 @@ mod tests {
         let mut state = AppState::new();
         state.apply(Action::AddProject {
             path: PathBuf::from("/tmp/repo"),
+            is_git: true,
         });
         state.apply(Action::AddProject {
             path: PathBuf::from("/tmp/repo/"),
+            is_git: true,
         });
 
         assert_eq!(state.projects.len(), 1);
@@ -2217,9 +2211,16 @@ mod tests {
         let mut state = AppState::new();
         state.apply(Action::AddProject {
             path: PathBuf::from("/tmp/repo"),
+            is_git: true,
         });
         let project_id = state.projects[0].id;
-        let main_id = main_workspace_id(&state);
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "main".to_owned(),
+            branch_name: "main".to_owned(),
+            worktree_path: PathBuf::from("/tmp/repo"),
+        });
+        let main_id = workspace_id_by_name(&state, "main");
 
         state.apply(Action::OpenWorkspace {
             workspace_id: main_id,
@@ -2243,6 +2244,7 @@ mod tests {
         let mut state = AppState::new();
         state.apply(Action::AddProject {
             path: PathBuf::from("/tmp/repo"),
+            is_git: true,
         });
         let project_id = state.projects[0].id;
 
@@ -2271,6 +2273,7 @@ mod tests {
         let mut state = AppState::new();
         state.apply(Action::AddProject {
             path: PathBuf::from("/tmp/repo"),
+            is_git: true,
         });
         let project_id = state.projects[0].id;
         state.apply(Action::WorkspaceCreated {
@@ -2308,6 +2311,7 @@ mod tests {
         let mut state = AppState::new();
         state.apply(Action::AddProject {
             path: PathBuf::from("/tmp/repo"),
+            is_git: true,
         });
         let project_id = state.projects[0].id;
 
@@ -2358,6 +2362,7 @@ mod tests {
         let mut state = AppState::new();
         state.apply(Action::AddProject {
             path: PathBuf::from("/tmp/repo"),
+            is_git: true,
         });
         let project_id = state.projects[0].id;
 
@@ -2884,6 +2889,7 @@ mod tests {
         let mut state = AppState::new();
         state.apply(Action::AddProject {
             path: PathBuf::from("/tmp/repo"),
+            is_git: true,
         });
         let project_id = state.projects[0].id;
         state.apply(Action::WorkspaceCreated {
@@ -2921,6 +2927,7 @@ mod tests {
         let mut state = AppState::new();
         state.apply(Action::AddProject {
             path: PathBuf::from("/tmp/repo"),
+            is_git: true,
         });
         let project_id = state.projects[0].id;
         state.apply(Action::WorkspaceCreated {
@@ -2958,6 +2965,7 @@ mod tests {
         let mut state = AppState::new();
         state.apply(Action::AddProject {
             path: PathBuf::from("/tmp/repo"),
+            is_git: true,
         });
         let project_id = state.projects[0].id;
         state.apply(Action::WorkspaceCreated {

@@ -169,8 +169,7 @@ pub(crate) fn apply_persisted_app_state(
     state.right_pane = RightPane::None;
     state.dashboard_preview_workspace_id = None;
 
-    let upgraded = projects_upgraded || state.ensure_main_workspaces();
-    let mut effects = if upgraded {
+    let mut effects = if projects_upgraded {
         vec![Effect::SaveAppState]
     } else {
         Vec::new()
@@ -211,6 +210,7 @@ pub(crate) fn to_persisted_app_state(state: &AppState) -> PersistedAppState {
                 name: p.name.clone(),
                 path: p.path.clone(),
                 slug: p.slug.clone(),
+                is_git: p.is_git,
                 expanded: p.expanded,
                 workspaces: p
                     .workspaces
@@ -309,6 +309,7 @@ fn load_projects(projects: Vec<PersistedProject>) -> (Vec<Project>, bool) {
             name: persisted.name,
             path: normalized_path.clone(),
             slug: persisted.slug,
+            is_git: persisted.is_git,
             expanded: persisted.expanded,
             create_workspace_status: OperationStatus::Idle,
             workspaces: persisted
@@ -473,6 +474,7 @@ mod tests {
                 name: "Repo".to_owned(),
                 path: path.clone(),
                 slug: "repo-1".to_owned(),
+                is_git: true,
                 expanded: false,
                 workspaces: vec![PersistedWorkspace {
                     id: 10,
@@ -488,6 +490,7 @@ mod tests {
                 name: "Repo".to_owned(),
                 path: path.clone(),
                 slug: "repo-2".to_owned(),
+                is_git: true,
                 expanded: true,
                 workspaces: vec![PersistedWorkspace {
                     id: 11,
@@ -516,6 +519,7 @@ mod tests {
             name: "Repo".to_owned(),
             path: path.clone(),
             slug: "repo".to_owned(),
+            is_git: true,
             expanded: false,
             workspaces: vec![
                 PersistedWorkspace {

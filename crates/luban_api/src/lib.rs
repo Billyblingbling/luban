@@ -49,6 +49,8 @@ pub struct ProjectSnapshot {
     pub name: String,
     pub slug: String,
     pub path: String,
+    #[serde(default)]
+    pub is_git: bool,
     pub expanded: bool,
     pub create_workspace_status: OperationStatus,
     pub workspaces: Vec<WorkspaceSnapshot>,
