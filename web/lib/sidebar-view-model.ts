@@ -18,6 +18,7 @@ export type SidebarWorktreeVm = {
 export type SidebarProjectVm = {
   id: number
   name: string
+  isGit: boolean
   expanded: boolean
   createWorkspaceStatus: OperationStatus
   worktrees: SidebarWorktreeVm[]
@@ -34,6 +35,7 @@ export function buildSidebarProjects(
   return app.projects.map((p) => ({
     id: p.id,
     name: p.slug,
+    isGit: p.is_git,
     expanded: p.expanded,
     createWorkspaceStatus: p.create_workspace_status,
     worktrees: p.workspaces

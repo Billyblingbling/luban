@@ -18,10 +18,15 @@ export type AppearanceSnapshot = {
   fonts: AppearanceFontsSnapshot
 }
 
+export type AgentSettingsSnapshot = {
+  codex_enabled: boolean
+}
+
 export type AppSnapshot = {
   rev: number
   projects: ProjectSnapshot[]
   appearance: AppearanceSnapshot
+  agent: AgentSettingsSnapshot
 }
 
 export type ProjectSnapshot = {
@@ -29,6 +34,7 @@ export type ProjectSnapshot = {
   name: string
   slug: string
   path: string
+  is_git: boolean
   expanded: boolean
   create_workspace_status: OperationStatus
   workspaces: WorkspaceSnapshot[]
@@ -210,6 +216,15 @@ export type TaskExecuteResult = {
   mode: TaskExecuteMode
 }
 
+export type CodexConfigEntryKind = "file" | "folder"
+
+export type CodexConfigEntrySnapshot = {
+  path: string
+  name: string
+  kind: CodexConfigEntryKind
+  children: CodexConfigEntrySnapshot[]
+}
+
 export type AgentItemKind =
   | "agent_message"
   | "reasoning"
@@ -274,6 +289,11 @@ export type ClientAction =
     }
   | { type: "appearance_theme_changed"; theme: AppearanceTheme }
   | { type: "appearance_fonts_changed"; fonts: AppearanceFontsSnapshot }
+  | { type: "codex_enabled_changed"; enabled: boolean }
+  | { type: "codex_check" }
+  | { type: "codex_config_tree" }
+  | { type: "codex_config_read_file"; path: string }
+  | { type: "codex_config_write_file"; path: string; contents: string }
 
 export type ServerEvent =
   | { type: "app_changed"; rev: number; snapshot: AppSnapshot }
@@ -283,6 +303,10 @@ export type ServerEvent =
   | { type: "project_path_picked"; request_id: string; path: string | null }
   | { type: "task_preview_ready"; request_id: string; draft: TaskDraft }
   | { type: "task_executed"; request_id: string; result: TaskExecuteResult }
+  | { type: "codex_check_ready"; request_id: string; ok: boolean; message: string | null }
+  | { type: "codex_config_tree_ready"; request_id: string; tree: CodexConfigEntrySnapshot[] }
+  | { type: "codex_config_file_ready"; request_id: string; path: string; contents: string }
+  | { type: "codex_config_file_saved"; request_id: string; path: string }
 
 export type WsClientMessage =
   | { type: "hello"; protocol_version: number; last_seen_rev: number | null }

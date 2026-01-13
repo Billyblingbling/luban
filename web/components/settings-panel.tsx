@@ -1,26 +1,36 @@
 "use client"
 
-import type { ElementType } from "react"
+import type { ElementType, MouseEvent } from "react"
 
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useTheme } from "next-themes"
 import {
   Check,
   ChevronDown,
   ChevronRight,
+  Bot,
+  CheckCircle2,
+  FileCode,
+  FileText,
+  Folder,
+  Loader2,
   Monitor,
   Moon,
   Palette,
+  Pencil,
+  RefreshCw,
   Settings,
   Sun,
   Type,
   X,
+  XCircle,
 } from "lucide-react"
+import { toast } from "sonner"
 
 import { useAppearance } from "@/components/appearance-provider"
 import { useLuban } from "@/lib/luban-context"
 import { cn } from "@/lib/utils"
-import type { AppearanceTheme } from "@/lib/luban-api"
+import type { AppearanceTheme, CodexConfigEntrySnapshot } from "@/lib/luban-api"
 
 interface SettingsPanelProps {
   open: boolean
@@ -43,6 +53,11 @@ const tocItems: TocItem[] = [
       { id: "theme", label: "Theme", icon: Sun },
       { id: "fonts", label: "Fonts", icon: Type },
     ],
+  },
+  {
+    id: "agent",
+    label: "Agent",
+    icon: Bot,
   },
 ]
 
@@ -426,7 +441,357 @@ function WorkspacePreviewWithFonts({
   )
 }
 
-function AppearanceSettings() {
+type CheckStatus = "idle" | "checking" | "success" | "error"
+
+type SaveStatus = "idle" | "unsaved" | "saving" | "saved"
+
+type CodexSelectedFile = {
+  path: string
+  name: string
+}
+
+function codexEntryIcon(entry: CodexConfigEntrySnapshot): { icon: ElementType; className: string } {
+  if (entry.kind === "folder") {
+    return { icon: Folder, className: "text-yellow-500" }
+  }
+
+  if (entry.name.endsWith(".toml") || entry.name.endsWith(".json") || entry.name.endsWith(".yaml") || entry.name.endsWith(".yml")) {
+    return { icon: FileCode, className: "text-orange-500" }
+  }
+
+  return { icon: FileText, className: "text-blue-500" }
+}
+
+function CodexConfigTree({
+  entries,
+  level = 0,
+  selectedPath,
+  expandedFolders,
+  onSelectFile,
+  onToggleFolder,
+}: {
+  entries: CodexConfigEntrySnapshot[]
+  level?: number
+  selectedPath: string | null
+  expandedFolders: Set<string>
+  onSelectFile: (file: CodexSelectedFile) => void
+  onToggleFolder: (path: string) => void
+}) {
+  return (
+    <div className="space-y-0.5">
+      {entries.map((entry) => {
+        const isFolder = entry.kind === "folder"
+        const isExpanded = isFolder && expandedFolders.has(entry.path)
+        const isSelected = selectedPath === entry.path
+        const { icon: Icon, className } = codexEntryIcon(entry)
+
+        return (
+          <div key={entry.path}>
+            <button
+              onClick={() => {
+                if (isFolder) {
+                  onToggleFolder(entry.path)
+                } else {
+                  onSelectFile({ path: entry.path, name: entry.name })
+                }
+              }}
+              className={cn(
+                "w-full flex items-center gap-1.5 px-2 py-1 rounded text-left transition-colors text-xs",
+                isSelected ? "bg-primary/15 text-primary" : "hover:bg-secondary/50 text-foreground/80",
+              )}
+              style={{ paddingLeft: `${8 + level * 12}px` }}
+            >
+              {isFolder ? (
+                <ChevronRight
+                  className={cn(
+                    "w-3 h-3 text-muted-foreground transition-transform flex-shrink-0",
+                    isExpanded && "rotate-90",
+                  )}
+                />
+              ) : (
+                <div className="w-3" />
+              )}
+              <Icon className={cn("w-3.5 h-3.5 flex-shrink-0", className)} />
+              <span className="truncate">{entry.name}</span>
+            </button>
+
+            {isFolder && isExpanded && entry.children.length > 0 && (
+              <CodexConfigTree
+                entries={entry.children}
+                level={level + 1}
+                selectedPath={selectedPath}
+                expandedFolders={expandedFolders}
+                onSelectFile={onSelectFile}
+                onToggleFolder={onToggleFolder}
+              />
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function CodexConfigEditor({
+  enabled,
+  saveStatus,
+  onSaveStatusChange,
+}: {
+  enabled: boolean
+  saveStatus: SaveStatus
+  onSaveStatusChange: (status: SaveStatus) => void
+}) {
+  const { getCodexConfigTree, readCodexConfigFile, writeCodexConfigFile } = useLuban()
+  const [tree, setTree] = useState<CodexConfigEntrySnapshot[]>([])
+  const [selectedFile, setSelectedFile] = useState<CodexSelectedFile | null>(null)
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set(["skills"]))
+  const [fileContents, setFileContents] = useState<Record<string, string>>({})
+  const saveTimeoutRef = useRef<number | null>(null)
+  const saveIdleTimeoutRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    if (!enabled) return
+    void getCodexConfigTree()
+      .then((entries) => setTree(entries))
+      .catch((err) => toast.error(err instanceof Error ? err.message : String(err)))
+  }, [enabled, getCodexConfigTree])
+
+  useEffect(() => {
+    return () => {
+      if (saveTimeoutRef.current != null) window.clearTimeout(saveTimeoutRef.current)
+      if (saveIdleTimeoutRef.current != null) window.clearTimeout(saveIdleTimeoutRef.current)
+    }
+  }, [])
+
+  const handleToggleFolder = (path: string) => {
+    setExpandedFolders((prev) => {
+      const next = new Set(prev)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      return next
+    })
+  }
+
+  const handleSelectFile = async (file: CodexSelectedFile) => {
+    setSelectedFile(file)
+    if (fileContents[file.path] != null) return
+    try {
+      const contents = await readCodexConfigFile(file.path)
+      setFileContents((prev) => ({ ...prev, [file.path]: contents }))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  const handleContentChange = (content: string) => {
+    if (!selectedFile) return
+
+    setFileContents((prev) => ({ ...prev, [selectedFile.path]: content }))
+    onSaveStatusChange("unsaved")
+
+    if (saveTimeoutRef.current != null) window.clearTimeout(saveTimeoutRef.current)
+    if (saveIdleTimeoutRef.current != null) window.clearTimeout(saveIdleTimeoutRef.current)
+
+    saveTimeoutRef.current = window.setTimeout(() => {
+      onSaveStatusChange("saving")
+      const path = selectedFile.path
+      void writeCodexConfigFile(path, content)
+        .then(() => {
+          onSaveStatusChange("saved")
+          saveIdleTimeoutRef.current = window.setTimeout(() => {
+            onSaveStatusChange("idle")
+          }, 1500)
+        })
+        .catch((err) => {
+          onSaveStatusChange("unsaved")
+          toast.error(err instanceof Error ? err.message : String(err))
+        })
+    }, 800)
+  }
+
+  const currentContent = selectedFile ? (fileContents[selectedFile.path] ?? "") : ""
+
+  return (
+    <div className="flex h-64 border-t border-border">
+      <div className="w-44 border-r border-border bg-secondary/20 overflow-y-auto py-1.5">
+        {tree.length === 0 ? (
+          <div className="px-2 py-1.5 text-xs text-muted-foreground">No config found.</div>
+        ) : (
+          <CodexConfigTree
+            entries={tree}
+            selectedPath={selectedFile?.path ?? null}
+            expandedFolders={expandedFolders}
+            onSelectFile={handleSelectFile}
+            onToggleFolder={handleToggleFolder}
+          />
+        )}
+      </div>
+
+      <div className="flex-1 overflow-hidden flex flex-col">
+        {selectedFile ? (
+          <textarea
+            data-testid="settings-codex-editor"
+            value={currentContent}
+            onChange={(e) => handleContentChange(e.target.value)}
+            className="flex-1 p-3 bg-background text-xs font-mono text-foreground/80 leading-relaxed resize-none focus:outline-none"
+            spellCheck={false}
+          />
+        ) : (
+          <div className="flex-1 flex items-center justify-center text-muted-foreground">
+            <div className="text-center">
+              <FileText className="w-8 h-8 mx-auto mb-2 opacity-30" />
+              <p className="text-xs">Select a file to edit</p>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function CodexSettings() {
+  const { app, setCodexEnabled, checkCodex, addProject } = useLuban()
+  const [enabled, setEnabled] = useState(true)
+  const [checkStatus, setCheckStatus] = useState<CheckStatus>("idle")
+  const [checkMessage, setCheckMessage] = useState<string | null>(null)
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle")
+
+  useEffect(() => {
+    const next = app?.agent?.codex_enabled ?? true
+    setEnabled(next)
+  }, [app?.rev])
+
+  const handleCheck = async (e: MouseEvent) => {
+    e.stopPropagation()
+    setCheckStatus("checking")
+    setCheckMessage(null)
+    try {
+      const res = await checkCodex()
+      setCheckStatus(res.ok ? "success" : "error")
+      setCheckMessage(res.message)
+    } catch (err) {
+      setCheckStatus("error")
+      setCheckMessage(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  const handleToggleEnabled = (e: MouseEvent) => {
+    e.stopPropagation()
+    const next = !enabled
+    setEnabled(next)
+    setCodexEnabled(next)
+  }
+
+  const handleEditInLuban = (e: MouseEvent) => {
+    e.stopPropagation()
+    addProject("~/.codex")
+    toast("Added ~/.codex as a project.")
+  }
+
+  return (
+    <div className="rounded-lg border border-border bg-card overflow-hidden">
+      <div className={cn("w-full flex items-center justify-between px-4 py-3 transition-colors", enabled ? "" : "opacity-60")}>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-black dark:bg-white text-white dark:text-black">
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+              <path d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.985 5.985 0 0 0-3.998 2.9 6.046 6.046 0 0 0 .743 7.097 5.98 5.98 0 0 0 4.529 2.094h.71l.147 1.02a2.5 2.5 0 0 0 2.478 2.149h5.02a2.5 2.5 0 0 0 2.478-2.149l.147-1.02h.71a5.98 5.98 0 0 0 4.529-2.094 6.046 6.046 0 0 0 1.0-4.457z" />
+            </svg>
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h4 className="text-sm font-medium">Codex</h4>
+              {checkStatus === "success" && (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-green-500/10 text-green-600 dark:text-green-400">
+                  <CheckCircle2 className="w-2.5 h-2.5" />
+                  Ready
+                </span>
+              )}
+              {checkStatus === "error" && (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-red-500/10 text-red-600 dark:text-red-400">
+                  <XCircle className="w-2.5 h-2.5" />
+                  Error
+                </span>
+              )}
+              {saveStatus !== "idle" && (
+                <span
+                  className={cn(
+                    "inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px]",
+                    saveStatus === "saved"
+                      ? "bg-green-500/10 text-green-600 dark:text-green-400"
+                      : "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+                  )}
+                >
+                  {saveStatus === "saving" && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
+                  {saveStatus === "saved" && <CheckCircle2 className="w-2.5 h-2.5" />}
+                  {saveStatus === "saving" ? "Saving..." : saveStatus === "unsaved" ? "Unsaved" : "Saved"}
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">OpenAI Codex CLI agent</p>
+            {checkMessage && <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-1">{checkMessage}</p>}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {enabled && (
+            <button
+              data-testid="settings-codex-check"
+              onClick={handleCheck}
+              disabled={checkStatus === "checking"}
+              className={cn(
+                "flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-all",
+                checkStatus === "checking"
+                  ? "bg-muted text-muted-foreground cursor-not-allowed"
+                  : "bg-secondary hover:bg-secondary/80 text-foreground",
+              )}
+            >
+              {checkStatus === "checking" ? (
+                <>
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  Checking...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="w-3 h-3" />
+                  Check
+                </>
+              )}
+            </button>
+          )}
+
+          {enabled && (
+            <button
+              data-testid="settings-codex-edit-in-luban"
+              onClick={handleEditInLuban}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+            >
+              <Pencil className="w-3 h-3" />
+              Edit in Luban
+            </button>
+          )}
+
+          <button
+            data-testid="settings-codex-toggle"
+            onClick={handleToggleEnabled}
+            className={cn("relative w-9 h-5 rounded-full transition-colors", enabled ? "bg-primary" : "bg-muted")}
+            title={enabled ? "Disable Codex" : "Enable Codex"}
+          >
+            <div
+              className={cn(
+                "absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform",
+                enabled ? "translate-x-4" : "translate-x-0.5",
+              )}
+            />
+          </button>
+        </div>
+      </div>
+
+      {enabled && <CodexConfigEditor enabled={enabled} saveStatus={saveStatus} onSaveStatusChange={setSaveStatus} />}
+    </div>
+  )
+}
+
+function AllSettings() {
   const { theme, setTheme } = useTheme()
   const { fonts, setFonts } = useAppearance()
   const { setAppearanceTheme, setAppearanceFonts } = useLuban()
@@ -509,6 +874,16 @@ function AppearanceSettings() {
           }}
         />
       </section>
+
+      <section id="agent" className="scroll-mt-8">
+        <h3 className="text-sm font-medium mb-4 flex items-center gap-2">
+          <Bot className="w-4 h-4 text-muted-foreground" />
+          Agent
+        </h3>
+        <div className="space-y-4">
+          <CodexSettings />
+        </div>
+      </section>
     </div>
   )
 }
@@ -558,13 +933,17 @@ export function SettingsPanel({ open, onOpenChange }: SettingsPanelProps) {
 
         <div className="flex-1 overflow-y-auto py-1.5">
           {tocItems.map((item) => {
+            const Icon = item.icon
             const isExpanded = expandedItems.has(item.id)
             const hasChildren = !!item.children?.length
 
             return (
               <div key={item.id}>
                 <div className="flex items-center hover:bg-sidebar-accent/50 transition-colors">
-                  <button onClick={() => hasChildren && toggleExpanded(item.id)} className="flex-1 flex items-center gap-2 px-3 py-1.5 text-left">
+                  <button
+                    onClick={() => (hasChildren ? toggleExpanded(item.id) : scrollToSection(item.id))}
+                    className="flex-1 flex items-center gap-2 px-3 py-1.5 text-left"
+                  >
                     {hasChildren ? (
                       isExpanded ? (
                         <ChevronDown className="w-3 h-3 text-muted-foreground flex-shrink-0" />
@@ -572,9 +951,16 @@ export function SettingsPanel({ open, onOpenChange }: SettingsPanelProps) {
                         <ChevronRight className="w-3 h-3 text-muted-foreground flex-shrink-0" />
                       )
                     ) : (
-                      <div className="w-3 h-3" />
+                      <Icon className="w-3 h-3 text-muted-foreground flex-shrink-0" />
                     )}
-                    <span className="text-sm text-muted-foreground truncate flex-1">{item.label}</span>
+                    <span
+                      className={cn(
+                        "text-sm truncate flex-1",
+                        !hasChildren && activeItem === item.id ? "text-foreground" : "text-muted-foreground",
+                      )}
+                    >
+                      {item.label}
+                    </span>
                   </button>
                 </div>
 
@@ -615,7 +1001,7 @@ export function SettingsPanel({ open, onOpenChange }: SettingsPanelProps) {
         </div>
         <div ref={contentRef} className="flex-1 overflow-y-auto p-8">
           <div className="max-w-4xl">
-            <AppearanceSettings />
+            <AllSettings />
           </div>
         </div>
       </div>

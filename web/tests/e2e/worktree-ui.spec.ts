@@ -98,6 +98,46 @@ test("creating a worktree auto-opens its conversation", async ({ page }) => {
   await expect(page.getByTestId("chat-input")).toBeFocused({ timeout: 20_000 })
 })
 
+test("non-git projects do not show worktree controls", async ({ page }) => {
+  await page.goto("/")
+
+  const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "luban-e2e-non-git-"))
+  fs.writeFileSync(path.join(projectDir, "notes.txt"), "hello\n", "utf8")
+  const projectPath = fs.realpathSync(projectDir)
+
+  await sendWsAction(page, { type: "add_project", path: projectPath })
+
+  const resolveProjectSlug = async () =>
+    await page.evaluate(async (projectDir) => {
+      const res = await fetch("/api/app")
+      if (!res.ok) return null
+      const app = (await res.json()) as { projects: { path: string; slug: string }[] }
+      return app.projects.find((p) => p.path === projectDir)?.slug ?? null
+    }, projectPath)
+
+  await expect.poll(async () => await resolveProjectSlug(), { timeout: 15_000 }).not.toBeNull()
+  const projectSlug = await resolveProjectSlug()
+  if (!projectSlug) throw new Error(`project slug not found for ${projectPath}`)
+
+  const projectToggle = page.getByRole("button", { name: projectSlug, exact: true })
+  await projectToggle.waitFor({ state: "visible", timeout: 15_000 })
+  const projectContainer = projectToggle.locator("..").locator("..")
+
+  await projectContainer.hover()
+  await expect(projectContainer.getByTitle("Add worktree")).toHaveCount(0)
+})
+
+test("settings panel exposes Codex agent settings", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  await page.getByTestId("sidebar-open-settings").click()
+  await expect(page.getByTestId("settings-panel")).toBeVisible({ timeout: 10_000 })
+
+  await page.getByRole("button", { name: "Agent", exact: true }).click()
+  await expect(page.getByText("Codex", { exact: true })).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByTestId("settings-codex-toggle")).toBeVisible({ timeout: 10_000 })
+})
+
 test("left sidebar does not allow horizontal scrolling", async ({ page }) => {
   await ensureWorkspace(page)
 
@@ -189,9 +229,6 @@ test("archiving a worktree shows an executing animation", async ({ page }) => {
   await projectToggle.waitFor({ state: "visible", timeout: 15_000 })
 
   const projectContainer = projectToggle.locator("..").locator("..")
-  if ((await projectContainer.getByTestId("worktree-branch-name").count()) === 0) {
-    await projectToggle.click()
-  }
 
   const projectId = await page.evaluate(async (projectDir) => {
     const res = await fetch("/api/app")
@@ -200,15 +237,6 @@ test("archiving a worktree shows an executing animation", async ({ page }) => {
     return app.projects.find((p) => p.path === projectDir)?.id ?? null
   }, projectPath)
   if (!projectId) throw new Error(`project id not found for ${projectPath}`)
-
-  const mainBranch = projectContainer.getByTestId("worktree-branch-name").first()
-  await mainBranch.click()
-
-  await expect
-    .poll(async () => (await page.evaluate(() => localStorage.getItem("luban:active_workspace_id"))) ?? "", {
-      timeout: 20_000,
-    })
-    .not.toBe("")
 
   await sendWsAction(page, { type: "create_workspace", project_id: projectId })
 
@@ -240,6 +268,22 @@ test("archiving a worktree shows an executing animation", async ({ page }) => {
   const resolved = await resolveWorkspace()
   if (!resolved) throw new Error("workspace not found after creation")
   const shortId = resolved.shortId
+
+  const ensureExpanded = async () => {
+    const count = await projectContainer
+      .getByTestId("worktree-short-id")
+      .filter({ hasText: shortId })
+      .count()
+    if (count > 0) return
+    await projectToggle.click()
+  }
+
+  await ensureExpanded()
+  await expect
+    .poll(async () => await projectContainer.getByTestId("worktree-short-id").filter({ hasText: shortId }).count(), {
+      timeout: 20_000,
+    })
+    .toBeGreaterThan(0)
   const row = projectContainer
     .getByTestId("worktree-short-id")
     .filter({ hasText: shortId })
@@ -249,8 +293,10 @@ test("archiving a worktree shows an executing animation", async ({ page }) => {
   await row.hover()
   await row.getByTitle("Archive worktree").click()
 
-  await expect(row.getByTestId("worktree-archiving-spinner")).toBeVisible({ timeout: 20_000 })
-  await expect(row).toHaveClass(/animate-pulse/, { timeout: 20_000 })
+  const spinner = row.getByTestId("worktree-archiving-spinner")
+  await expect(spinner).toBeVisible({ timeout: 20_000 })
+  const rowClass = await row.getAttribute("class")
+  expect(rowClass ?? "").toContain("animate-pulse")
 })
 
 test("sidebar resize gutter does not break header divider line", async ({ page }) => {

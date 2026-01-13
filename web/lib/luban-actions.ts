@@ -5,6 +5,7 @@ import type {
   AppearanceTheme,
   AttachmentRef,
   ClientAction,
+  CodexConfigEntrySnapshot,
   TaskDraft,
   TaskExecuteMode,
   TaskExecuteResult,
@@ -27,6 +28,11 @@ export type LubanActions = {
   openWorkspacePullRequestFailedAction: (workspaceId: WorkspaceId) => void
   archiveWorkspace: (workspaceId: number) => void
   toggleProjectExpanded: (projectId: number) => void
+  setCodexEnabled: (enabled: boolean) => void
+  checkCodex: () => Promise<{ ok: boolean; message: string | null }>
+  getCodexConfigTree: () => Promise<CodexConfigEntrySnapshot[]>
+  readCodexConfigFile: (path: string) => Promise<string>
+  writeCodexConfigFile: (path: string, contents: string) => Promise<void>
 
   previewTask: (input: string) => Promise<TaskDraft>
   executeTask: (draft: TaskDraft, mode: TaskExecuteMode) => Promise<TaskExecuteResult>
@@ -104,6 +110,26 @@ export function createLubanActions(args: {
       }
     })
     args.sendAction({ type: "toggle_project_expanded", project_id: projectId })
+  }
+
+  function setCodexEnabled(enabled: boolean) {
+    args.sendAction({ type: "codex_enabled_changed", enabled })
+  }
+
+  function checkCodex(): Promise<{ ok: boolean; message: string | null }> {
+    return args.request<{ ok: boolean; message: string | null }>({ type: "codex_check" })
+  }
+
+  function getCodexConfigTree(): Promise<CodexConfigEntrySnapshot[]> {
+    return args.request<CodexConfigEntrySnapshot[]>({ type: "codex_config_tree" })
+  }
+
+  function readCodexConfigFile(path: string): Promise<string> {
+    return args.request<string>({ type: "codex_config_read_file", path })
+  }
+
+  async function writeCodexConfigFile(path: string, contents: string): Promise<void> {
+    await args.request<null>({ type: "codex_config_write_file", path, contents })
   }
 
   function previewTask(input: string): Promise<TaskDraft> {
@@ -342,6 +368,11 @@ export function createLubanActions(args: {
     openWorkspacePullRequestFailedAction,
     archiveWorkspace,
     toggleProjectExpanded,
+    setCodexEnabled,
+    checkCodex,
+    getCodexConfigTree,
+    readCodexConfigFile,
+    writeCodexConfigFile,
     previewTask,
     executeTask,
     openWorkspace,

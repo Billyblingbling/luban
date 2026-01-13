@@ -214,26 +214,35 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
       </div>
 
       {/* Project List */}
-      <div data-testid="left-sidebar-scroll" className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain py-1.5">
-	        {projects.map((project) => {
-	          const activeCount = getActiveWorktreeCount(project.worktrees)
-	          const isCreating =
-	            project.createWorkspaceStatus === "running" || optimisticCreatingProjectId === project.id
-	          const isDeleting = deletingProjectId === project.id
-	          return (
+      <div
+        data-testid="left-sidebar-scroll"
+        className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain py-1.5"
+      >
+        {projects.map((project) => {
+          const activeCount = getActiveWorktreeCount(project.worktrees)
+          const isCreating =
+            project.createWorkspaceStatus === "running" || optimisticCreatingProjectId === project.id
+          const isDeleting = deletingProjectId === project.id
+          const hasWorktrees = project.worktrees.length > 0
+          const canExpand = project.isGit && hasWorktrees
+          return (
             <div
               key={project.id}
               className={cn("group/project", isDeleting && "animate-pulse opacity-50 pointer-events-none")}
             >
               <div className="flex items-center hover:bg-sidebar-accent/50 transition-colors">
                 <button
-                  onClick={() => toggleProjectExpanded(project.id)}
-                  className="flex-1 flex items-center gap-2 px-3 py-1.5 text-left"
+                  onClick={() => canExpand && toggleProjectExpanded(project.id)}
+                  className={cn("flex-1 flex items-center gap-2 px-3 py-1.5 text-left", !canExpand && "cursor-default")}
                 >
-                  {project.expanded ? (
-                    <ChevronDown className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+                  {canExpand ? (
+                    project.expanded ? (
+                      <ChevronDown className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+                    ) : (
+                      <ChevronRight className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+                    )
                   ) : (
-                    <ChevronRight className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+                    <span className="w-3 h-3 flex-shrink-0" />
                   )}
                   <span className="text-sm text-muted-foreground truncate flex-1" title={project.name}>
                     {project.name}
@@ -245,30 +254,32 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
                   )}
                 </button>
                 <div className="flex items-center gap-0.5 pr-2 opacity-0 group-hover/project:opacity-100 transition-opacity">
-                  <button
-                    className="p-1 text-muted-foreground hover:text-foreground transition-colors"
-                    title="Add worktree"
-                    onClick={() => {
-                      if (isCreating) return
-                      if (!project.expanded) {
-                        toggleProjectExpanded(project.id)
-                      }
-                      const fullProject = app?.projects.find((p) => p.id === project.id) ?? null
-                      const existingWorkspaceIds = new Set<number>(
-                        fullProject?.workspaces.map((w) => w.id) ?? project.worktrees.map((w) => w.workspaceId),
-                      )
-                      pendingCreateRef.current = { projectId: project.id, existingWorkspaceIds }
-                      setOptimisticCreatingProjectId(project.id)
-                      createWorkspace(project.id)
-                    }}
-                    disabled={isCreating}
-                  >
-                    {isCreating ? (
-                      <Loader2 className="w-4 h-4 animate-spin text-primary" />
-                    ) : (
-                      <Plus className="w-4 h-4" />
-                    )}
-                  </button>
+                  {project.isGit && (
+                    <button
+                      className="p-1 text-muted-foreground hover:text-foreground transition-colors"
+                      title="Add worktree"
+                      onClick={() => {
+                        if (isCreating) return
+                        if (!project.expanded) {
+                          toggleProjectExpanded(project.id)
+                        }
+                        const fullProject = app?.projects.find((p) => p.id === project.id) ?? null
+                        const existingWorkspaceIds = new Set<number>(
+                          fullProject?.workspaces.map((w) => w.id) ?? project.worktrees.map((w) => w.workspaceId),
+                        )
+                        pendingCreateRef.current = { projectId: project.id, existingWorkspaceIds }
+                        setOptimisticCreatingProjectId(project.id)
+                        createWorkspace(project.id)
+                      }}
+                      disabled={isCreating}
+                    >
+                      {isCreating ? (
+                        <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                      ) : (
+                        <Plus className="w-4 h-4" />
+                      )}
+                    </button>
+                  )}
                   <button
                     data-testid="project-delete-button"
                     onClick={() => setProjectToDelete({ id: project.id, name: project.name })}
@@ -279,9 +290,9 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
                     {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
                   </button>
                 </div>
-	              </div>
+              </div>
 
-	                  {project.expanded && (
+              {canExpand && project.expanded && (
 	                <div className="ml-4 pl-3 border-l border-border-subtle">
 	                  {project.worktrees.map((worktree, idx) => (
 	                    <div

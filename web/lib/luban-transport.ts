@@ -104,7 +104,11 @@ export function useLubanTransport(args: {
         if (
           event.type === "project_path_picked" ||
           event.type === "task_preview_ready" ||
-          event.type === "task_executed"
+          event.type === "task_executed" ||
+          event.type === "codex_check_ready" ||
+          event.type === "codex_config_tree_ready" ||
+          event.type === "codex_config_file_ready" ||
+          event.type === "codex_config_file_saved"
         ) {
           const pending = pendingResponsesRef.current.get(event.request_id)
           if (pending) {
@@ -112,6 +116,10 @@ export function useLubanTransport(args: {
             if (event.type === "project_path_picked") pending.resolve(event.path)
             if (event.type === "task_preview_ready") pending.resolve(event.draft)
             if (event.type === "task_executed") pending.resolve(event.result)
+            if (event.type === "codex_check_ready") pending.resolve({ ok: event.ok, message: event.message })
+            if (event.type === "codex_config_tree_ready") pending.resolve(event.tree)
+            if (event.type === "codex_config_file_ready") pending.resolve(event.contents)
+            if (event.type === "codex_config_file_saved") pending.resolve(null)
           }
           return
         }
@@ -141,4 +149,3 @@ export function useLubanTransport(args: {
 
   return { wsConnected, sendAction, request }
 }
-

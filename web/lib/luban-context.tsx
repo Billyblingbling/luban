@@ -10,6 +10,7 @@ import type {
   AppearanceFontsSnapshot,
   AppearanceTheme,
   AttachmentRef,
+  CodexConfigEntrySnapshot,
   ConversationSnapshot,
   ServerEvent,
   ThreadMeta,
@@ -71,6 +72,12 @@ type LubanContextValue = {
   setThinkingEffort: (workspaceId: WorkspaceId, threadId: WorkspaceThreadId, effort: ThinkingEffort) => void
   setAppearanceTheme: (theme: AppearanceTheme) => void
   setAppearanceFonts: (fonts: AppearanceFontsSnapshot) => void
+
+  setCodexEnabled: (enabled: boolean) => void
+  checkCodex: () => Promise<{ ok: boolean; message: string | null }>
+  getCodexConfigTree: () => Promise<CodexConfigEntrySnapshot[]>
+  readCodexConfigFile: (path: string) => Promise<string>
+  writeCodexConfigFile: (path: string, contents: string) => Promise<void>
 }
 
 const LubanContext = createContext<LubanContextValue | null>(null)
@@ -150,6 +157,11 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     setThinkingEffort: actions.setThinkingEffort,
     setAppearanceTheme: actions.setAppearanceTheme,
     setAppearanceFonts: actions.setAppearanceFonts,
+    setCodexEnabled: actions.setCodexEnabled,
+    checkCodex: actions.checkCodex,
+    getCodexConfigTree: actions.getCodexConfigTree,
+    readCodexConfigFile: actions.readCodexConfigFile,
+    writeCodexConfigFile: actions.writeCodexConfigFile,
   }
 
   return <LubanContext.Provider value={value}>{children}</LubanContext.Provider>
