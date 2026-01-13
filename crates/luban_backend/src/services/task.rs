@@ -341,50 +341,71 @@ fn compose_agent_prompt(
 
     out.push_str("\nGlobal constraints:\n");
     out.push_str("- Do NOT commit, push, open a pull request, create a PR review, or comment on the upstream issue/PR unless the user explicitly asks.\n");
-    out.push_str("- If changes are needed, provide a patch/diff and clear instructions for the user to apply.\n");
-    out.push_str(
-        "- Prefer minimal, reviewable steps and follow the target repository's conventions.\n",
-    );
+    out.push_str("- You MAY run commands, inspect files, search the web, and modify code directly in this worktree.\n");
+    out.push_str("- Prefer the smallest correct change that addresses the root cause and follows the target repository's conventions.\n");
+    out.push_str("- If you are about to do anything destructive or irreversible (delete data, rewrite history, force push, etc.), stop and ask the user first.\n");
+    out.push_str("- When you change behavior, run the repository's existing checks/tests and report what you ran and what passed.\n");
+
+    out.push_str("\nOperating mode:\n");
+    out.push_str("- First, assess whether this task is SIMPLE or COMPLEX.\n");
+    out.push_str("  - SIMPLE: the goal is clear and likely requires a small, isolated change.\n");
+    out.push_str("  - COMPLEX: ambiguous requirements, multiple plausible approaches, cross-module impact, or high risk.\n");
+    out.push_str("- If SIMPLE: proceed to complete it end-to-end.\n");
+    out.push_str("- If COMPLEX: prioritize discussion and planning before making large changes.\n");
+    out.push_str("  - Share your root-cause analysis or key uncertainties.\n");
+    out.push_str("  - Propose a concrete plan with milestones and verification steps.\n");
+    out.push_str("  - Ask the user to confirm the next action you should take.\n");
 
     out.push_str("\nInstructions:\n");
     match intent_kind {
         TaskIntentKind::FixIssue => {
+            out.push_str("- Goal: identify the root cause of the reported problem and fix it.\n");
+            out.push_str("- Suggested flow:\n");
             out.push_str(
-                "- Goal: reproduce the reported problem, identify the root cause, and fix it.\n",
+                "  1) Reproduce (or create a minimal reproduction) and localize the fault.\n",
             );
-            out.push_str("- Steps: find reproduction steps, narrow down the failing behavior, implement a minimal fix, and add/adjust tests to prevent regression.\n");
-            out.push_str("- Output: explain the root cause, the fix, tests/verification performed, and any remaining risks.\n");
+            out.push_str("  2) Explain the root cause in concrete terms (what/where/why).\n");
+            out.push_str(
+                "  3) Implement the minimal fix and add/adjust tests to prevent regressions.\n",
+            );
+            out.push_str("  4) Run the relevant verification and report results.\n");
+            out.push_str("- Output: root cause, fix summary, and verification.\n");
         }
         TaskIntentKind::ImplementFeature => {
-            out.push_str(
-                "- Goal: implement the requested feature with minimal, maintainable changes.\n",
-            );
-            out.push_str("- Steps: locate the correct extension points, implement the feature, update docs/tests if applicable, and verify with the repository's standard checks.\n");
-            out.push_str(
-                "- Output: describe behavior changes, how to verify, and any trade-offs.\n",
-            );
+            out.push_str("- Goal: implement the requested feature.\n");
+            out.push_str("- If requirements are unclear or the change is broad, propose a design/plan first and ask the user to confirm before implementing.\n");
+            out.push_str("- If requirements are clear and the change is small, implement it directly and verify.\n");
+            out.push_str("- Output: what changed (user-visible), key implementation notes, and verification.\n");
         }
         TaskIntentKind::ReviewPullRequest => {
-            out.push_str("- Goal: produce a high-quality code review. Do NOT implement changes unless explicitly requested.\n");
-            out.push_str("- Steps: understand the PR intent, review for correctness, security, performance, maintainability, and test coverage.\n");
-            out.push_str("- Output: a structured review with (1) summary, (2) major issues, (3) minor notes, (4) suggested tests, (5) questions.\n");
+            out.push_str(
+                "- Goal: produce a high-quality code review of the referenced pull request.\n",
+            );
+            out.push_str(
+                "- Constraints: Do NOT implement changes unless the user explicitly asks.\n",
+            );
+            out.push_str("- Steps: understand intent, evaluate correctness and edge cases, check tests/CI, identify risks, and suggest improvements.\n");
+            out.push_str("- Output: a structured review with actionable feedback, prioritized by severity.\n");
         }
         TaskIntentKind::ResolvePullRequestConflicts => {
             out.push_str(
                 "- Goal: resolve merge conflicts between the PR branch and the base branch.\n",
             );
-            out.push_str("- Steps: update the branch locally, resolve conflicts with minimal semantic changes, and verify with the repository's standard checks.\n");
-            out.push_str("- Output: list the conflicted files, explain key resolutions, and provide the final diff (without committing).\n");
+            out.push_str("- Steps: fetch latest upstream refs, resolve conflicts carefully, and run tests/verification.\n");
+            out.push_str(
+                "- Constraints: Do NOT push or open PRs unless the user explicitly asks.\n",
+            );
+            out.push_str("- Output: what conflicted, how you resolved it, and verification.\n");
         }
         TaskIntentKind::AddProject => {
-            out.push_str("- Goal: help initialize/onboard the project for further work.\n");
-            out.push_str("- Steps: inspect repository structure, find the standard build/test workflow, and validate the local setup.\n");
-            out.push_str("- Output: a concise project map and the recommended local workflow for future tasks.\n");
+            out.push_str("- Goal: initialize/onboard the specified project so it can be worked on locally.\n");
+            out.push_str("- Steps: ensure the project is available locally, verify prerequisites, run basic checks, and summarize how to get started.\n");
+            out.push_str("- Output: a concise setup guide and what was verified.\n");
         }
         TaskIntentKind::Other => {
-            out.push_str("- Goal: interpret the request, gather needed context from the repository, and propose a concrete plan.\n");
-            out.push_str("- Steps: summarize the intent, list assumptions, identify the relevant code areas, and propose next actions.\n");
-            out.push_str("- Output: a clear plan and, if feasible, a minimal implementation or a review (depending on what the request implies).\n");
+            out.push_str("- Goal: understand the user's request and move it forward.\n");
+            out.push_str("- Steps: summarize intent, identify unknowns, propose next actions, and proceed if it is SIMPLE.\n");
+            out.push_str("- Output: either an end-to-end completion (SIMPLE) or a plan + a request for the user's next instruction (COMPLEX).\n");
         }
     }
 
@@ -760,6 +781,10 @@ mod tests {
             "prompt must include global no-commit/no-pr constraint"
         );
         assert!(
+            !prompt.contains("provide a patch") && !prompt.contains("patch/diff"),
+            "prompt must not require patch/diff output for code agents"
+        );
+        assert!(
             !prompt.contains("`just") && !prompt.contains("\njust "),
             "prompt must not include luban-specific just commands"
         );
@@ -837,7 +862,8 @@ mod tests {
             &None,
             &None,
         );
-        assert!(fix.contains("Goal: reproduce"), "{fix}");
+        assert!(fix.contains("Goal: identify the root cause"), "{fix}");
+        assert!(fix.contains("Operating mode:"), "{fix}");
         assert_global_constraints(&fix);
 
         let feature = compose_agent_prompt(
@@ -877,7 +903,11 @@ mod tests {
             &None,
             &None,
         );
-        assert!(conflicts.contains("resolve merge conflicts"), "{conflicts}");
+        assert!(
+            conflicts.contains("resolve merge conflicts")
+                || conflicts.contains("resolve conflicts"),
+            "{conflicts}"
+        );
         assert_global_constraints(&conflicts);
 
         let add_project = compose_agent_prompt(
@@ -888,12 +918,15 @@ mod tests {
             &None,
             &None,
         );
-        assert!(add_project.contains("initialize/onboard"), "{add_project}");
+        assert!(
+            add_project.contains("initialize/onboard") || add_project.contains("onboard"),
+            "{add_project}"
+        );
         assert_global_constraints(&add_project);
 
         let other =
             compose_agent_prompt(input, TaskIntentKind::Other, &project, &None, &None, &None);
-        assert!(other.contains("propose a concrete plan"), "{other}");
+        assert!(other.contains("move it forward"), "{other}");
         assert_global_constraints(&other);
     }
 }

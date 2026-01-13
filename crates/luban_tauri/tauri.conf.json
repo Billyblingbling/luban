@@ -9,12 +9,9 @@
     }
   },
   "build": {
-    "frontendDist": "../../web/out"
+    "frontendDist": "web_stub"
   },
   "bundle": {
-    "active": false,
-    "resources": [
-      "../../web/out"
-    ]
+    "active": false
   }
 }
