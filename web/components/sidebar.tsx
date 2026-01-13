@@ -230,23 +230,43 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
           const isCreating =
             project.createWorkspaceStatus === "running" || optimisticCreatingProjectId === project.id
           const isDeleting = deletingProjectId === project.id
-          const hasWorktrees = project.worktrees.length > 0
-          const canExpand = project.isGit && hasWorktrees
+          const standaloneMainWorktree =
+            project.isGit && project.worktrees.length === 1 && project.worktrees[0]?.isHome
+              ? project.worktrees[0]
+              : null
+          const canExpand = project.isGit && project.worktrees.length > 1
           const isExpanded = canExpand && project.expanded
           const standaloneStatus = canExpand
             ? null
-            : deriveStandaloneProjectStatus({ isCreating, isGit: project.isGit })
+            : standaloneMainWorktree?.agentStatus ??
+              deriveStandaloneProjectStatus({ isCreating, isGit: project.isGit })
+          const isStandaloneMainActive =
+            standaloneMainWorktree != null && standaloneMainWorktree.workspaceId === activeWorkspaceId
           return (
             <div
               key={project.id}
               className={cn("group/project", isDeleting && "animate-pulse opacity-50 pointer-events-none")}
             >
-              <div className="flex items-center hover:bg-sidebar-accent/50 transition-colors">
+              <div
+                className={cn(
+                  "flex items-center hover:bg-sidebar-accent/50 transition-colors",
+                  isStandaloneMainActive && "bg-sidebar-accent/30",
+                )}
+              >
                 <button
-                  onClick={() => canExpand && toggleProjectExpanded(project.id)}
+                  data-testid={standaloneMainWorktree ? "project-main-only-entry" : undefined}
+                  onClick={() => {
+                    if (canExpand) {
+                      toggleProjectExpanded(project.id)
+                      return
+                    }
+                    if (standaloneMainWorktree) {
+                      void openWorkspace(standaloneMainWorktree.workspaceId)
+                    }
+                  }}
                   className={cn(
                     "flex-1 flex items-center gap-2 px-3 py-1.5 text-left",
-                    !canExpand && "cursor-default",
+                    !canExpand && !standaloneMainWorktree && "cursor-default",
                   )}
                 >
                   {canExpand ? (
@@ -265,7 +285,7 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
                   <span className="text-sm text-muted-foreground truncate flex-1" title={project.name}>
                     {project.name}
                   </span>
-                  {!isExpanded && activeCount > 0 && (
+                  {canExpand && !isExpanded && activeCount > 0 && (
                     <span className="text-xs px-1.5 py-0.5 rounded-full bg-primary/20 text-primary font-medium">
                       {activeCount}
                     </span>

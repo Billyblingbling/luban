@@ -166,6 +166,98 @@ test("git projects without worktrees show standalone agent status icon", async (
   await expect(projectContainer.getByTitle("Add worktree")).toHaveCount(1)
 })
 
+test("git projects with only main worktree render as a standalone entry", async ({ page }) => {
+  await page.goto("/")
+
+  const remoteDir = fs.mkdtempSync(path.join(os.tmpdir(), "luban-e2e-main-only-origin-"))
+  execSync("git init --bare", { cwd: remoteDir, stdio: "ignore" })
+
+  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "luban-e2e-main-only-"))
+  const projectDir = path.join(repoRoot, "repo")
+  execSync(`git clone "${remoteDir}" "${projectDir}"`, { stdio: "ignore" })
+
+  fs.writeFileSync(path.join(projectDir, "README.md"), "e2e\n", "utf8")
+  execSync("git checkout -b main", { cwd: projectDir, stdio: "ignore" })
+  execSync('git config user.email "e2e@example.com"', { cwd: projectDir, stdio: "ignore" })
+  execSync('git config user.name "e2e"', { cwd: projectDir, stdio: "ignore" })
+  execSync("git add -A", { cwd: projectDir, stdio: "ignore" })
+  execSync('git commit -m "init"', { cwd: projectDir, stdio: "ignore" })
+  execSync("git push -u origin main", { cwd: projectDir, stdio: "ignore" })
+  execSync("git symbolic-ref HEAD refs/heads/main", { cwd: remoteDir, stdio: "ignore" })
+  execSync("git fetch --prune origin", { cwd: projectDir, stdio: "ignore" })
+  execSync("git remote set-head origin -a", { cwd: projectDir, stdio: "ignore" })
+
+  const projectPath = fs.realpathSync(projectDir)
+  await sendWsAction(page, { type: "add_project", path: projectPath })
+
+  const resolveProjectSlug = async () =>
+    await page.evaluate(async (projectDir) => {
+      const res = await fetch("/api/app")
+      if (!res.ok) return null
+      const app = (await res.json()) as { projects: { path: string; slug: string }[] }
+      return app.projects.find((p) => p.path === projectDir)?.slug ?? null
+    }, projectPath)
+
+  await expect.poll(async () => await resolveProjectSlug(), { timeout: 15_000 }).not.toBeNull()
+  const projectSlug = await resolveProjectSlug()
+  if (!projectSlug) throw new Error(`project slug not found for ${projectPath}`)
+
+  const projectToggle = page.getByRole("button", { name: projectSlug, exact: true })
+  await projectToggle.waitFor({ state: "visible", timeout: 15_000 })
+  const projectContainer = projectToggle.locator("..").locator("..")
+
+  await projectContainer.hover()
+  await projectContainer.getByTitle("Add worktree").click()
+
+  const branches = projectContainer.getByTestId("worktree-branch-name")
+  await branches.first().waitFor({ timeout: 90_000 })
+
+  const ids = await page.evaluate(async (projectDir) => {
+    const res = await fetch("/api/app")
+    if (!res.ok) return null
+    const app = (await res.json()) as {
+      projects: {
+        id: number
+        path: string
+        workspaces: { id: number; status: string; workspace_name: string; worktree_path: string }[]
+      }[]
+    }
+    const project = app.projects.find((p) => p.path === projectDir)
+    if (!project) return null
+    const main = project.workspaces.find((w) => w.status === "active" && w.workspace_name === "main" && w.worktree_path === project.path)
+    const nonMain = project.workspaces.filter((w) => w.status === "active" && !(w.workspace_name === "main" && w.worktree_path === project.path))
+    return { projectId: project.id, mainId: main?.id ?? null, nonMainIds: nonMain.map((w) => w.id) }
+  }, projectPath)
+  if (!ids || !ids.mainId || ids.nonMainIds.length === 0) throw new Error("expected main and non-main workspaces")
+
+  for (const wid of ids.nonMainIds) {
+    await sendWsAction(page, { type: "archive_workspace", workspace_id: wid })
+  }
+
+  await expect.poll(async () => {
+    return await page.evaluate(async (projectDir) => {
+      const res = await fetch("/api/app")
+      if (!res.ok) return null
+      const app = (await res.json()) as {
+        projects: { path: string; workspaces: { id: number; status: string }[] }[]
+      }
+      const project = app.projects.find((p) => p.path === projectDir)
+      if (!project) return null
+      return project.workspaces.filter((w) => w.status === "active").length
+    }, projectPath)
+  }, { timeout: 90_000 }).toBe(1)
+
+  await expect(projectContainer.getByTestId("project-main-only-entry")).toBeVisible({ timeout: 15_000 })
+  await expect(projectContainer.getByTestId("worktree-branch-name")).toHaveCount(0)
+
+  await projectToggle.click()
+  await expect
+    .poll(async () => (await page.evaluate(() => localStorage.getItem("luban:active_workspace_id"))) ?? "", {
+      timeout: 20_000,
+    })
+    .toBe(String(ids.mainId))
+})
+
 test("settings panel exposes Codex agent settings", async ({ page }) => {
   await ensureWorkspace(page)
 
