@@ -27,6 +27,7 @@ import { focusChatInput } from "@/lib/focus-chat-input"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { SettingsPanel } from "@/components/settings-panel"
+import type { AgentStatus } from "@/lib/worktree-ui"
 
 interface SidebarProps {
   viewMode: "workspace" | "kanban"
@@ -167,6 +168,12 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
     return worktrees.filter((w) => w.agentStatus !== "idle" || w.prStatus !== "none").length
   }
 
+  const deriveStandaloneProjectStatus = (args: { isCreating: boolean; isGit: boolean }): AgentStatus | null => {
+    if (!args.isGit) return "idle"
+    if (args.isCreating) return "running"
+    return "idle"
+  }
+
   const handleAddProjectClick = async () => {
     try {
       const picked = await pickProjectPath()
@@ -225,6 +232,10 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
           const isDeleting = deletingProjectId === project.id
           const hasWorktrees = project.worktrees.length > 0
           const canExpand = project.isGit && hasWorktrees
+          const isExpanded = canExpand && project.expanded
+          const standaloneStatus = canExpand
+            ? null
+            : deriveStandaloneProjectStatus({ isCreating, isGit: project.isGit })
           return (
             <div
               key={project.id}
@@ -233,21 +244,28 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
               <div className="flex items-center hover:bg-sidebar-accent/50 transition-colors">
                 <button
                   onClick={() => canExpand && toggleProjectExpanded(project.id)}
-                  className={cn("flex-1 flex items-center gap-2 px-3 py-1.5 text-left", !canExpand && "cursor-default")}
+                  className={cn(
+                    "flex-1 flex items-center gap-2 px-3 py-1.5 text-left",
+                    !canExpand && "cursor-default",
+                  )}
                 >
                   {canExpand ? (
-                    project.expanded ? (
+                    isExpanded ? (
                       <ChevronDown className="w-3 h-3 text-muted-foreground flex-shrink-0" />
                     ) : (
                       <ChevronRight className="w-3 h-3 text-muted-foreground flex-shrink-0" />
                     )
+                  ) : standaloneStatus ? (
+                    <span data-testid="project-agent-status-icon">
+                      <AgentStatusIcon status={standaloneStatus} size="xs" />
+                    </span>
                   ) : (
                     <span className="w-3 h-3 flex-shrink-0" />
                   )}
                   <span className="text-sm text-muted-foreground truncate flex-1" title={project.name}>
                     {project.name}
                   </span>
-                  {!project.expanded && activeCount > 0 && (
+                  {!isExpanded && activeCount > 0 && (
                     <span className="text-xs px-1.5 py-0.5 rounded-full bg-primary/20 text-primary font-medium">
                       {activeCount}
                     </span>
@@ -261,18 +279,18 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
                       onClick={() => {
                         if (isCreating) return
                         if (!project.expanded) {
-                          toggleProjectExpanded(project.id)
-                        }
-                        const fullProject = app?.projects.find((p) => p.id === project.id) ?? null
-                        const existingWorkspaceIds = new Set<number>(
+                        toggleProjectExpanded(project.id)
+                      }
+                      const fullProject = app?.projects.find((p) => p.id === project.id) ?? null
+                      const existingWorkspaceIds = new Set<number>(
                           fullProject?.workspaces.map((w) => w.id) ?? project.worktrees.map((w) => w.workspaceId),
                         )
                         pendingCreateRef.current = { projectId: project.id, existingWorkspaceIds }
                         setOptimisticCreatingProjectId(project.id)
-                        createWorkspace(project.id)
-                      }}
-                      disabled={isCreating}
-                    >
+                      createWorkspace(project.id)
+                    }}
+                    disabled={isCreating}
+                  >
                       {isCreating ? (
                         <Loader2 className="w-4 h-4 animate-spin text-primary" />
                       ) : (
@@ -292,26 +310,26 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
                 </div>
               </div>
 
-              {canExpand && project.expanded && (
-	                <div className="ml-4 pl-3 border-l border-border-subtle">
-	                  {project.worktrees.map((worktree, idx) => (
-	                    <div
-	                      key={worktree.workspaceId}
-	                      className={cn(
-	                        "group/worktree flex items-center gap-2 px-2 py-1.5 hover:bg-sidebar-accent/30 transition-all cursor-pointer rounded mx-1",
-	                        worktree.workspaceId === activeWorkspaceId && "bg-sidebar-accent/30",
-	                        newlyCreatedWorkspaceId === worktree.workspaceId &&
-	                          "animate-in slide-in-from-left-2 fade-in duration-300 bg-primary/15 ring-1 ring-primary/30",
-                          worktree.isArchiving && "animate-pulse opacity-50 pointer-events-none",
-	                      )}
-	                      style={{
-	                        animationDelay:
-	                          newlyCreatedWorkspaceId === worktree.workspaceId ? "0ms" : `${idx * 30}ms`,
-	                      }}
-	                      onClick={() => {
-	                        void openWorkspace(worktree.workspaceId)
-	                      }}
-	                    >
+              {isExpanded && (
+                <div className="ml-4 pl-3 border-l border-border-subtle">
+                  {project.worktrees.map((worktree, idx) => (
+                    <div
+                      key={worktree.workspaceId}
+                      className={cn(
+                        "group/worktree flex items-center gap-2 px-2 py-1.5 hover:bg-sidebar-accent/30 transition-all cursor-pointer rounded mx-1",
+                        worktree.workspaceId === activeWorkspaceId && "bg-sidebar-accent/30",
+                        newlyCreatedWorkspaceId === worktree.workspaceId &&
+                          "animate-in slide-in-from-left-2 fade-in duration-300 bg-primary/15 ring-1 ring-primary/30",
+                        worktree.isArchiving && "animate-pulse opacity-50 pointer-events-none",
+                      )}
+                      style={{
+                        animationDelay:
+                          newlyCreatedWorkspaceId === worktree.workspaceId ? "0ms" : `${idx * 30}ms`,
+                      }}
+                      onClick={() => {
+                        void openWorkspace(worktree.workspaceId)
+                      }}
+                    >
                         {worktree.isArchiving ? (
                           <Loader2
                             data-testid="worktree-archiving-spinner"
@@ -374,22 +392,22 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
 	                          <Archive className="w-3 h-3" />
 	                        </button>
 	                      )}
-	                    </div>
-	                  ))}
+                    </div>
+                  ))}
 
-	                  {isCreating && (
-	                    <div className="flex items-center gap-2 px-2 py-1.5 mx-1 animate-pulse">
-	                      <div className="flex flex-col flex-1 gap-1">
-	                        <div className="flex items-center gap-1.5">
-	                          <div className="w-3 h-3 rounded bg-muted-foreground/20" />
-	                          <div className="h-3 w-20 rounded bg-muted-foreground/20" />
-	                        </div>
-	                        <div className="h-2.5 w-8 ml-4 rounded bg-muted-foreground/15" />
-	                      </div>
-	                    </div>
-	                  )}
-	                </div>
-	              )}
+                  {isCreating && (
+                    <div className="flex items-center gap-2 px-2 py-1.5 mx-1 animate-pulse">
+                      <div className="flex flex-col flex-1 gap-1">
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-3 h-3 rounded bg-muted-foreground/20" />
+                          <div className="h-3 w-20 rounded bg-muted-foreground/20" />
+                        </div>
+                        <div className="h-2.5 w-8 ml-4 rounded bg-muted-foreground/15" />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 	            </div>
 	          )
 	        })}

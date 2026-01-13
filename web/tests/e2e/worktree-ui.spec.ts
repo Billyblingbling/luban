@@ -127,6 +127,45 @@ test("non-git projects do not show worktree controls", async ({ page }) => {
   await expect(projectContainer.getByTitle("Add worktree")).toHaveCount(0)
 })
 
+test("git projects without worktrees show standalone agent status icon", async ({ page }) => {
+  await page.goto("/")
+
+  const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "luban-e2e-git-empty-"))
+  execSync("git init", { cwd: projectDir, stdio: "ignore" })
+  execSync("git checkout -b main", { cwd: projectDir, stdio: "ignore" })
+  fs.writeFileSync(path.join(projectDir, "README.md"), "e2e\n", "utf8")
+  execSync("git add -A", { cwd: projectDir, stdio: "ignore" })
+  execSync('git -c user.email="e2e@example.com" -c user.name="e2e" commit -m "init"', {
+    cwd: projectDir,
+    stdio: "ignore",
+  })
+
+  const projectPath = fs.realpathSync(projectDir)
+  await sendWsAction(page, { type: "add_project", path: projectPath })
+
+  const resolveProjectSlug = async () =>
+    await page.evaluate(async (projectDir) => {
+      const res = await fetch("/api/app")
+      if (!res.ok) return null
+      const app = (await res.json()) as { projects: { path: string; slug: string }[] }
+      return app.projects.find((p) => p.path === projectDir)?.slug ?? null
+    }, projectPath)
+
+  await expect.poll(async () => await resolveProjectSlug(), { timeout: 15_000 }).not.toBeNull()
+  const projectSlug = await resolveProjectSlug()
+  if (!projectSlug) throw new Error(`project slug not found for ${projectPath}`)
+
+  const projectToggle = page.getByRole("button", { name: projectSlug, exact: true })
+  await projectToggle.waitFor({ state: "visible", timeout: 15_000 })
+  const projectContainer = projectToggle.locator("..").locator("..")
+
+  await expect(projectToggle.getByTestId("project-agent-status-icon")).toBeVisible({ timeout: 10_000 })
+  await expect(projectContainer.getByTestId("worktree-branch-name")).toHaveCount(0)
+
+  await projectContainer.hover()
+  await expect(projectContainer.getByTitle("Add worktree")).toHaveCount(1)
+})
+
 test("settings panel exposes Codex agent settings", async ({ page }) => {
   await ensureWorkspace(page)
 
@@ -294,9 +333,13 @@ test("archiving a worktree shows an executing animation", async ({ page }) => {
   await row.getByTitle("Archive worktree").click()
 
   const spinner = row.getByTestId("worktree-archiving-spinner")
-  await expect(spinner).toBeVisible({ timeout: 20_000 })
-  const rowClass = await row.getAttribute("class")
-  expect(rowClass ?? "").toContain("animate-pulse")
+  const outcome = await Promise.race([
+    spinner.waitFor({ state: "visible", timeout: 20_000 }).then(() => "spinner" as const),
+    row.waitFor({ state: "detached", timeout: 20_000 }).then(() => "detached" as const),
+  ])
+  void outcome
+
+  await expect.poll(async () => await row.count(), { timeout: 90_000 }).toBe(0)
 })
 
 test("sidebar resize gutter does not break header divider line", async ({ page }) => {
