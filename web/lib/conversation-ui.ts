@@ -6,6 +6,7 @@ import type {
   ConversationSnapshot,
   ThinkingEffort,
 } from "./luban-api"
+import { AGENT_MODELS } from "./agent-settings"
 
 export interface ActivityEvent {
   id: string
@@ -53,14 +54,12 @@ export function formatDurationMs(ms: number): string {
 
 export function agentModelLabel(modelId: string | null | undefined): string {
   if (!modelId) return "Model"
-  if (modelId === "gpt-5.2") return "GPT-5.2"
-  if (modelId === "gpt-5.2-codex") return "GPT-5.2-Codex"
-  if (modelId === "gpt-5.1-codex-max") return "GPT-5.1-Codex-Max"
-  return modelId
+  return AGENT_MODELS.find((m) => m.id === modelId)?.label ?? modelId
 }
 
 export function thinkingEffortLabel(effort: ThinkingEffort | null | undefined): string {
   if (!effort) return "Effort"
+  if (effort === "minimal") return "Minimal"
   if (effort === "low") return "Low"
   if (effort === "medium") return "Medium"
   if (effort === "high") return "High"

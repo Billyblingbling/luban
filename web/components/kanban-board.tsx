@@ -5,23 +5,22 @@ import type React from "react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import {
   ArrowRight,
-  Brain,
   ChevronDown,
   FolderGit2,
   LayoutGrid,
   Loader2,
   Send,
-  Settings2,
   X,
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { useLuban } from "@/lib/luban-context"
 import { fetchConversation, fetchThreads } from "@/lib/luban-http"
-import { agentModelLabel, buildMessages, thinkingEffortLabel, type Message } from "@/lib/conversation-ui"
+import { buildMessages, type Message } from "@/lib/conversation-ui"
 import type { ConversationEntry, ConversationSnapshot } from "@/lib/luban-api"
 import { ConversationView } from "@/components/conversation-view"
 import { AgentStatusIcon, PRBadge } from "@/components/shared/status-indicator"
+import { CodexAgentSelector } from "@/components/shared/agent-selector"
 import { buildKanbanBoardVm, type KanbanWorktreeVm } from "@/lib/kanban-view-model"
 import { kanbanColumns, type KanbanColumn } from "@/lib/worktree-ui"
 import { pickThreadId } from "@/lib/thread-ui"
@@ -83,7 +82,7 @@ function WorktreePreviewPanel({
   onClose: () => void
   onNavigate: () => void
 }) {
-  const { sendAgentMessageTo } = useLuban()
+  const { sendAgentMessageTo, setChatModel, setThinkingEffort } = useLuban()
 
   const [input, setInput] = useState("")
   const [isLoading, setIsLoading] = useState(false)
@@ -93,9 +92,6 @@ function WorktreePreviewPanel({
   const seqRef = useRef(0)
 
   const messages: Message[] = useMemo(() => buildMessages(conversation), [conversation])
-  const modelLabel = useMemo(() => agentModelLabel(conversation?.agent_model_id), [conversation?.agent_model_id])
-  const effortLabel = useMemo(() => thinkingEffortLabel(conversation?.thinking_effort), [conversation?.thinking_effort])
-
   useEffect(() => {
     const workspaceId = worktree.workspaceId
     const seq = (seqRef.current += 1)
@@ -213,17 +209,23 @@ function WorktreePreviewPanel({
       </div>
 
       <div className="border-t border-border p-3">
-        <div className="flex items-center gap-2 mb-2">
-          <button className="inline-flex items-center gap-1 px-1.5 py-0.5 hover:bg-muted rounded text-[10px] text-muted-foreground hover:text-foreground transition-colors">
-            <Settings2 className="w-3 h-3" />
-            {modelLabel}
-          </button>
-          <button className="inline-flex items-center gap-1 px-1.5 py-0.5 hover:bg-muted rounded text-[10px] text-muted-foreground hover:text-foreground transition-colors">
-            <Brain className="w-3 h-3" />
-            {effortLabel}
-          </button>
-        </div>
         <div className="flex items-center gap-2 bg-muted/30 rounded-lg border border-border focus-within:border-primary/50 transition-colors">
+          <div className="pl-1.5 py-1">
+            <CodexAgentSelector
+              dropdownPosition="top"
+              disabled={threadId == null}
+              modelId={conversation?.agent_model_id}
+              thinkingEffort={conversation?.thinking_effort}
+              onChangeModelId={(modelId) => {
+                if (threadId == null) return
+                setChatModel(worktree.workspaceId, threadId, modelId)
+              }}
+              onChangeThinkingEffort={(effort) => {
+                if (threadId == null) return
+                setThinkingEffort(worktree.workspaceId, threadId, effort)
+              }}
+            />
+          </div>
           <input
             type="text"
             value={input}

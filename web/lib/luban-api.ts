@@ -158,7 +158,7 @@ export type ConversationSnapshot = {
 
 export type OperationStatus = "idle" | "running"
 
-export type ThinkingEffort = "low" | "medium" | "high" | "xhigh"
+export type ThinkingEffort = "minimal" | "low" | "medium" | "high" | "xhigh"
 
 export type TaskIntentKind =
   | "fix_issue"

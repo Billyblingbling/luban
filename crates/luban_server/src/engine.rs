@@ -845,6 +845,7 @@ impl Engine {
             thread_id,
             agent_model_id: default_agent_model_id().to_owned(),
             thinking_effort: match default_thinking_effort() {
+                ThinkingEffort::Minimal => luban_api::ThinkingEffort::Minimal,
                 ThinkingEffort::Low => luban_api::ThinkingEffort::Low,
                 ThinkingEffort::Medium => luban_api::ThinkingEffort::Medium,
                 ThinkingEffort::High => luban_api::ThinkingEffort::High,
@@ -1449,6 +1450,7 @@ impl Engine {
             thread_id,
             agent_model_id: conversation.agent_model_id.clone(),
             thinking_effort: match conversation.thinking_effort {
+                ThinkingEffort::Minimal => luban_api::ThinkingEffort::Minimal,
                 ThinkingEffort::Low => luban_api::ThinkingEffort::Low,
                 ThinkingEffort::Medium => luban_api::ThinkingEffort::Medium,
                 ThinkingEffort::High => luban_api::ThinkingEffort::High,
@@ -1885,6 +1887,7 @@ fn map_client_action(action: luban_api::ClientAction) -> Option<Action> {
             workspace_id: WorkspaceId::from_u64(workspace_id.0),
             thread_id: WorkspaceThreadId::from_u64(thread_id.0),
             thinking_effort: match thinking_effort {
+                luban_api::ThinkingEffort::Minimal => ThinkingEffort::Minimal,
                 luban_api::ThinkingEffort::Low => ThinkingEffort::Low,
                 luban_api::ThinkingEffort::Medium => ThinkingEffort::Medium,
                 luban_api::ThinkingEffort::High => ThinkingEffort::High,

@@ -1,5 +1,6 @@
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum ThinkingEffort {
+    Minimal,
     Low,
     Medium,
     High,
@@ -7,7 +8,8 @@ pub enum ThinkingEffort {
 }
 
 impl ThinkingEffort {
-    pub const ALL: [ThinkingEffort; 4] = [
+    pub const ALL: [ThinkingEffort; 5] = [
+        ThinkingEffort::Minimal,
         ThinkingEffort::Low,
         ThinkingEffort::Medium,
         ThinkingEffort::High,
@@ -16,6 +18,7 @@ impl ThinkingEffort {
 
     pub fn as_str(self) -> &'static str {
         match self {
+            ThinkingEffort::Minimal => "minimal",
             ThinkingEffort::Low => "low",
             ThinkingEffort::Medium => "medium",
             ThinkingEffort::High => "high",
@@ -25,6 +28,7 @@ impl ThinkingEffort {
 
     pub fn label(self) -> &'static str {
         match self {
+            ThinkingEffort::Minimal => "Minimal",
             ThinkingEffort::Low => "Low",
             ThinkingEffort::Medium => "Medium",
             ThinkingEffort::High => "High",
@@ -35,6 +39,9 @@ impl ThinkingEffort {
 
 pub fn parse_thinking_effort(value: &str) -> Option<ThinkingEffort> {
     let value = value.trim();
+    if value.eq_ignore_ascii_case("minimal") {
+        return Some(ThinkingEffort::Minimal);
+    }
     if value.eq_ignore_ascii_case("low") {
         return Some(ThinkingEffort::Low);
     }
@@ -57,21 +64,31 @@ pub struct AgentModelSpec {
     pub supported_thinking_efforts: &'static [ThinkingEffort],
 }
 
-const GPT_52_EFFORTS: &[ThinkingEffort] = &[
+const STANDARD_EFFORTS: &[ThinkingEffort] = &[
+    ThinkingEffort::Minimal,
     ThinkingEffort::Low,
     ThinkingEffort::Medium,
     ThinkingEffort::High,
     ThinkingEffort::XHigh,
 ];
 
-const GPT_52_CODEX_EFFORTS: &[ThinkingEffort] = &[
+const CODEX_MAX_EFFORTS: &[ThinkingEffort] = &[
+    ThinkingEffort::Minimal,
+    ThinkingEffort::Medium,
+    ThinkingEffort::High,
+    ThinkingEffort::XHigh,
+];
+
+const CODEX_STANDARD_EFFORTS: &[ThinkingEffort] = &[
+    ThinkingEffort::Minimal,
     ThinkingEffort::Low,
     ThinkingEffort::Medium,
     ThinkingEffort::High,
     ThinkingEffort::XHigh,
 ];
 
-const GPT_51_CODEX_MAX_EFFORTS: &[ThinkingEffort] = &[
+const BASE_MODEL_EFFORTS: &[ThinkingEffort] = &[
+    ThinkingEffort::Minimal,
     ThinkingEffort::Low,
     ThinkingEffort::Medium,
     ThinkingEffort::High,
@@ -82,17 +99,47 @@ const AGENT_MODELS: &[AgentModelSpec] = &[
     AgentModelSpec {
         id: "gpt-5.2",
         label: "GPT-5.2",
-        supported_thinking_efforts: GPT_52_EFFORTS,
+        supported_thinking_efforts: BASE_MODEL_EFFORTS,
     },
     AgentModelSpec {
         id: "gpt-5.2-codex",
         label: "GPT-5.2-Codex",
-        supported_thinking_efforts: GPT_52_CODEX_EFFORTS,
+        supported_thinking_efforts: CODEX_STANDARD_EFFORTS,
     },
     AgentModelSpec {
         id: "gpt-5.1-codex-max",
         label: "GPT-5.1-Codex-Max",
-        supported_thinking_efforts: GPT_51_CODEX_MAX_EFFORTS,
+        supported_thinking_efforts: CODEX_MAX_EFFORTS,
+    },
+    AgentModelSpec {
+        id: "gpt-5.1-codex-mini",
+        label: "GPT-5.1-Codex-Mini",
+        supported_thinking_efforts: CODEX_STANDARD_EFFORTS,
+    },
+    AgentModelSpec {
+        id: "gpt-5.1",
+        label: "GPT-5.1",
+        supported_thinking_efforts: BASE_MODEL_EFFORTS,
+    },
+    AgentModelSpec {
+        id: "gpt-5.1-codex",
+        label: "GPT-5.1-Codex",
+        supported_thinking_efforts: CODEX_STANDARD_EFFORTS,
+    },
+    AgentModelSpec {
+        id: "gpt-5-codex",
+        label: "GPT-5-Codex",
+        supported_thinking_efforts: CODEX_STANDARD_EFFORTS,
+    },
+    AgentModelSpec {
+        id: "gpt-5-codex-mini",
+        label: "GPT-5-Codex-Mini",
+        supported_thinking_efforts: CODEX_STANDARD_EFFORTS,
+    },
+    AgentModelSpec {
+        id: "gpt-5",
+        label: "GPT-5",
+        supported_thinking_efforts: STANDARD_EFFORTS,
     },
 ];
 
