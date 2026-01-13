@@ -98,6 +98,24 @@ test("creating a worktree auto-opens its conversation", async ({ page }) => {
   await expect(page.getByTestId("chat-input")).toBeFocused({ timeout: 20_000 })
 })
 
+test("left sidebar does not allow horizontal scrolling", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  const scroll = page.getByTestId("left-sidebar-scroll")
+
+  await expect
+    .poll(async () => await scroll.evaluate((el) => getComputedStyle(el).overflowX), { timeout: 5_000 })
+    .toBe("hidden")
+
+  await scroll.hover()
+  const before = await scroll.evaluate((el) => el.scrollLeft)
+  await page.mouse.wheel(200, 0)
+  const after = await scroll.evaluate((el) => el.scrollLeft)
+
+  expect(before).toBe(0)
+  expect(after).toBe(0)
+})
+
 test("changes panel opens unified diff tab", async ({ page }) => {
   await ensureWorkspace(page)
 

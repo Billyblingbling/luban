@@ -192,7 +192,8 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
 
   return (
     <aside
-      className="flex-shrink-0 border-r border-border bg-sidebar flex flex-col"
+      data-testid="left-sidebar"
+      className="flex-shrink-0 border-r border-border bg-sidebar flex flex-col overflow-x-hidden"
       style={{ width: `${widthPx}px` }}
     >
       <div className="flex items-center justify-between h-11 px-3 border-b border-border">
@@ -213,7 +214,7 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
       </div>
 
       {/* Project List */}
-      <div className="flex-1 overflow-y-auto overscroll-contain py-1.5">
+      <div data-testid="left-sidebar-scroll" className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain py-1.5">
 	        {projects.map((project) => {
 	          const activeCount = getActiveWorktreeCount(project.worktrees)
 	          const isCreating =
