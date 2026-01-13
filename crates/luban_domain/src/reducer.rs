@@ -7,8 +7,8 @@ use crate::{
     Action, AgentRunConfig, AppState, CodexThreadEvent, ConversationEntry, DraftAttachment, Effect,
     MainPane, OperationStatus, PersistedAppState, Project, ProjectId, QueuedPrompt, RightPane,
     ThinkingEffort, Workspace, WorkspaceConversation, WorkspaceId, WorkspaceStatus, WorkspaceTabs,
-    WorkspaceThreadId, default_agent_model_id, default_thinking_effort, normalize_thinking_effort,
-    thinking_effort_supported,
+    WorkspaceThreadId, default_agent_model_id, default_task_prompt_templates,
+    default_thinking_effort, normalize_thinking_effort, thinking_effort_supported,
 };
 use std::collections::VecDeque;
 use std::{
@@ -42,6 +42,7 @@ impl AppState {
             workspace_chat_scroll_y10: HashMap::new(),
             workspace_chat_scroll_anchor: HashMap::new(),
             workspace_unread_completions: HashSet::new(),
+            task_prompt_templates: default_task_prompt_templates(),
         }
     }
 
@@ -893,6 +894,25 @@ impl AppState {
                 self.agent_codex_enabled = enabled;
                 vec![Effect::SaveAppState]
             }
+            Action::TaskPromptTemplateChanged {
+                intent_kind,
+                template,
+            } => {
+                let trimmed = template.trim();
+                if trimmed.is_empty() {
+                    return Vec::new();
+                }
+                let existing = self
+                    .task_prompt_templates
+                    .get(&intent_kind)
+                    .map(|t| t.as_str());
+                if existing == Some(trimmed) {
+                    return Vec::new();
+                }
+                self.task_prompt_templates
+                    .insert(intent_kind, trimmed.to_owned());
+                vec![Effect::SaveAppState]
+            }
             Action::WorkspaceChatScrollSaved {
                 workspace_id,
                 thread_id,
@@ -1721,6 +1741,7 @@ mod tests {
                 workspace_chat_scroll_y10: HashMap::new(),
                 workspace_chat_scroll_anchor: HashMap::new(),
                 workspace_unread_completions: HashMap::new(),
+                task_prompt_templates: HashMap::new(),
             }),
         });
         assert_eq!(state.terminal_pane_width, Some(480));
@@ -1759,6 +1780,7 @@ mod tests {
                 workspace_chat_scroll_y10: HashMap::new(),
                 workspace_chat_scroll_anchor: HashMap::new(),
                 workspace_unread_completions: HashMap::new(),
+                task_prompt_templates: HashMap::new(),
             }),
         });
         assert_eq!(state.sidebar_width, Some(360));
@@ -1799,6 +1821,7 @@ mod tests {
                 workspace_chat_scroll_y10: HashMap::new(),
                 workspace_chat_scroll_anchor: HashMap::new(),
                 workspace_unread_completions: HashMap::new(),
+                task_prompt_templates: HashMap::new(),
             }),
         });
         assert_eq!(restored.appearance_theme, crate::AppearanceTheme::Light);

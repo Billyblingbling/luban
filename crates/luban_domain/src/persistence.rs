@@ -4,7 +4,10 @@ use crate::{
     PersistedAppState, PersistedProject, PersistedWorkspace, Project, ProjectId, RightPane,
     Workspace, WorkspaceId, WorkspaceStatus, WorkspaceTabs, WorkspaceThreadId,
 };
-use crate::{default_agent_model_id, default_thinking_effort, normalize_thinking_effort};
+use crate::{
+    TaskIntentKind, default_agent_model_id, default_task_prompt_templates, default_thinking_effort,
+    normalize_thinking_effort,
+};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::{Duration, UNIX_EPOCH};
@@ -40,6 +43,24 @@ pub(crate) fn apply_persisted_app_state(
     state.agent_default_model_id = agent_default_model_id;
     state.agent_default_thinking_effort = agent_default_thinking_effort;
     state.agent_codex_enabled = persisted.agent_codex_enabled.unwrap_or(true);
+
+    let mut templates = default_task_prompt_templates();
+    for (key, template) in persisted.task_prompt_templates.iter() {
+        let normalized = key.trim().to_ascii_lowercase();
+        let kind = TaskIntentKind::ALL
+            .iter()
+            .copied()
+            .find(|kind| kind.as_key() == normalized);
+        let Some(kind) = kind else {
+            continue;
+        };
+        let trimmed = template.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        templates.insert(kind, trimmed.to_owned());
+    }
+    state.task_prompt_templates = templates;
 
     let (projects, projects_upgraded) = load_projects(persisted.projects);
     state.projects = projects;
@@ -290,6 +311,11 @@ pub(crate) fn to_persisted_app_state(state: &AppState) -> PersistedAppState {
             .workspace_unread_completions
             .iter()
             .map(|workspace_id| (workspace_id.0, true))
+            .collect(),
+        task_prompt_templates: state
+            .task_prompt_templates
+            .iter()
+            .map(|(kind, template)| (kind.as_key().to_owned(), template.clone()))
             .collect(),
     }
 }

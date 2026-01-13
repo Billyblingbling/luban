@@ -274,7 +274,7 @@ export function NewTaskModal({ open, onOpenChange }: NewTaskModalProps) {
                       <ChevronRight
                         className={cn("w-3 h-3 transition-transform duration-200", promptExpanded && "rotate-90")}
                       />
-                      <span>Suggested prompt</span>
+                      <span>Task prompts</span>
                     </button>
                     <div
                       className={cn(

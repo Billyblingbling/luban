@@ -22,11 +22,21 @@ export type AgentSettingsSnapshot = {
   codex_enabled: boolean
 }
 
+export type TaskPromptTemplateSnapshot = {
+  intent_kind: TaskIntentKind
+  template: string
+}
+
+export type TaskSettingsSnapshot = {
+  prompt_templates: TaskPromptTemplateSnapshot[]
+}
+
 export type AppSnapshot = {
   rev: number
   projects: ProjectSnapshot[]
   appearance: AppearanceSnapshot
   agent: AgentSettingsSnapshot
+  task: TaskSettingsSnapshot
 }
 
 export type ProjectSnapshot = {
@@ -290,6 +300,7 @@ export type ClientAction =
   | { type: "appearance_theme_changed"; theme: AppearanceTheme }
   | { type: "appearance_fonts_changed"; fonts: AppearanceFontsSnapshot }
   | { type: "codex_enabled_changed"; enabled: boolean }
+  | { type: "task_prompt_template_changed"; intent_kind: TaskIntentKind; template: string }
   | { type: "codex_check" }
   | { type: "codex_config_tree" }
   | { type: "codex_config_read_file"; path: string }

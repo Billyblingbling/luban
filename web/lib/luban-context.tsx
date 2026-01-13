@@ -17,6 +17,7 @@ import type {
   TaskDraft,
   TaskExecuteMode,
   TaskExecuteResult,
+  TaskIntentKind,
   ThinkingEffort,
   WorkspaceId,
   WorkspaceThreadId,
@@ -74,6 +75,7 @@ type LubanContextValue = {
   setAppearanceFonts: (fonts: AppearanceFontsSnapshot) => void
 
   setCodexEnabled: (enabled: boolean) => void
+  setTaskPromptTemplate: (intentKind: TaskIntentKind, template: string) => void
   checkCodex: () => Promise<{ ok: boolean; message: string | null }>
   getCodexConfigTree: () => Promise<CodexConfigEntrySnapshot[]>
   readCodexConfigFile: (path: string) => Promise<string>
@@ -158,6 +160,7 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     setAppearanceTheme: actions.setAppearanceTheme,
     setAppearanceFonts: actions.setAppearanceFonts,
     setCodexEnabled: actions.setCodexEnabled,
+    setTaskPromptTemplate: actions.setTaskPromptTemplate,
     checkCodex: actions.checkCodex,
     getCodexConfigTree: actions.getCodexConfigTree,
     readCodexConfigFile: actions.readCodexConfigFile,

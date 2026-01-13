@@ -1,7 +1,7 @@
 use crate::{
     AppearanceTheme, AttachmentRef, ChatScrollAnchor, CodexThreadEvent, ContextTokenKind,
-    ConversationSnapshot, ConversationThreadMeta, PersistedAppState, ProjectId, ThinkingEffort,
-    WorkspaceId, WorkspaceThreadId,
+    ConversationSnapshot, ConversationThreadMeta, PersistedAppState, ProjectId, TaskIntentKind,
+    ThinkingEffort, WorkspaceId, WorkspaceThreadId,
 };
 use std::path::PathBuf;
 
@@ -204,6 +204,10 @@ pub enum Action {
     },
     AgentCodexEnabledChanged {
         enabled: bool,
+    },
+    TaskPromptTemplateChanged {
+        intent_kind: TaskIntentKind,
+        template: String,
     },
     WorkspaceChatScrollSaved {
         workspace_id: WorkspaceId,

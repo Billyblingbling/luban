@@ -6,6 +6,7 @@ import type {
   AttachmentRef,
   ClientAction,
   CodexConfigEntrySnapshot,
+  TaskIntentKind,
   TaskDraft,
   TaskExecuteMode,
   TaskExecuteResult,
@@ -29,6 +30,7 @@ export type LubanActions = {
   archiveWorkspace: (workspaceId: number) => void
   toggleProjectExpanded: (projectId: number) => void
   setCodexEnabled: (enabled: boolean) => void
+  setTaskPromptTemplate: (intentKind: TaskIntentKind, template: string) => void
   checkCodex: () => Promise<{ ok: boolean; message: string | null }>
   getCodexConfigTree: () => Promise<CodexConfigEntrySnapshot[]>
   readCodexConfigFile: (path: string) => Promise<string>
@@ -114,6 +116,28 @@ export function createLubanActions(args: {
 
   function setCodexEnabled(enabled: boolean) {
     args.sendAction({ type: "codex_enabled_changed", enabled })
+  }
+
+  function setTaskPromptTemplate(intentKind: TaskIntentKind, template: string) {
+    const trimmed = template.trim()
+    if (!trimmed) return
+
+    store.setApp((prev) => {
+      if (!prev) return prev
+      const existing = prev.task?.prompt_templates ?? []
+      const nextTemplates = [...existing]
+      const idx = nextTemplates.findIndex((t) => t.intent_kind === intentKind)
+      if (idx >= 0) nextTemplates[idx] = { intent_kind: intentKind, template: trimmed }
+      else nextTemplates.push({ intent_kind: intentKind, template: trimmed })
+      return {
+        ...prev,
+        task: {
+          prompt_templates: nextTemplates,
+        },
+      }
+    })
+
+    args.sendAction({ type: "task_prompt_template_changed", intent_kind: intentKind, template: trimmed })
   }
 
   function checkCodex(): Promise<{ ok: boolean; message: string | null }> {
@@ -369,6 +393,7 @@ export function createLubanActions(args: {
     archiveWorkspace,
     toggleProjectExpanded,
     setCodexEnabled,
+    setTaskPromptTemplate,
     checkCodex,
     getCodexConfigTree,
     readCodexConfigFile,

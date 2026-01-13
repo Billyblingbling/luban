@@ -21,6 +21,8 @@ pub struct AppSnapshot {
     pub appearance: AppearanceSnapshot,
     #[serde(default)]
     pub agent: AgentSettingsSnapshot,
+    #[serde(default)]
+    pub task: TaskSettingsSnapshot,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -40,6 +42,18 @@ impl Default for AgentSettingsSnapshot {
             codex_enabled: true,
         }
     }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct TaskSettingsSnapshot {
+    #[serde(default)]
+    pub prompt_templates: Vec<TaskPromptTemplateSnapshot>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TaskPromptTemplateSnapshot {
+    pub intent_kind: TaskIntentKind,
+    pub template: String,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -514,6 +528,10 @@ pub enum ClientAction {
     },
     CodexEnabledChanged {
         enabled: bool,
+    },
+    TaskPromptTemplateChanged {
+        intent_kind: TaskIntentKind,
+        template: String,
     },
     CodexCheck,
     CodexConfigTree,

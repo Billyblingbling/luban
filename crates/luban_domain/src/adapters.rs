@@ -59,7 +59,7 @@ pub struct RunAgentTurnRequest {
     pub model_reasoning_effort: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum TaskIntentKind {
     FixIssue,
     ImplementFeature,
@@ -67,6 +67,50 @@ pub enum TaskIntentKind {
     ResolvePullRequestConflicts,
     AddProject,
     Other,
+}
+
+impl TaskIntentKind {
+    pub const ALL: [TaskIntentKind; 6] = [
+        TaskIntentKind::FixIssue,
+        TaskIntentKind::ImplementFeature,
+        TaskIntentKind::ReviewPullRequest,
+        TaskIntentKind::ResolvePullRequestConflicts,
+        TaskIntentKind::AddProject,
+        TaskIntentKind::Other,
+    ];
+
+    pub fn as_key(self) -> &'static str {
+        match self {
+            TaskIntentKind::FixIssue => "fix_issue",
+            TaskIntentKind::ImplementFeature => "implement_feature",
+            TaskIntentKind::ReviewPullRequest => "review_pull_request",
+            TaskIntentKind::ResolvePullRequestConflicts => "resolve_pull_request_conflicts",
+            TaskIntentKind::AddProject => "add_project",
+            TaskIntentKind::Other => "other",
+        }
+    }
+
+    pub fn parse_key(raw: &str) -> TaskIntentKind {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "fix_issue" => TaskIntentKind::FixIssue,
+            "implement_feature" => TaskIntentKind::ImplementFeature,
+            "review_pull_request" => TaskIntentKind::ReviewPullRequest,
+            "resolve_pull_request_conflicts" => TaskIntentKind::ResolvePullRequestConflicts,
+            "add_project" => TaskIntentKind::AddProject,
+            _ => TaskIntentKind::Other,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            TaskIntentKind::FixIssue => "Fix issue",
+            TaskIntentKind::ImplementFeature => "Implement feature",
+            TaskIntentKind::ReviewPullRequest => "Review pull request",
+            TaskIntentKind::ResolvePullRequestConflicts => "Resolve pull request conflicts",
+            TaskIntentKind::AddProject => "Add project",
+            TaskIntentKind::Other => "Other",
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

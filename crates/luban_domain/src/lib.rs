@@ -27,10 +27,12 @@ mod effects;
 pub use effects::Effect;
 mod agent_settings;
 pub mod paths;
+mod task_prompts;
 pub use agent_settings::{
     AgentModelSpec, ThinkingEffort, agent_model_label, agent_models, default_agent_model_id,
     default_thinking_effort, normalize_thinking_effort, thinking_effort_supported,
 };
+pub use task_prompts::{default_task_prompt_template, default_task_prompt_templates};
 mod dashboard;
 pub use dashboard::{
     DashboardCardModel, DashboardPreviewMessage, DashboardPreviewModel, DashboardStage,

@@ -1428,6 +1428,20 @@ impl Engine {
             agent: luban_api::AgentSettingsSnapshot {
                 codex_enabled: self.state.agent_codex_enabled(),
             },
+            task: luban_api::TaskSettingsSnapshot {
+                prompt_templates: luban_domain::TaskIntentKind::ALL
+                    .iter()
+                    .copied()
+                    .filter_map(|kind| {
+                        self.state.task_prompt_templates.get(&kind).map(|template| {
+                            luban_api::TaskPromptTemplateSnapshot {
+                                intent_kind: map_task_intent_kind(kind),
+                                template: template.clone(),
+                            }
+                        })
+                    })
+                    .collect(),
+            },
         }
     }
 
@@ -1967,6 +1981,26 @@ fn map_client_action(action: luban_api::ClientAction) -> Option<Action> {
         luban_api::ClientAction::CodexEnabledChanged { enabled } => {
             Some(Action::AgentCodexEnabledChanged { enabled })
         }
+        luban_api::ClientAction::TaskPromptTemplateChanged {
+            intent_kind,
+            template,
+        } => Some(Action::TaskPromptTemplateChanged {
+            intent_kind: match intent_kind {
+                luban_api::TaskIntentKind::FixIssue => luban_domain::TaskIntentKind::FixIssue,
+                luban_api::TaskIntentKind::ImplementFeature => {
+                    luban_domain::TaskIntentKind::ImplementFeature
+                }
+                luban_api::TaskIntentKind::ReviewPullRequest => {
+                    luban_domain::TaskIntentKind::ReviewPullRequest
+                }
+                luban_api::TaskIntentKind::ResolvePullRequestConflicts => {
+                    luban_domain::TaskIntentKind::ResolvePullRequestConflicts
+                }
+                luban_api::TaskIntentKind::AddProject => luban_domain::TaskIntentKind::AddProject,
+                luban_api::TaskIntentKind::Other => luban_domain::TaskIntentKind::Other,
+            },
+            template,
+        }),
         luban_api::ClientAction::CodexCheck
         | luban_api::ClientAction::CodexConfigTree
         | luban_api::ClientAction::CodexConfigReadFile { .. }
@@ -2204,6 +2238,7 @@ mod tests {
                 workspace_chat_scroll_y10: HashMap::new(),
                 workspace_chat_scroll_anchor: HashMap::new(),
                 workspace_unread_completions: HashMap::new(),
+                task_prompt_templates: HashMap::new(),
             })
         }
 
@@ -2627,6 +2662,7 @@ mod tests {
                 workspace_chat_scroll_y10: HashMap::new(),
                 workspace_chat_scroll_anchor: HashMap::new(),
                 workspace_unread_completions: HashMap::new(),
+                task_prompt_templates: HashMap::new(),
             })
         }
 
@@ -2877,6 +2913,7 @@ mod tests {
                 workspace_chat_scroll_y10: HashMap::new(),
                 workspace_chat_scroll_anchor: HashMap::new(),
                 workspace_unread_completions: HashMap::new(),
+                task_prompt_templates: HashMap::new(),
             })
         }
 

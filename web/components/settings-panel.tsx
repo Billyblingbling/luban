@@ -10,6 +10,13 @@ import {
   ChevronRight,
   Bot,
   CheckCircle2,
+  CirclePlus,
+  GitMerge,
+  GitPullRequest,
+  Lightbulb,
+  ListTodo,
+  MessageSquare,
+  Bug,
   FileCode,
   FileText,
   Folder,
@@ -30,7 +37,7 @@ import { toast } from "sonner"
 import { useAppearance } from "@/components/appearance-provider"
 import { useLuban } from "@/lib/luban-context"
 import { cn } from "@/lib/utils"
-import type { AppearanceTheme, CodexConfigEntrySnapshot } from "@/lib/luban-api"
+import type { AppearanceTheme, CodexConfigEntrySnapshot, TaskIntentKind } from "@/lib/luban-api"
 
 interface SettingsPanelProps {
   open: boolean
@@ -58,6 +65,11 @@ const tocItems: TocItem[] = [
     id: "agent",
     label: "Agent",
     icon: Bot,
+  },
+  {
+    id: "task",
+    label: "Task",
+    icon: ListTodo,
   },
 ]
 
@@ -794,8 +806,100 @@ function CodexSettings() {
 function AllSettings() {
   const { theme, setTheme } = useTheme()
   const { fonts, setFonts } = useAppearance()
-  const { setAppearanceTheme, setAppearanceFonts } = useLuban()
+  const { app, setAppearanceTheme, setAppearanceFonts, setTaskPromptTemplate } = useLuban()
   const resolvedTheme = theme ?? "system"
+
+  const TaskPromptEditor = () => {
+    const templates = app?.task?.prompt_templates ?? []
+    const templateByKind = useRef(new Map<TaskIntentKind, string>())
+    templateByKind.current = new Map(templates.map((t) => [t.intent_kind, t.template]))
+
+    const kinds: { kind: TaskIntentKind; label: string; icon: ElementType }[] = [
+      { kind: "fix_issue", label: "Fix", icon: Bug },
+      { kind: "implement_feature", label: "Implement", icon: Lightbulb },
+      { kind: "review_pull_request", label: "Review", icon: GitPullRequest },
+      { kind: "resolve_pull_request_conflicts", label: "Conflicts", icon: GitMerge },
+      { kind: "add_project", label: "Add project", icon: CirclePlus },
+      { kind: "other", label: "Other", icon: MessageSquare },
+    ]
+
+    const [selected, setSelected] = useState<TaskIntentKind>("fix_issue")
+    const [value, setValue] = useState(() => templateByKind.current.get("fix_issue") ?? "")
+    const saveTimerRef = useRef<number | null>(null)
+
+    useEffect(() => {
+      setValue(templateByKind.current.get(selected) ?? "")
+    }, [selected, app?.rev])
+
+    useEffect(() => {
+      if (saveTimerRef.current != null) {
+        window.clearTimeout(saveTimerRef.current)
+      }
+      if (!value.trim()) return
+
+      saveTimerRef.current = window.setTimeout(() => {
+        setTaskPromptTemplate(selected, value)
+      }, 800)
+
+      return () => {
+        if (saveTimerRef.current != null) {
+          window.clearTimeout(saveTimerRef.current)
+        }
+      }
+    }, [selected, value, setTaskPromptTemplate])
+
+    return (
+      <div data-testid="task-prompt-editor" className="border border-border rounded-xl overflow-hidden bg-card shadow-sm">
+        <div className="flex items-center gap-1 px-3 py-2 bg-muted/50 border-b border-border overflow-x-auto">
+          {kinds.map(({ kind, label, icon: Icon }) => {
+            const isSelected = selected === kind
+            return (
+              <button
+                key={kind}
+                data-testid={`task-prompt-tab-${kind}`}
+                onClick={() => setSelected(kind)}
+                className={cn(
+                  "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap",
+                  isSelected
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted",
+                )}
+              >
+                <Icon className="w-3.5 h-3.5" />
+                {label}
+              </button>
+            )
+          })}
+        </div>
+
+        <div className="flex divide-x divide-border h-[320px]">
+          <div className="flex-1 flex flex-col min-w-0">
+            <textarea
+              data-testid="task-prompt-template"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              className="flex-1 w-full bg-transparent text-xs font-mono leading-relaxed resize-none focus:outline-none text-foreground p-3"
+              spellCheck={false}
+              placeholder="Edit the task prompt template..."
+            />
+          </div>
+          <div className="w-64 flex flex-col bg-muted/20">
+            <div className="px-3 py-2 border-b border-border bg-muted/30">
+              <span className="text-xs font-medium text-muted-foreground">Variables</span>
+            </div>
+            <div className="p-3 space-y-2 text-xs text-muted-foreground">
+              <div className="font-mono">{"{{task_input}}"}</div>
+              <div className="font-mono">{"{{intent_label}}"}</div>
+              <div className="font-mono">{"{{known_context}}"}</div>
+              <p className="text-[11px] leading-relaxed">
+                Templates are rendered when creating a new task. Unknown variables are left as-is.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-12">
@@ -883,6 +987,14 @@ function AllSettings() {
         <div className="space-y-4">
           <CodexSettings />
         </div>
+      </section>
+
+      <section id="task" className="scroll-mt-8">
+        <h3 className="text-sm font-medium mb-4 flex items-center gap-2">
+          <ListTodo className="w-4 h-4 text-muted-foreground" />
+          Task
+        </h3>
+        <TaskPromptEditor />
       </section>
     </div>
   )

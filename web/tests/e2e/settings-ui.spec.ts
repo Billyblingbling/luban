@@ -51,3 +51,34 @@ test("settings panel updates theme and appearance fonts", async ({ page }) => {
     )
     .toBe("Roboto")
 })
+
+test("task prompt templates persist across reload", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  await page.getByTestId("sidebar-open-settings").click()
+  await expect(page.getByTestId("settings-panel")).toBeVisible({ timeout: 10_000 })
+
+  await page.getByRole("button", { name: "Task", exact: true }).click()
+  await expect(page.getByTestId("task-prompt-editor")).toBeVisible({ timeout: 10_000 })
+
+  await page.getByTestId("task-prompt-tab-other").click()
+  const textarea = page.getByTestId("task-prompt-template")
+  const original = await textarea.inputValue()
+
+  const marker = `e2e-marker-${Date.now()}`
+  await textarea.fill(`${original}\n${marker}\n`)
+
+  await page.waitForTimeout(1500)
+  await page.reload()
+
+  await page.getByTestId("sidebar-open-settings").click()
+  await expect(page.getByTestId("settings-panel")).toBeVisible({ timeout: 10_000 })
+
+  await page.getByRole("button", { name: "Task", exact: true }).click()
+  await page.getByTestId("task-prompt-tab-other").click()
+  await expect(page.getByTestId("task-prompt-template")).toContainText(marker, { timeout: 10_000 })
+
+  await page.getByTestId("task-prompt-template").fill(original)
+  await page.waitForTimeout(1200)
+  await page.getByTitle("Close settings").click()
+})

@@ -21,6 +21,7 @@ const LAST_OPEN_WORKSPACE_ID_KEY: &str = "last_open_workspace_id";
 const AGENT_DEFAULT_MODEL_ID_KEY: &str = "agent_default_model_id";
 const AGENT_DEFAULT_THINKING_EFFORT_KEY: &str = "agent_default_thinking_effort";
 const AGENT_CODEX_ENABLED_KEY: &str = "agent_codex_enabled";
+const TASK_PROMPT_TEMPLATE_PREFIX: &str = "task_prompt_template_";
 const APPEARANCE_THEME_KEY: &str = "appearance_theme";
 const APPEARANCE_UI_FONT_KEY: &str = "appearance_ui_font";
 const APPEARANCE_CHAT_FONT_KEY: &str = "appearance_chat_font";
@@ -745,6 +746,24 @@ impl SqliteDatabase {
             .context("failed to load agent codex enabled flag")?
             .map(|value| value != 0);
 
+        let mut task_prompt_templates = HashMap::new();
+        let mut stmt = self.conn.prepare(
+            "SELECT key, value FROM app_settings_text WHERE key LIKE 'task_prompt_template_%'",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (key, value) = row?;
+            let Some(kind) = key.strip_prefix(TASK_PROMPT_TEMPLATE_PREFIX) else {
+                continue;
+            };
+            if kind.trim().is_empty() || value.trim().is_empty() {
+                continue;
+            }
+            task_prompt_templates.insert(kind.to_owned(), value);
+        }
+
         if !self.persist_ui_state {
             return Ok(PersistedAppState {
                 projects,
@@ -766,6 +785,7 @@ impl SqliteDatabase {
                 workspace_chat_scroll_y10: HashMap::new(),
                 workspace_chat_scroll_anchor: HashMap::new(),
                 workspace_unread_completions: HashMap::new(),
+                task_prompt_templates,
             });
         }
 
@@ -1095,6 +1115,7 @@ impl SqliteDatabase {
             workspace_chat_scroll_y10,
             workspace_chat_scroll_anchor,
             workspace_unread_completions,
+            task_prompt_templates,
         })
     }
 
@@ -1372,6 +1393,26 @@ impl SqliteDatabase {
             tx.execute(
                 "DELETE FROM app_settings WHERE key = ?1",
                 params![AGENT_CODEX_ENABLED_KEY],
+            )?;
+        }
+
+        tx.execute(
+            "DELETE FROM app_settings_text WHERE key LIKE 'task_prompt_template_%'",
+            [],
+        )?;
+        for (kind, template) in &snapshot.task_prompt_templates {
+            let key = format!("{TASK_PROMPT_TEMPLATE_PREFIX}{kind}");
+            let trimmed = template.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            tx.execute(
+                "INSERT INTO app_settings_text (key, value, created_at, updated_at)
+                 VALUES (?1, ?2, COALESCE((SELECT created_at FROM app_settings_text WHERE key = ?1), ?3), ?3)
+                 ON CONFLICT(key) DO UPDATE SET
+                   value = excluded.value,
+                   updated_at = excluded.updated_at",
+                params![key, trimmed, now],
             )?;
         }
 
@@ -2091,6 +2132,10 @@ mod tests {
                 },
             )]),
             workspace_unread_completions: HashMap::from([(10, true)]),
+            task_prompt_templates: HashMap::from([(
+                "fix_issue".to_owned(),
+                "Fix issue template override".to_owned(),
+            )]),
         };
 
         db.save_app_state(&snapshot).unwrap();
@@ -2138,6 +2183,7 @@ mod tests {
             workspace_chat_scroll_y10: HashMap::new(),
             workspace_chat_scroll_anchor: HashMap::new(),
             workspace_unread_completions: HashMap::new(),
+            task_prompt_templates: HashMap::new(),
         };
         db.save_app_state(&snapshot).unwrap();
 
@@ -2205,6 +2251,7 @@ mod tests {
             workspace_chat_scroll_y10: HashMap::new(),
             workspace_chat_scroll_anchor: HashMap::new(),
             workspace_unread_completions: HashMap::new(),
+            task_prompt_templates: HashMap::new(),
         };
         db.save_app_state(&snapshot).unwrap();
 
@@ -2306,6 +2353,7 @@ mod tests {
             workspace_chat_scroll_y10: HashMap::new(),
             workspace_chat_scroll_anchor: HashMap::new(),
             workspace_unread_completions: HashMap::new(),
+            task_prompt_templates: HashMap::new(),
         };
 
         db.save_app_state(&snapshot_before).unwrap();
@@ -2363,6 +2411,7 @@ mod tests {
             workspace_chat_scroll_y10: HashMap::new(),
             workspace_chat_scroll_anchor: HashMap::new(),
             workspace_unread_completions: HashMap::new(),
+            task_prompt_templates: HashMap::new(),
         };
 
         db.save_app_state(&snapshot_after).unwrap();
@@ -2419,6 +2468,7 @@ mod tests {
             workspace_chat_scroll_y10: HashMap::new(),
             workspace_chat_scroll_anchor: HashMap::new(),
             workspace_unread_completions: HashMap::new(),
+            task_prompt_templates: HashMap::new(),
         };
 
         db.save_app_state(&snapshot).unwrap();
@@ -2460,6 +2510,7 @@ mod tests {
             workspace_chat_scroll_y10: HashMap::new(),
             workspace_chat_scroll_anchor: HashMap::new(),
             workspace_unread_completions: HashMap::new(),
+            task_prompt_templates: HashMap::new(),
         };
         db.save_app_state(&empty).unwrap();
 

@@ -235,14 +235,7 @@ Output JSON schema:
 }
 
 fn intent_kind_label(kind: TaskIntentKind) -> &'static str {
-    match kind {
-        TaskIntentKind::FixIssue => "Fix issue",
-        TaskIntentKind::ImplementFeature => "Implement feature",
-        TaskIntentKind::ReviewPullRequest => "Review pull request",
-        TaskIntentKind::ResolvePullRequestConflicts => "Resolve pull request conflicts",
-        TaskIntentKind::AddProject => "Add project",
-        TaskIntentKind::Other => "Other",
-    }
+    kind.label()
 }
 
 fn project_label(spec: &TaskProjectSpec) -> String {
@@ -282,6 +275,59 @@ fn compose_task_summary(
     lines.join("\n")
 }
 
+fn render_known_context(
+    project: &TaskProjectSpec,
+    repo: &Option<TaskRepoInfo>,
+    issue: &Option<TaskIssueInfo>,
+    pull_request: &Option<TaskPullRequestInfo>,
+) -> String {
+    let mut out = String::new();
+    out.push_str("Known context:\n");
+    match project {
+        TaskProjectSpec::Unspecified => out.push_str("- Project: Unspecified\n"),
+        TaskProjectSpec::LocalPath { path } => {
+            out.push_str(&format!("- Project: Local path {}\n", path.display()));
+        }
+        TaskProjectSpec::GitHubRepo { full_name } => {
+            out.push_str(&format!("- Project: GitHub repo {full_name}\n"));
+        }
+    }
+
+    if let Some(r) = repo {
+        out.push_str(&format!("- Repo URL: {}\n", r.url));
+        if let Some(branch) = &r.default_branch {
+            out.push_str(&format!("- Default branch: {branch}\n"));
+        }
+    }
+    if let Some(i) = issue {
+        out.push_str(&format!("- Issue: #{} {}\n", i.number, i.url));
+    }
+    if let Some(pr) = pull_request {
+        out.push_str(&format!("- PR: #{} {}\n", pr.number, pr.url));
+        if let Some(head) = &pr.head_ref {
+            out.push_str(&format!("- PR head: {head}\n"));
+        }
+        if let Some(base) = &pr.base_ref {
+            out.push_str(&format!("- PR base: {base}\n"));
+        }
+    }
+    out
+}
+
+fn render_task_prompt_template(
+    template: &str,
+    task_input: &str,
+    intent_label: &str,
+    known_context: &str,
+) -> String {
+    let mut out = template.to_owned();
+    out = out.replace("{{task_input}}", task_input.trim());
+    out = out.replace("{{intent_label}}", intent_label);
+    out = out.replace("{{known_context}}", known_context.trim_end());
+    out
+}
+
+#[cfg(test)]
 fn compose_agent_prompt(
     input: &str,
     intent_kind: TaskIntentKind,
@@ -290,127 +336,14 @@ fn compose_agent_prompt(
     issue: &Option<TaskIssueInfo>,
     pull_request: &Option<TaskPullRequestInfo>,
 ) -> String {
-    fn render_known_context(
-        project: &TaskProjectSpec,
-        repo: &Option<TaskRepoInfo>,
-        issue: &Option<TaskIssueInfo>,
-        pull_request: &Option<TaskPullRequestInfo>,
-    ) -> String {
-        let mut out = String::new();
-        out.push_str("Known context:\n");
-        match project {
-            TaskProjectSpec::Unspecified => out.push_str("- Project: Unspecified\n"),
-            TaskProjectSpec::LocalPath { path } => {
-                out.push_str(&format!("- Project: Local path {}\n", path.display()));
-            }
-            TaskProjectSpec::GitHubRepo { full_name } => {
-                out.push_str(&format!("- Project: GitHub repo {full_name}\n"));
-            }
-        }
-
-        if let Some(r) = repo {
-            out.push_str(&format!("- Repo URL: {}\n", r.url));
-            if let Some(branch) = &r.default_branch {
-                out.push_str(&format!("- Default branch: {branch}\n"));
-            }
-        }
-        if let Some(i) = issue {
-            out.push_str(&format!("- Issue: #{} {}\n", i.number, i.url));
-        }
-        if let Some(pr) = pull_request {
-            out.push_str(&format!("- PR: #{} {}\n", pr.number, pr.url));
-            if let Some(head) = &pr.head_ref {
-                out.push_str(&format!("- PR head: {head}\n"));
-            }
-            if let Some(base) = &pr.base_ref {
-                out.push_str(&format!("- PR base: {base}\n"));
-            }
-        }
-        out
-    }
-
-    let mut out = String::new();
-    out.push_str("You are an AI coding agent working inside a git worktree.\n\n");
-    out.push_str("Task input:\n");
-    out.push_str(input.trim());
-    out.push_str("\n\n");
-    out.push_str("Intent:\n");
-    out.push_str(intent_kind_label(intent_kind));
-    out.push_str("\n\n");
-    out.push_str(&render_known_context(project, repo, issue, pull_request));
-
-    out.push_str("\nGlobal constraints:\n");
-    out.push_str("- Do NOT commit, push, open a pull request, create a PR review, or comment on the upstream issue/PR unless the user explicitly asks.\n");
-    out.push_str("- You MAY run commands, inspect files, search the web, and modify code directly in this worktree.\n");
-    out.push_str("- Discover and follow the target repository's own practices (README/CONTRIBUTING/CI). Do not assume a specific toolchain or workflow.\n");
-    out.push_str("- Prefer the smallest correct change that addresses the root cause and follows the target repository's conventions.\n");
-    out.push_str("- If you are about to do anything destructive or irreversible (delete data, rewrite history, force push, etc.), stop and ask the user first.\n");
-    out.push_str("- When you change behavior, run the repository's existing checks/tests and report what you ran and what passed.\n");
-
-    out.push_str("\nOperating mode:\n");
-    out.push_str("- First, assess whether this task is SIMPLE or COMPLEX.\n");
-    out.push_str("  - SIMPLE: the goal is clear and likely requires a small, isolated change.\n");
-    out.push_str("  - COMPLEX: ambiguous requirements, multiple plausible approaches, cross-module impact, or high risk.\n");
-    out.push_str("- If SIMPLE: proceed to complete it end-to-end.\n");
-    out.push_str("- If COMPLEX: prioritize discussion and planning before making large changes.\n");
-    out.push_str("  - Share your root-cause analysis or key uncertainties.\n");
-    out.push_str("  - Propose a concrete plan with milestones and verification steps.\n");
-    out.push_str("  - Ask the user to confirm the next action you should take.\n");
-
-    out.push_str("\nInstructions:\n");
-    match intent_kind {
-        TaskIntentKind::FixIssue => {
-            out.push_str("- Goal: identify the root cause of the reported problem and fix it.\n");
-            out.push_str("- Suggested flow:\n");
-            out.push_str(
-                "  1) Reproduce (or create a minimal reproduction) and localize the fault.\n",
-            );
-            out.push_str("  2) Explain the root cause in concrete terms (what/where/why).\n");
-            out.push_str(
-                "  3) Implement the minimal fix and add/adjust tests to prevent regressions.\n",
-            );
-            out.push_str("  4) Run the relevant verification and report results.\n");
-            out.push_str("- Output: root cause, fix summary, and verification.\n");
-        }
-        TaskIntentKind::ImplementFeature => {
-            out.push_str("- Goal: implement the requested feature.\n");
-            out.push_str("- If requirements are unclear or the change is broad, propose a design/plan first and ask the user to confirm before implementing.\n");
-            out.push_str("- If requirements are clear and the change is small, implement it directly and verify.\n");
-            out.push_str("- Output: what changed (user-visible), key implementation notes, and verification.\n");
-        }
-        TaskIntentKind::ReviewPullRequest => {
-            out.push_str(
-                "- Goal: produce a high-quality code review of the referenced pull request.\n",
-            );
-            out.push_str(
-                "- Constraints: Do NOT implement changes unless the user explicitly asks.\n",
-            );
-            out.push_str("- Steps: understand intent, evaluate correctness and edge cases, check tests/CI, identify risks, and suggest improvements.\n");
-            out.push_str("- Output: a structured review with actionable feedback, prioritized by severity.\n");
-        }
-        TaskIntentKind::ResolvePullRequestConflicts => {
-            out.push_str(
-                "- Goal: resolve merge conflicts between the PR branch and the base branch.\n",
-            );
-            out.push_str("- Steps: fetch latest upstream refs, resolve conflicts carefully, and run tests/verification.\n");
-            out.push_str(
-                "- Constraints: Do NOT push or open PRs unless the user explicitly asks.\n",
-            );
-            out.push_str("- Output: what conflicted, how you resolved it, and verification.\n");
-        }
-        TaskIntentKind::AddProject => {
-            out.push_str("- Goal: initialize/onboard the specified project so it can be worked on locally.\n");
-            out.push_str("- Steps: ensure the project is available locally, verify prerequisites, run basic checks, and summarize how to get started.\n");
-            out.push_str("- Output: a concise setup guide and what was verified.\n");
-        }
-        TaskIntentKind::Other => {
-            out.push_str("- Goal: understand the user's request and move it forward.\n");
-            out.push_str("- Steps: summarize intent, identify unknowns, propose next actions, and proceed if it is SIMPLE.\n");
-            out.push_str("- Output: either an end-to-end completion (SIMPLE) or a plan + a request for the user's next instruction (COMPLEX).\n");
-        }
-    }
-
-    out
+    let template = luban_domain::default_task_prompt_template(intent_kind);
+    let known_context = render_known_context(project, repo, issue, pull_request);
+    render_task_prompt_template(
+        &template,
+        input,
+        intent_kind_label(intent_kind),
+        &known_context,
+    )
 }
 
 fn extract_first_json_object(raw: &str) -> Option<&str> {
@@ -688,7 +621,24 @@ pub(super) fn task_preview(
 
     let intent_kind = parse_intent_kind(output.intent_kind.as_deref().unwrap_or("other"));
     let summary = compose_task_summary(intent_kind, &project, &repo, &issue, &pull_request, &notes);
-    let prompt = compose_agent_prompt(&input, intent_kind, &project, &repo, &issue, &pull_request);
+    let known_context = render_known_context(&project, &repo, &issue, &pull_request);
+    let template = service
+        .load_app_state_internal()
+        .ok()
+        .and_then(|state| {
+            state
+                .task_prompt_templates
+                .get(intent_kind.as_key())
+                .cloned()
+        })
+        .filter(|template| !template.trim().is_empty())
+        .unwrap_or_else(|| luban_domain::default_task_prompt_template(intent_kind));
+    let prompt = render_task_prompt_template(
+        &template,
+        &input,
+        intent_kind_label(intent_kind),
+        &known_context,
+    );
 
     Ok(TaskDraft {
         input,
