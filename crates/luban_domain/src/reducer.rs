@@ -33,6 +33,7 @@ impl AppState {
             appearance_fonts: crate::AppearanceFonts::default(),
             agent_default_model_id: default_agent_model_id().to_owned(),
             agent_default_thinking_effort: default_thinking_effort(),
+            agent_codex_enabled: true,
             conversations: HashMap::new(),
             workspace_tabs: HashMap::new(),
             dashboard_preview_workspace_id: None,
@@ -885,6 +886,13 @@ impl AppState {
                 self.appearance_fonts = next;
                 vec![Effect::SaveAppState]
             }
+            Action::AgentCodexEnabledChanged { enabled } => {
+                if self.agent_codex_enabled == enabled {
+                    return Vec::new();
+                }
+                self.agent_codex_enabled = enabled;
+                vec![Effect::SaveAppState]
+            }
             Action::WorkspaceChatScrollSaved {
                 workspace_id,
                 thread_id,
@@ -1704,6 +1712,7 @@ mod tests {
                 appearance_terminal_font: None,
                 agent_default_model_id: None,
                 agent_default_thinking_effort: None,
+                agent_codex_enabled: Some(true),
                 last_open_workspace_id: None,
                 workspace_active_thread_id: HashMap::new(),
                 workspace_open_tabs: HashMap::new(),
@@ -1741,6 +1750,7 @@ mod tests {
                 appearance_terminal_font: None,
                 agent_default_model_id: None,
                 agent_default_thinking_effort: None,
+                agent_codex_enabled: Some(true),
                 last_open_workspace_id: None,
                 workspace_active_thread_id: HashMap::new(),
                 workspace_open_tabs: HashMap::new(),
@@ -1780,6 +1790,7 @@ mod tests {
                 appearance_terminal_font: None,
                 agent_default_model_id: None,
                 agent_default_thinking_effort: None,
+                agent_codex_enabled: Some(true),
                 last_open_workspace_id: None,
                 workspace_active_thread_id: HashMap::new(),
                 workspace_open_tabs: HashMap::new(),

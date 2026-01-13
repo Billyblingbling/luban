@@ -485,6 +485,7 @@ pub struct AppState {
     pub appearance_fonts: AppearanceFonts,
     pub(crate) agent_default_model_id: String,
     pub(crate) agent_default_thinking_effort: ThinkingEffort,
+    pub(crate) agent_codex_enabled: bool,
     pub conversations: HashMap<(WorkspaceId, WorkspaceThreadId), WorkspaceConversation>,
     pub workspace_tabs: HashMap<WorkspaceId, WorkspaceTabs>,
     pub dashboard_preview_workspace_id: Option<WorkspaceId>,
@@ -493,6 +494,12 @@ pub struct AppState {
     pub workspace_chat_scroll_y10: HashMap<(WorkspaceId, WorkspaceThreadId), i32>,
     pub workspace_chat_scroll_anchor: HashMap<(WorkspaceId, WorkspaceThreadId), ChatScrollAnchor>,
     pub workspace_unread_completions: HashSet<WorkspaceId>,
+}
+
+impl AppState {
+    pub fn agent_codex_enabled(&self) -> bool {
+        self.agent_codex_enabled
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -507,6 +514,7 @@ pub struct PersistedAppState {
     pub appearance_terminal_font: Option<String>,
     pub agent_default_model_id: Option<String>,
     pub agent_default_thinking_effort: Option<String>,
+    pub agent_codex_enabled: Option<bool>,
     pub last_open_workspace_id: Option<u64>,
     pub workspace_active_thread_id: HashMap<u64, u64>,
     pub workspace_open_tabs: HashMap<u64, Vec<u64>>,

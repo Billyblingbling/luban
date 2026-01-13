@@ -119,6 +119,20 @@ pub struct ProjectIdentity {
     pub is_git: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CodexConfigEntryKind {
+    File,
+    Folder,
+}
+
+#[derive(Clone, Debug)]
+pub struct CodexConfigEntry {
+    pub path: String,
+    pub name: String,
+    pub kind: CodexConfigEntryKind,
+    pub children: Vec<CodexConfigEntry>,
+}
+
 pub trait ProjectWorkspaceService: Send + Sync {
     fn load_app_state(&self) -> Result<PersistedAppState, String>;
 
@@ -222,6 +236,22 @@ pub trait ProjectWorkspaceService: Send + Sync {
     fn task_preview(&self, input: String) -> Result<TaskDraft, String>;
 
     fn task_prepare_project(&self, spec: TaskProjectSpec) -> Result<PathBuf, String>;
+
+    fn codex_check(&self) -> Result<(), String> {
+        Err("unimplemented".to_owned())
+    }
+
+    fn codex_config_tree(&self) -> Result<Vec<CodexConfigEntry>, String> {
+        Err("unimplemented".to_owned())
+    }
+
+    fn codex_config_read_file(&self, _path: String) -> Result<String, String> {
+        Err("unimplemented".to_owned())
+    }
+
+    fn codex_config_write_file(&self, _path: String, _contents: String) -> Result<(), String> {
+        Err("unimplemented".to_owned())
+    }
 
     fn project_identity(&self, path: PathBuf) -> Result<ProjectIdentity, String> {
         Ok(ProjectIdentity {

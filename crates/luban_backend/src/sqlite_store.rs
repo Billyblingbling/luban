@@ -20,6 +20,7 @@ const WORKSPACE_UNREAD_COMPLETION_PREFIX: &str = "workspace_unread_completion_";
 const LAST_OPEN_WORKSPACE_ID_KEY: &str = "last_open_workspace_id";
 const AGENT_DEFAULT_MODEL_ID_KEY: &str = "agent_default_model_id";
 const AGENT_DEFAULT_THINKING_EFFORT_KEY: &str = "agent_default_thinking_effort";
+const AGENT_CODEX_ENABLED_KEY: &str = "agent_codex_enabled";
 const APPEARANCE_THEME_KEY: &str = "appearance_theme";
 const APPEARANCE_UI_FONT_KEY: &str = "appearance_ui_font";
 const APPEARANCE_CHAT_FONT_KEY: &str = "appearance_chat_font";
@@ -733,6 +734,17 @@ impl SqliteDatabase {
             .optional()
             .context("failed to load agent default thinking effort")?;
 
+        let agent_codex_enabled = self
+            .conn
+            .query_row(
+                "SELECT value FROM app_settings WHERE key = ?1",
+                params![AGENT_CODEX_ENABLED_KEY],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .context("failed to load agent codex enabled flag")?
+            .map(|value| value != 0);
+
         if !self.persist_ui_state {
             return Ok(PersistedAppState {
                 projects,
@@ -745,6 +757,7 @@ impl SqliteDatabase {
                 appearance_terminal_font: None,
                 agent_default_model_id,
                 agent_default_thinking_effort,
+                agent_codex_enabled,
                 last_open_workspace_id: None,
                 workspace_active_thread_id: HashMap::new(),
                 workspace_open_tabs: HashMap::new(),
@@ -1073,6 +1086,7 @@ impl SqliteDatabase {
             appearance_terminal_font,
             agent_default_model_id,
             agent_default_thinking_effort,
+            agent_codex_enabled,
             last_open_workspace_id,
             workspace_active_thread_id,
             workspace_open_tabs,
@@ -1338,6 +1352,26 @@ impl SqliteDatabase {
             tx.execute(
                 "DELETE FROM app_settings_text WHERE key = ?1",
                 params![AGENT_DEFAULT_THINKING_EFFORT_KEY],
+            )?;
+        }
+
+        if let Some(enabled) = snapshot.agent_codex_enabled {
+            tx.execute(
+                "INSERT INTO app_settings (key, value, created_at, updated_at)
+                 VALUES (?1, ?2, COALESCE((SELECT created_at FROM app_settings WHERE key = ?1), ?3), ?3)
+                 ON CONFLICT(key) DO UPDATE SET
+                   value = excluded.value,
+                   updated_at = excluded.updated_at",
+                params![
+                    AGENT_CODEX_ENABLED_KEY,
+                    if enabled { 1i64 } else { 0i64 },
+                    now
+                ],
+            )?;
+        } else {
+            tx.execute(
+                "DELETE FROM app_settings WHERE key = ?1",
+                params![AGENT_CODEX_ENABLED_KEY],
             )?;
         }
 
@@ -2041,6 +2075,7 @@ mod tests {
             appearance_terminal_font: Some("Geist Mono".to_owned()),
             agent_default_model_id: Some("gpt-5.2-codex".to_owned()),
             agent_default_thinking_effort: Some("high".to_owned()),
+            agent_codex_enabled: Some(true),
             last_open_workspace_id: Some(10),
             workspace_active_thread_id: HashMap::from([(10, 1)]),
             workspace_open_tabs: HashMap::from([(10, vec![1, 2, 3])]),
@@ -2094,6 +2129,7 @@ mod tests {
             appearance_terminal_font: None,
             agent_default_model_id: None,
             agent_default_thinking_effort: None,
+            agent_codex_enabled: Some(true),
             last_open_workspace_id: None,
             workspace_active_thread_id: HashMap::new(),
             workspace_open_tabs: HashMap::new(),
@@ -2160,6 +2196,7 @@ mod tests {
             appearance_terminal_font: None,
             agent_default_model_id: None,
             agent_default_thinking_effort: None,
+            agent_codex_enabled: Some(true),
             last_open_workspace_id: None,
             workspace_active_thread_id: HashMap::new(),
             workspace_open_tabs: HashMap::new(),
@@ -2260,6 +2297,7 @@ mod tests {
             appearance_terminal_font: None,
             agent_default_model_id: None,
             agent_default_thinking_effort: None,
+            agent_codex_enabled: Some(true),
             last_open_workspace_id: None,
             workspace_active_thread_id: HashMap::new(),
             workspace_open_tabs: HashMap::new(),
@@ -2316,6 +2354,7 @@ mod tests {
             appearance_terminal_font: None,
             agent_default_model_id: None,
             agent_default_thinking_effort: None,
+            agent_codex_enabled: Some(true),
             last_open_workspace_id: None,
             workspace_active_thread_id: HashMap::new(),
             workspace_open_tabs: HashMap::new(),
@@ -2371,6 +2410,7 @@ mod tests {
             appearance_terminal_font: None,
             agent_default_model_id: None,
             agent_default_thinking_effort: None,
+            agent_codex_enabled: Some(true),
             last_open_workspace_id: None,
             workspace_active_thread_id: HashMap::new(),
             workspace_open_tabs: HashMap::new(),
@@ -2411,6 +2451,7 @@ mod tests {
             appearance_terminal_font: None,
             agent_default_model_id: None,
             agent_default_thinking_effort: None,
+            agent_codex_enabled: Some(true),
             last_open_workspace_id: None,
             workspace_active_thread_id: HashMap::new(),
             workspace_open_tabs: HashMap::new(),

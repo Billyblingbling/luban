@@ -39,6 +39,7 @@ pub(crate) fn apply_persisted_app_state(
 
     state.agent_default_model_id = agent_default_model_id;
     state.agent_default_thinking_effort = agent_default_thinking_effort;
+    state.agent_codex_enabled = persisted.agent_codex_enabled.unwrap_or(true);
 
     let (projects, projects_upgraded) = load_projects(persisted.projects);
     state.projects = projects;
@@ -239,6 +240,7 @@ pub(crate) fn to_persisted_app_state(state: &AppState) -> PersistedAppState {
         agent_default_thinking_effort: Some(
             state.agent_default_thinking_effort.as_str().to_owned(),
         ),
+        agent_codex_enabled: Some(state.agent_codex_enabled),
         last_open_workspace_id: state.last_open_workspace_id.map(|id| id.0),
         workspace_active_thread_id: state
             .workspace_tabs

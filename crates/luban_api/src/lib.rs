@@ -19,12 +19,43 @@ pub struct AppSnapshot {
     pub rev: u64,
     pub projects: Vec<ProjectSnapshot>,
     pub appearance: AppearanceSnapshot,
+    #[serde(default)]
+    pub agent: AgentSettingsSnapshot,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AppearanceSnapshot {
     pub theme: AppearanceTheme,
     pub fonts: AppearanceFontsSnapshot,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AgentSettingsSnapshot {
+    pub codex_enabled: bool,
+}
+
+impl Default for AgentSettingsSnapshot {
+    fn default() -> Self {
+        Self {
+            codex_enabled: true,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CodexConfigEntryKind {
+    File,
+    Folder,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CodexConfigEntrySnapshot {
+    pub path: String,
+    pub name: String,
+    pub kind: CodexConfigEntryKind,
+    #[serde(default)]
+    pub children: Vec<CodexConfigEntrySnapshot>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -480,6 +511,18 @@ pub enum ClientAction {
     AppearanceFontsChanged {
         fonts: AppearanceFontsSnapshot,
     },
+    CodexEnabledChanged {
+        enabled: bool,
+    },
+    CodexCheck,
+    CodexConfigTree,
+    CodexConfigReadFile {
+        path: String,
+    },
+    CodexConfigWriteFile {
+        path: String,
+        contents: String,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -512,6 +555,24 @@ pub enum ServerEvent {
     TaskExecuted {
         request_id: String,
         result: TaskExecuteResult,
+    },
+    CodexCheckReady {
+        request_id: String,
+        ok: bool,
+        message: Option<String>,
+    },
+    CodexConfigTreeReady {
+        request_id: String,
+        tree: Vec<CodexConfigEntrySnapshot>,
+    },
+    CodexConfigFileReady {
+        request_id: String,
+        path: String,
+        contents: String,
+    },
+    CodexConfigFileSaved {
+        request_id: String,
+        path: String,
     },
 }
 

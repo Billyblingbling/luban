@@ -604,6 +604,172 @@ impl Engine {
                     return;
                 }
 
+                if matches!(action, luban_api::ClientAction::CodexCheck) {
+                    let services = self.services.clone();
+                    let events = self.events.clone();
+                    let request_id = request_id.clone();
+                    let rev = self.rev;
+                    tokio::spawn(async move {
+                        let result = tokio::task::spawn_blocking(move || services.codex_check())
+                            .await
+                            .ok()
+                            .unwrap_or_else(|| Err("failed to join codex check task".to_owned()));
+
+                        let (ok, message) = match result {
+                            Ok(()) => (true, None),
+                            Err(message) => (false, Some(message)),
+                        };
+
+                        let _ = events.send(WsServerMessage::Event {
+                            rev,
+                            event: Box::new(luban_api::ServerEvent::CodexCheckReady {
+                                request_id,
+                                ok,
+                                message,
+                            }),
+                        });
+                    });
+
+                    let _ = reply.send(Ok(self.rev));
+                    return;
+                }
+
+                if matches!(action, luban_api::ClientAction::CodexConfigTree) {
+                    fn map_entry(
+                        entry: luban_domain::CodexConfigEntry,
+                    ) -> luban_api::CodexConfigEntrySnapshot {
+                        luban_api::CodexConfigEntrySnapshot {
+                            path: entry.path,
+                            name: entry.name,
+                            kind: match entry.kind {
+                                luban_domain::CodexConfigEntryKind::File => {
+                                    luban_api::CodexConfigEntryKind::File
+                                }
+                                luban_domain::CodexConfigEntryKind::Folder => {
+                                    luban_api::CodexConfigEntryKind::Folder
+                                }
+                            },
+                            children: entry.children.into_iter().map(map_entry).collect(),
+                        }
+                    }
+
+                    let services = self.services.clone();
+                    let events = self.events.clone();
+                    let request_id = request_id.clone();
+                    let rev = self.rev;
+                    tokio::spawn(async move {
+                        let result =
+                            tokio::task::spawn_blocking(move || services.codex_config_tree())
+                                .await
+                                .ok()
+                                .unwrap_or_else(|| {
+                                    Err("failed to join codex config tree task".to_owned())
+                                });
+
+                        match result {
+                            Ok(tree) => {
+                                let tree = tree.into_iter().map(map_entry).collect();
+                                let _ = events.send(WsServerMessage::Event {
+                                    rev,
+                                    event: Box::new(luban_api::ServerEvent::CodexConfigTreeReady {
+                                        request_id,
+                                        tree,
+                                    }),
+                                });
+                            }
+                            Err(message) => {
+                                let _ = events.send(WsServerMessage::Error {
+                                    request_id: Some(request_id),
+                                    message,
+                                });
+                            }
+                        }
+                    });
+
+                    let _ = reply.send(Ok(self.rev));
+                    return;
+                }
+
+                if let luban_api::ClientAction::CodexConfigReadFile { path } = &action {
+                    let services = self.services.clone();
+                    let events = self.events.clone();
+                    let request_id = request_id.clone();
+                    let rev = self.rev;
+                    let path = path.clone();
+                    tokio::spawn(async move {
+                        let path_for_task = path.clone();
+                        let result = tokio::task::spawn_blocking(move || {
+                            services.codex_config_read_file(path_for_task)
+                        })
+                        .await
+                        .ok()
+                        .unwrap_or_else(|| Err("failed to join codex config read task".to_owned()));
+
+                        match result {
+                            Ok(contents) => {
+                                let _ = events.send(WsServerMessage::Event {
+                                    rev,
+                                    event: Box::new(luban_api::ServerEvent::CodexConfigFileReady {
+                                        request_id,
+                                        path,
+                                        contents,
+                                    }),
+                                });
+                            }
+                            Err(message) => {
+                                let _ = events.send(WsServerMessage::Error {
+                                    request_id: Some(request_id),
+                                    message,
+                                });
+                            }
+                        }
+                    });
+
+                    let _ = reply.send(Ok(self.rev));
+                    return;
+                }
+
+                if let luban_api::ClientAction::CodexConfigWriteFile { path, contents } = &action {
+                    let services = self.services.clone();
+                    let events = self.events.clone();
+                    let request_id = request_id.clone();
+                    let rev = self.rev;
+                    let path = path.clone();
+                    let contents = contents.clone();
+                    tokio::spawn(async move {
+                        let path_for_task = path.clone();
+                        let result = tokio::task::spawn_blocking(move || {
+                            services.codex_config_write_file(path_for_task, contents)
+                        })
+                        .await
+                        .ok()
+                        .unwrap_or_else(|| {
+                            Err("failed to join codex config write task".to_owned())
+                        });
+
+                        match result {
+                            Ok(()) => {
+                                let _ = events.send(WsServerMessage::Event {
+                                    rev,
+                                    event: Box::new(luban_api::ServerEvent::CodexConfigFileSaved {
+                                        request_id,
+                                        path,
+                                    }),
+                                });
+                            }
+                            Err(message) => {
+                                let _ = events.send(WsServerMessage::Error {
+                                    request_id: Some(request_id),
+                                    message,
+                                });
+                            }
+                        }
+                    });
+
+                    let _ = reply.send(Ok(self.rev));
+                    return;
+                }
+
                 if let luban_api::ClientAction::OpenWorkspace { workspace_id } = &action {
                     self.maybe_refresh_pull_request(WorkspaceId::from_u64(workspace_id.0));
                 }
@@ -1258,6 +1424,9 @@ impl Engine {
                     terminal_font: self.state.appearance_fonts.terminal_font.clone(),
                 },
             },
+            agent: luban_api::AgentSettingsSnapshot {
+                codex_enabled: self.state.agent_codex_enabled(),
+            },
         }
     }
 
@@ -1792,6 +1961,13 @@ fn map_client_action(action: luban_api::ClientAction) -> Option<Action> {
                 terminal_font: fonts.terminal_font,
             })
         }
+        luban_api::ClientAction::CodexEnabledChanged { enabled } => {
+            Some(Action::AgentCodexEnabledChanged { enabled })
+        }
+        luban_api::ClientAction::CodexCheck
+        | luban_api::ClientAction::CodexConfigTree
+        | luban_api::ClientAction::CodexConfigReadFile { .. }
+        | luban_api::ClientAction::CodexConfigWriteFile { .. } => None,
     }
 }
 
@@ -2016,6 +2192,7 @@ mod tests {
                 appearance_terminal_font: None,
                 agent_default_model_id: None,
                 agent_default_thinking_effort: None,
+                agent_codex_enabled: Some(true),
                 last_open_workspace_id: None,
                 workspace_active_thread_id: HashMap::new(),
                 workspace_open_tabs: HashMap::new(),
@@ -2438,6 +2615,7 @@ mod tests {
                 appearance_terminal_font: None,
                 agent_default_model_id: None,
                 agent_default_thinking_effort: None,
+                agent_codex_enabled: Some(true),
                 last_open_workspace_id: None,
                 workspace_active_thread_id: HashMap::new(),
                 workspace_open_tabs: HashMap::new(),
@@ -2687,6 +2865,7 @@ mod tests {
                 appearance_terminal_font: None,
                 agent_default_model_id: None,
                 agent_default_thinking_effort: None,
+                agent_codex_enabled: Some(true),
                 last_open_workspace_id: None,
                 workspace_active_thread_id: HashMap::new(),
                 workspace_open_tabs: HashMap::new(),

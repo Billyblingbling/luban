@@ -202,6 +202,9 @@ pub enum Action {
         code_font: String,
         terminal_font: String,
     },
+    AgentCodexEnabledChanged {
+        enabled: bool,
+    },
     WorkspaceChatScrollSaved {
         workspace_id: WorkspaceId,
         thread_id: WorkspaceThreadId,
