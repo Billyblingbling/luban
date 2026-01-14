@@ -339,7 +339,7 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
                         "group/worktree flex items-center gap-2 px-2 py-1.5 hover:bg-sidebar-accent/30 transition-all cursor-pointer rounded mx-1",
                         worktree.workspaceId === activeWorkspaceId && "bg-sidebar-accent/30",
                         newlyCreatedWorkspaceId === worktree.workspaceId &&
-                          "animate-in slide-in-from-left-2 fade-in duration-300 bg-primary/15 ring-1 ring-primary/30",
+                          "animate-in slide-in-from-left-2 fade-in duration-300 ring-1 ring-primary/30",
                         worktree.isArchiving && "animate-pulse opacity-50 pointer-events-none",
                       )}
                       style={{
