@@ -98,6 +98,141 @@ const themeColors = {
   },
 }
 
+function intentLabel(kind: TaskIntentKind): string {
+  switch (kind) {
+    case "fix":
+      return "Fix"
+    case "implement":
+      return "Implement"
+    case "review":
+      return "Review"
+    case "discuss":
+      return "Discuss"
+    case "other":
+      return "Other"
+  }
+}
+
+function renderTaskPromptPreview(template: string, kind: TaskIntentKind): string {
+  const taskInput = "Example: Investigate why tests are flaky on CI and propose a fix."
+  const knownContext = ["Known context:", "- Project: Unspecified", "- Context: None"].join("\n")
+
+  return template
+    .replaceAll("{{task_input}}", taskInput)
+    .replaceAll("{{intent_label}}", intentLabel(kind))
+    .replaceAll("{{known_context}}", knownContext)
+}
+
+function TaskPromptEditor({
+  templates,
+  appRev,
+  setTaskPromptTemplate,
+}: {
+  templates: { intent_kind: TaskIntentKind; template: string }[]
+  appRev: number | undefined
+  setTaskPromptTemplate: (kind: TaskIntentKind, template: string) => void
+}) {
+  const templateByKind = useRef(new Map<TaskIntentKind, string>())
+  templateByKind.current = new Map(templates.map((t) => [t.intent_kind, t.template]))
+
+  const kinds: { kind: TaskIntentKind; label: string; icon: ElementType }[] = [
+    { kind: "fix", label: "Fix", icon: Bug },
+    { kind: "implement", label: "Implement", icon: Lightbulb },
+    { kind: "review", label: "Review", icon: GitPullRequest },
+    { kind: "discuss", label: "Discuss", icon: MessageSquare },
+    { kind: "other", label: "Other", icon: HelpCircle },
+  ]
+
+  const [selected, setSelected] = useState<TaskIntentKind>("fix")
+  const [value, setValue] = useState(() => templateByKind.current.get("fix") ?? "")
+  const saveTimerRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    setValue(templateByKind.current.get(selected) ?? "")
+  }, [selected, appRev])
+
+  useEffect(() => {
+    if (saveTimerRef.current != null) {
+      window.clearTimeout(saveTimerRef.current)
+    }
+    if (!value.trim()) return
+
+    saveTimerRef.current = window.setTimeout(() => {
+      setTaskPromptTemplate(selected, value)
+    }, 800)
+
+    return () => {
+      if (saveTimerRef.current != null) {
+        window.clearTimeout(saveTimerRef.current)
+      }
+    }
+  }, [selected, value, setTaskPromptTemplate])
+
+  return (
+    <div data-testid="task-prompt-editor" className="border border-border rounded-xl overflow-hidden bg-card shadow-sm">
+      <div className="flex items-center gap-1 px-3 py-2 bg-muted/50 border-b border-border overflow-x-auto">
+        {kinds.map(({ kind, label, icon: Icon }) => {
+          const isSelected = selected === kind
+          return (
+            <button
+              key={kind}
+              data-testid={`task-prompt-tab-${kind}`}
+              onClick={() => setSelected(kind)}
+              className={cn(
+                "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap",
+                isSelected
+                  ? "bg-primary text-primary-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted",
+              )}
+            >
+              <Icon className="w-3.5 h-3.5" />
+              {label}
+            </button>
+          )
+        })}
+      </div>
+
+      <div className="flex divide-x divide-border h-[400px]">
+        <div className="flex-1 flex flex-col min-w-0">
+          <textarea
+            data-testid="task-prompt-template"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            className="flex-1 w-full bg-transparent text-xs font-mono leading-relaxed resize-none focus:outline-none text-foreground p-3"
+            spellCheck={false}
+            placeholder="Edit the task prompt template..."
+          />
+        </div>
+        <div className="flex-1 flex flex-col min-w-0 bg-background overflow-hidden">
+          <div className="px-3 py-2 border-b border-border bg-muted/30">
+            <span className="text-xs font-medium text-muted-foreground">Preview</span>
+          </div>
+
+          <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border bg-muted/30 opacity-40">
+            <div className="h-2.5 w-24 rounded bg-muted-foreground/30" />
+            <div className="h-2 w-8 rounded bg-muted-foreground/20" />
+          </div>
+
+          <div className="flex items-center px-2 py-1.5 border-b border-border bg-muted/20 opacity-40">
+            <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-muted-foreground/20">
+              <div className="w-2.5 h-2.5 rounded bg-muted-foreground/30" />
+              <div className="h-2 w-12 rounded bg-muted-foreground/30" />
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-3">
+            <div className="flex justify-end">
+              <div className="max-w-[85%] border border-border rounded-lg px-3 py-2.5 bg-muted/30 luban-font-chat">
+                <Markdown content={renderTaskPromptPreview(value, selected)} className="text-[12px]" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function ThemePreviewCard({
   themeId,
   label,
@@ -809,138 +944,6 @@ function AllSettings() {
   const { app, setAppearanceTheme, setAppearanceFonts, setTaskPromptTemplate } = useLuban()
   const resolvedTheme = theme ?? "system"
 
-  const TaskPromptEditor = () => {
-    const templates = app?.task?.prompt_templates ?? []
-    const templateByKind = useRef(new Map<TaskIntentKind, string>())
-    templateByKind.current = new Map(templates.map((t) => [t.intent_kind, t.template]))
-
-    const kinds: { kind: TaskIntentKind; label: string; icon: ElementType }[] = [
-      { kind: "fix", label: "Fix", icon: Bug },
-      { kind: "implement", label: "Implement", icon: Lightbulb },
-      { kind: "review", label: "Review", icon: GitPullRequest },
-      { kind: "discuss", label: "Discuss", icon: MessageSquare },
-      { kind: "other", label: "Other", icon: HelpCircle },
-    ]
-
-    const [selected, setSelected] = useState<TaskIntentKind>("fix")
-    const [value, setValue] = useState(() => templateByKind.current.get("fix") ?? "")
-    const saveTimerRef = useRef<number | null>(null)
-
-    useEffect(() => {
-      setValue(templateByKind.current.get(selected) ?? "")
-    }, [selected, app?.rev])
-
-    useEffect(() => {
-      if (saveTimerRef.current != null) {
-        window.clearTimeout(saveTimerRef.current)
-      }
-      if (!value.trim()) return
-
-      saveTimerRef.current = window.setTimeout(() => {
-        setTaskPromptTemplate(selected, value)
-      }, 800)
-
-      return () => {
-        if (saveTimerRef.current != null) {
-          window.clearTimeout(saveTimerRef.current)
-        }
-      }
-    }, [selected, value, setTaskPromptTemplate])
-
-    const intentLabel = (kind: TaskIntentKind): string => {
-      switch (kind) {
-        case "fix":
-          return "Fix"
-        case "implement":
-          return "Implement"
-        case "review":
-          return "Review"
-        case "discuss":
-          return "Discuss"
-        case "other":
-          return "Other"
-      }
-    }
-
-    const renderPreview = (template: string, kind: TaskIntentKind): string => {
-      const taskInput = "Example: Investigate why tests are flaky on CI and propose a fix."
-      const knownContext = [
-        "Known context:",
-        "- Project: Unspecified",
-        "- Context: None",
-      ].join("\n")
-
-      return template
-        .replaceAll("{{task_input}}", taskInput)
-        .replaceAll("{{intent_label}}", intentLabel(kind))
-        .replaceAll("{{known_context}}", knownContext)
-    }
-
-    return (
-      <div data-testid="task-prompt-editor" className="border border-border rounded-xl overflow-hidden bg-card shadow-sm">
-        <div className="flex items-center gap-1 px-3 py-2 bg-muted/50 border-b border-border overflow-x-auto">
-          {kinds.map(({ kind, label, icon: Icon }) => {
-            const isSelected = selected === kind
-            return (
-              <button
-                key={kind}
-                data-testid={`task-prompt-tab-${kind}`}
-                onClick={() => setSelected(kind)}
-                className={cn(
-                  "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap",
-                  isSelected
-                    ? "bg-primary text-primary-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted",
-                )}
-              >
-                <Icon className="w-3.5 h-3.5" />
-                {label}
-              </button>
-            )
-          })}
-        </div>
-
-        <div className="flex divide-x divide-border h-[400px]">
-          <div className="flex-1 flex flex-col min-w-0">
-            <textarea
-              data-testid="task-prompt-template"
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              className="flex-1 w-full bg-transparent text-xs font-mono leading-relaxed resize-none focus:outline-none text-foreground p-3"
-              spellCheck={false}
-              placeholder="Edit the task prompt template..."
-            />
-          </div>
-          <div className="flex-1 flex flex-col min-w-0 bg-background overflow-hidden">
-            <div className="px-3 py-2 border-b border-border bg-muted/30">
-              <span className="text-xs font-medium text-muted-foreground">Preview</span>
-            </div>
-
-            <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border bg-muted/30 opacity-40">
-              <div className="h-2.5 w-24 rounded bg-muted-foreground/30" />
-              <div className="h-2 w-8 rounded bg-muted-foreground/20" />
-            </div>
-
-            <div className="flex items-center px-2 py-1.5 border-b border-border bg-muted/20 opacity-40">
-              <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-muted-foreground/20">
-                <div className="w-2.5 h-2.5 rounded bg-muted-foreground/30" />
-                <div className="h-2 w-12 rounded bg-muted-foreground/30" />
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-3">
-              <div className="flex justify-end">
-                <div className="max-w-[85%] border border-border rounded-lg px-3 py-2.5 bg-muted/30 luban-font-chat">
-                  <Markdown content={renderPreview(value, selected)} className="text-[12px]" />
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="space-y-12">
       <section id="theme" className="scroll-mt-8">
@@ -1034,7 +1037,11 @@ function AllSettings() {
           <ListTodo className="w-4 h-4 text-muted-foreground" />
           Task
         </h3>
-        <TaskPromptEditor />
+        <TaskPromptEditor
+          templates={app?.task?.prompt_templates ?? []}
+          appRev={app?.rev}
+          setTaskPromptTemplate={setTaskPromptTemplate}
+        />
       </section>
     </div>
   )
