@@ -131,6 +131,7 @@ export function ChatPanel({
   const [isRenamingBranch, setIsRenamingBranch] = useState(false)
   const [branchRenameValue, setBranchRenameValue] = useState("")
   const branchInputRef = useRef<HTMLInputElement | null>(null)
+  const branchRenameCanceledRef = useRef(false)
   const [copySuccess, setCopySuccess] = useState(false)
   const [branchRenamePending, setBranchRenamePending] = useState<{ initialBranch: string; startedAt: number } | null>(
     null,
@@ -514,12 +515,12 @@ export function ChatPanel({
             <GitBranch className="w-3.5 h-3.5" />
             {isRenamingBranch ? (
               <div className="flex items-center gap-1">
-                <input
-                  ref={branchInputRef}
-                  type="text"
-                  value={branchRenameValue}
-                  onChange={(e) => setBranchRenameValue(e.target.value)}
-                  onKeyDown={(e) => {
+                    <input
+                      ref={branchInputRef}
+                      type="text"
+                      value={branchRenameValue}
+                      onChange={(e) => setBranchRenameValue(e.target.value)}
+                      onKeyDown={(e) => {
                         if (e.key === "Enter") {
                           if (activeWorkspaceId == null) return
                           setIsRenamingBranch(false)
@@ -527,12 +528,18 @@ export function ChatPanel({
                           renameWorkspaceBranch(activeWorkspaceId, branchRenameValue)
                         }
                         if (e.key === "Escape") {
+                          branchRenameCanceledRef.current = true
+                          setBranchRenameValue(projectInfo.branch)
                           setIsRenamingBranch(false)
                         }
                       }}
                       onBlur={() => {
                         if (activeWorkspaceId == null) return
                         setIsRenamingBranch(false)
+                        if (branchRenameCanceledRef.current) {
+                          branchRenameCanceledRef.current = false
+                          return
+                        }
                         setBranchRenamePending({ initialBranch: projectInfo.branch, startedAt: Date.now() })
                         renameWorkspaceBranch(activeWorkspaceId, branchRenameValue)
                       }}

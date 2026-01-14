@@ -630,8 +630,22 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                     continue;
                 }
 
-                self.run_git(&worktree_path, ["branch", "-m", &candidate])
-                    .with_context(|| format!("failed to rename branch to {candidate}"))?;
+                let rename_result = self.run_git(&worktree_path, ["branch", "-m", &candidate]);
+                if let Err(err) = rename_result {
+                    let message = err.to_string();
+                    let exists = message.contains("already exists")
+                        || message.contains("a branch named")
+                        || message.contains("a branch with that name")
+                        || message.contains("is not a valid branch name");
+                    let locked = message.contains("cannot lock ref")
+                        || message.contains("cannot lock")
+                        || message.contains("unable to lock");
+                    if (exists || locked) && candidate != current_branch {
+                        continue;
+                    }
+                    return Err(err)
+                        .with_context(|| format!("failed to rename branch to {candidate}"));
+                }
 
                 let updated = self
                     .run_git(&worktree_path, ["rev-parse", "--abbrev-ref", "HEAD"])

@@ -1204,30 +1204,41 @@ impl Engine {
 
                 let worktree_path = workspace.worktree_path.clone();
                 let services = self.services.clone();
-                let result = tokio::task::spawn_blocking(move || {
-                    services.rename_workspace_branch(worktree_path, requested_branch_name)
-                })
-                .await
-                .ok()
-                .unwrap_or_else(|| Err("failed to join rename workspace branch task".to_owned()));
+                let tx = self.tx.clone();
+                tokio::spawn(async move {
+                    let result = tokio::task::spawn_blocking(move || {
+                        services.rename_workspace_branch(worktree_path, requested_branch_name)
+                    })
+                    .await
+                    .ok()
+                    .unwrap_or_else(|| {
+                        Err("failed to join rename workspace branch task".to_owned())
+                    });
 
-                let action = match result {
-                    Ok(branch_name) => Action::WorkspaceBranchRenamed {
-                        workspace_id,
-                        branch_name,
-                    },
-                    Err(message) => Action::WorkspaceBranchRenameFailed {
-                        workspace_id,
-                        message,
-                    },
-                };
-                Ok(VecDeque::from([action]))
+                    let action = match result {
+                        Ok(branch_name) => Action::WorkspaceBranchRenamed {
+                            workspace_id,
+                            branch_name,
+                        },
+                        Err(message) => Action::WorkspaceBranchRenameFailed {
+                            workspace_id,
+                            message,
+                        },
+                    };
+                    let _ = tx
+                        .send(EngineCommand::DispatchAction {
+                            action: Box::new(action),
+                        })
+                        .await;
+                });
+
+                Ok(VecDeque::new())
             }
             Effect::AiRenameWorkspaceBranch {
                 workspace_id,
                 input,
             } => {
-                let Some(scope) = workspace_scope(&self.state, workspace_id) else {
+                if workspace_scope(&self.state, workspace_id).is_none() {
                     return Ok(VecDeque::from([Action::WorkspaceBranchRenameFailed {
                         workspace_id,
                         message: "workspace not found".to_owned(),
@@ -1241,45 +1252,46 @@ impl Engine {
                     .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 
                 let services = self.services.clone();
-                let project_path = self
-                    .state
-                    .projects
-                    .iter()
-                    .find(|p| p.slug == scope.project_slug)
-                    .map(|p| p.path.clone())
-                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+                let tx = self.tx.clone();
+                tokio::spawn(async move {
+                    let result = tokio::task::spawn_blocking(move || {
+                        let draft = luban_domain::TaskDraft {
+                            input,
+                            project: luban_domain::TaskProjectSpec::Unspecified,
+                            intent_kind: luban_domain::TaskIntentKind::Other,
+                            summary: String::new(),
+                            prompt: String::new(),
+                            repo: None,
+                            issue: None,
+                            pull_request: None,
+                        };
+                        let suggested = services.task_suggest_branch_name(draft)?;
+                        services.rename_workspace_branch(worktree_path, suggested)
+                    })
+                    .await
+                    .ok()
+                    .unwrap_or_else(|| {
+                        Err("failed to join ai rename workspace branch task".to_owned())
+                    });
 
-                let result = tokio::task::spawn_blocking(move || {
-                    let draft = luban_domain::TaskDraft {
-                        input,
-                        project: luban_domain::TaskProjectSpec::LocalPath { path: project_path },
-                        intent_kind: luban_domain::TaskIntentKind::Other,
-                        summary: String::new(),
-                        prompt: String::new(),
-                        repo: None,
-                        issue: None,
-                        pull_request: None,
+                    let action = match result {
+                        Ok(branch_name) => Action::WorkspaceBranchRenamed {
+                            workspace_id,
+                            branch_name,
+                        },
+                        Err(message) => Action::WorkspaceBranchRenameFailed {
+                            workspace_id,
+                            message,
+                        },
                     };
-                    let suggested = services.task_suggest_branch_name(draft)?;
-                    services.rename_workspace_branch(worktree_path, suggested)
-                })
-                .await
-                .ok()
-                .unwrap_or_else(|| {
-                    Err("failed to join ai rename workspace branch task".to_owned())
+                    let _ = tx
+                        .send(EngineCommand::DispatchAction {
+                            action: Box::new(action),
+                        })
+                        .await;
                 });
 
-                let action = match result {
-                    Ok(branch_name) => Action::WorkspaceBranchRenamed {
-                        workspace_id,
-                        branch_name,
-                    },
-                    Err(message) => Action::WorkspaceBranchRenameFailed {
-                        workspace_id,
-                        message,
-                    },
-                };
-                Ok(VecDeque::from([action]))
+                Ok(VecDeque::new())
             }
             Effect::LoadWorkspaceThreads { workspace_id } => {
                 let Some(scope) = workspace_scope(&self.state, workspace_id) else {
@@ -2551,6 +2563,7 @@ mod tests {
     };
     use std::collections::HashMap;
     use std::sync::atomic::AtomicBool;
+    use std::time::Duration;
 
     struct TestServices;
 
@@ -3846,6 +3859,257 @@ mod tests {
         ) -> Result<luban_domain::ProjectIdentity, String> {
             Err("unimplemented".to_owned())
         }
+    }
+
+    struct SlowRenameServices {
+        delay: Duration,
+    }
+
+    impl ProjectWorkspaceService for SlowRenameServices {
+        fn load_app_state(&self) -> Result<PersistedAppState, String> {
+            Ok(PersistedAppState {
+                projects: Vec::new(),
+                sidebar_width: None,
+                terminal_pane_width: None,
+                appearance_theme: None,
+                appearance_ui_font: None,
+                appearance_chat_font: None,
+                appearance_code_font: None,
+                appearance_terminal_font: None,
+                agent_default_model_id: None,
+                agent_default_thinking_effort: None,
+                agent_codex_enabled: Some(true),
+                last_open_workspace_id: None,
+                workspace_active_thread_id: HashMap::new(),
+                workspace_open_tabs: HashMap::new(),
+                workspace_archived_tabs: HashMap::new(),
+                workspace_next_thread_id: HashMap::new(),
+                workspace_chat_scroll_y10: HashMap::new(),
+                workspace_chat_scroll_anchor: HashMap::new(),
+                workspace_unread_completions: HashMap::new(),
+                task_prompt_templates: HashMap::new(),
+            })
+        }
+
+        fn save_app_state(&self, _snapshot: PersistedAppState) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn create_workspace(
+            &self,
+            _project_path: PathBuf,
+            _project_slug: String,
+            _branch_name_hint: Option<String>,
+        ) -> Result<luban_domain::CreatedWorkspace, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn open_workspace_in_ide(&self, _worktree_path: PathBuf) -> Result<(), String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn archive_workspace(
+            &self,
+            _project_path: PathBuf,
+            _worktree_path: PathBuf,
+        ) -> Result<(), String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn rename_workspace_branch(
+            &self,
+            _worktree_path: PathBuf,
+            requested_branch_name: String,
+        ) -> Result<String, String> {
+            std::thread::sleep(self.delay);
+            Ok(requested_branch_name)
+        }
+
+        fn ensure_conversation(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+            _thread_id: u64,
+        ) -> Result<(), String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn list_conversation_threads(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+        ) -> Result<Vec<ConversationThreadMeta>, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn load_conversation(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+            _thread_id: u64,
+        ) -> Result<DomainConversationSnapshot, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn store_context_image(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+            _image: ContextImage,
+        ) -> Result<AttachmentRef, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn store_context_text(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+            _text: String,
+            _extension: String,
+        ) -> Result<AttachmentRef, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn store_context_file(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+            _source_path: PathBuf,
+        ) -> Result<AttachmentRef, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn record_context_item(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+            _attachment: AttachmentRef,
+            _created_at_unix_ms: u64,
+        ) -> Result<u64, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn list_context_items(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+        ) -> Result<Vec<ContextItem>, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn delete_context_item(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+            _context_id: u64,
+        ) -> Result<(), String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn run_agent_turn_streamed(
+            &self,
+            _request: luban_domain::RunAgentTurnRequest,
+            _cancel: Arc<AtomicBool>,
+            _on_event: Arc<dyn Fn(CodexThreadEvent) + Send + Sync>,
+        ) -> Result<(), String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn task_preview(&self, _input: String) -> Result<luban_domain::TaskDraft, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn task_prepare_project(
+            &self,
+            _spec: luban_domain::TaskProjectSpec,
+        ) -> Result<PathBuf, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn gh_is_authorized(&self) -> Result<bool, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn gh_pull_request_info(
+            &self,
+            _worktree_path: PathBuf,
+        ) -> Result<Option<PullRequestInfo>, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn gh_open_pull_request(&self, _worktree_path: PathBuf) -> Result<(), String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn gh_open_pull_request_failed_action(
+            &self,
+            _worktree_path: PathBuf,
+        ) -> Result<(), String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn project_identity(
+            &self,
+            _path: PathBuf,
+        ) -> Result<luban_domain::ProjectIdentity, String> {
+            Err("unimplemented".to_owned())
+        }
+    }
+
+    #[tokio::test]
+    async fn workspace_branch_rename_does_not_block_engine() {
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(SlowRenameServices {
+            delay: Duration::from_secs(2),
+        });
+
+        let mut state = AppState::new();
+        let _ = state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/luban-server-rename-test"),
+            is_git: true,
+        });
+        let project_id = state.projects[0].id;
+        let _ = state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "w1".to_owned(),
+            branch_name: "luban/w1".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban-server-rename-test"),
+            branch_name_hint_provided: true,
+        });
+        let workspace_id = state.projects[0].workspaces[0].id;
+
+        let (events, _) = broadcast::channel::<WsServerMessage>(16);
+        let (tx, mut rx) = mpsc::channel::<EngineCommand>(16);
+        let mut engine = Engine {
+            state,
+            rev: 1,
+            services,
+            events,
+            tx: tx.clone(),
+            cancel_flags: HashMap::new(),
+            pull_requests: HashMap::new(),
+            pull_requests_in_flight: HashSet::new(),
+        };
+
+        let rename = tokio::time::timeout(
+            Duration::from_millis(200),
+            engine.process_action_queue(Action::WorkspaceBranchRenameRequested {
+                workspace_id,
+                requested_branch_name: "luban/rename-test".to_owned(),
+            }),
+        )
+        .await;
+        assert!(rename.is_ok(), "rename action should not block");
+
+        // Drain the dispatch action so the spawned task does not leak.
+        let _ = tokio::time::timeout(Duration::from_secs(5), async {
+            while let Some(cmd) = rx.recv().await {
+                if let EngineCommand::DispatchAction { action } = cmd {
+                    engine.process_action_queue(*action).await;
+                    break;
+                }
+            }
+        })
+        .await;
     }
 
     #[tokio::test]
