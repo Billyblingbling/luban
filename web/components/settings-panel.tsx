@@ -2,7 +2,7 @@
 
 import type { ElementType, MouseEvent } from "react"
 
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useTheme } from "next-themes"
 import {
   Check,
@@ -31,6 +31,8 @@ import {
   X,
   XCircle,
 } from "lucide-react"
+import type { Highlighter } from "shiki"
+import { createHighlighter } from "shiki"
 import { toast } from "sonner"
 
 import { useAppearance } from "@/components/appearance-provider"
@@ -97,280 +99,363 @@ const themeColors = {
   },
 }
 
-function intentLabel(kind: TaskIntentKind): string {
-  switch (kind) {
-    case "fix":
-      return "Fix"
-    case "implement":
-      return "Implement"
-    case "review":
-      return "Review"
-    case "discuss":
-      return "Discuss"
-    case "other":
-      return "Other"
+type TaskPromptTemplate = { intent_kind: TaskIntentKind; template: string }
+
+type TaskTypeConfig = {
+  id: TaskIntentKind
+  label: string
+  icon: ElementType
+  description: string
+}
+
+const taskTypes: TaskTypeConfig[] = [
+  { id: "fix", label: "Fix", icon: Bug, description: "Fix bugs or issues in the code" },
+  { id: "implement", label: "Implement", icon: Lightbulb, description: "Implement new features or functionality" },
+  { id: "review", label: "Review", icon: GitPullRequest, description: "Review pull request code changes" },
+  { id: "discuss", label: "Discuss", icon: MessageSquare, description: "Discuss and explore ideas or questions" },
+  { id: "other", label: "Other", icon: HelpCircle, description: "Other types of tasks" },
+]
+
+type TemplateVariable = {
+  id: string
+  label: string
+  description: string
+}
+
+const templateVariables: TemplateVariable[] = [
+  { id: "repo", label: "repo", description: "Repository name (e.g., owner/repo)" },
+  { id: "issue", label: "issue", description: "Issue details (title/body/comments)" },
+  { id: "pr", label: "pr", description: "Pull request details (title/diff/comments)" },
+  { id: "task_input", label: "task_input", description: "Raw task input from the user" },
+  { id: "intent_label", label: "intent_label", description: "Intent label derived from task analysis" },
+  { id: "known_context", label: "known_context", description: "Known context retrieved during task preview" },
+]
+
+const variablesByTaskType: Record<TaskIntentKind, string[]> = {
+  fix: ["repo", "issue", "task_input", "intent_label", "known_context"],
+  implement: ["repo", "issue", "task_input", "intent_label", "known_context"],
+  review: ["repo", "pr", "task_input", "intent_label", "known_context"],
+  discuss: ["repo", "issue", "task_input", "intent_label", "known_context"],
+  other: ["repo", "issue", "task_input", "intent_label", "known_context"],
+}
+
+function variablesForTaskType(taskType: TaskIntentKind): TemplateVariable[] {
+  const ids = variablesByTaskType[taskType] ?? []
+  return ids.map((id) => templateVariables.find((v) => v.id === id)).filter(Boolean) as TemplateVariable[]
+}
+
+let highlighterPromise: Promise<Highlighter> | null = null
+
+function getHighlighter(): Promise<Highlighter> {
+  if (!highlighterPromise) {
+    highlighterPromise = createHighlighter({
+      themes: ["github-light", "github-dark"],
+      langs: ["markdown"],
+    })
   }
+  return highlighterPromise
 }
 
-function renderTaskPromptPreview(template: string, kind: TaskIntentKind): string {
-  const taskInput = "Example: Investigate why tests are flaky on CI and propose a fix."
-  const knownContext = ["Known context:", "- Project: Unspecified", "- Context: None"].join("\n")
-
-  return template
-    .replaceAll("{{task_input}}", taskInput)
-    .replaceAll("{{intent_label}}", intentLabel(kind))
-    .replaceAll("{{known_context}}", knownContext)
+function useShikiHighlighter(): Highlighter | null {
+  const [highlighter, setHighlighter] = useState<Highlighter | null>(null)
+  useEffect(() => {
+    void getHighlighter().then(setHighlighter)
+  }, [])
+  return highlighter
 }
 
-function TaskPromptPreviewMessage({ content }: { content: string }) {
-  const lines = useMemo(() => content.split("\n"), [content])
+function MarkdownHighlight({ text, highlighter }: { text: string; highlighter: Highlighter | null }) {
+  const html = useMemo(() => {
+    if (!highlighter) return null
+    return highlighter.codeToHtml(text, {
+      lang: "markdown",
+      themes: {
+        light: "github-light",
+        dark: "github-dark",
+      },
+    })
+  }, [text, highlighter])
+
+  if (!html) return <span className="text-foreground">{text}</span>
 
   return (
-    <div className="text-[12px] leading-relaxed text-foreground/90 break-words overflow-hidden">
-      {lines.map((line, idx) => {
-        const trimmed = line.trim()
-        if (!trimmed) return <div key={idx} className="h-2" />
-
-        if (trimmed.startsWith("## ")) {
-          return (
-            <p key={idx} className="font-semibold text-foreground pt-1">
-              {trimmed.slice(3)}
-            </p>
-          )
-        }
-
-        if (trimmed.startsWith("### ")) {
-          return (
-            <p key={idx} className="font-semibold text-foreground pt-1">
-              {trimmed.slice(4)}
-            </p>
-          )
-        }
-
-        if (trimmed.startsWith("- ")) {
-          return (
-            <div key={idx} className="flex gap-2">
-              <span className="text-muted-foreground">•</span>
-              <span className="flex-1 whitespace-pre-wrap">{trimmed.slice(2)}</span>
-            </div>
-          )
-        }
-
-        return (
-          <p key={idx} className="whitespace-pre-wrap">
-            {line}
-          </p>
-        )
-      })}
-    </div>
+    <div
+      className="shiki-highlight [&_pre]:!bg-transparent [&_code]:!bg-transparent [&_.shiki]:!bg-transparent"
+      // eslint-disable-next-line react/no-danger
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
   )
 }
 
 function TaskPromptEditor({
   templates,
-  appRev,
+  defaultTemplates,
   setTaskPromptTemplate,
 }: {
-  templates: { intent_kind: TaskIntentKind; template: string }[]
-  appRev: number | undefined
+  templates: TaskPromptTemplate[]
+  defaultTemplates: TaskPromptTemplate[]
   setTaskPromptTemplate: (kind: TaskIntentKind, template: string) => void
 }) {
-  const templateByKind = useRef(new Map<TaskIntentKind, string>())
-  templateByKind.current = new Map(templates.map((t) => [t.intent_kind, t.template]))
-
-  const kinds: { kind: TaskIntentKind; label: string; icon: ElementType }[] = [
-    { kind: "fix", label: "Fix", icon: Bug },
-    { kind: "implement", label: "Implement", icon: Lightbulb },
-    { kind: "review", label: "Review", icon: GitPullRequest },
-    { kind: "discuss", label: "Discuss", icon: MessageSquare },
-    { kind: "other", label: "Other", icon: HelpCircle },
-  ]
-
-  const [selected, setSelected] = useState<TaskIntentKind>("fix")
-  const [value, setValue] = useState(() => templateByKind.current.get("fix") ?? "")
-  const saveTimerRef = useRef<number | null>(null)
-  const editorRef = useRef<HTMLTextAreaElement | null>(null)
-  const previewRef = useRef<HTMLDivElement | null>(null)
-  const isSyncScrollingRef = useRef(false)
-  const editorScrollableRef = useRef(1)
-  const previewScrollableRef = useRef(1)
-  const resizeObserverRef = useRef<ResizeObserver | null>(null)
-  const pendingSyncRef = useRef<{
-    sourceEl: HTMLTextAreaElement | HTMLDivElement
-    targetEl: HTMLTextAreaElement | HTMLDivElement
-    sourceScrollTop: number
-  } | null>(null)
-  const syncRafRef = useRef<number | null>(null)
-
-  useEffect(() => {
-    setValue(templateByKind.current.get(selected) ?? "")
-  }, [selected, appRev])
-
-  useEffect(() => {
-    if (saveTimerRef.current != null) {
-      window.clearTimeout(saveTimerRef.current)
-    }
-    if (!value.trim()) return
-
-    saveTimerRef.current = window.setTimeout(() => {
-      setTaskPromptTemplate(selected, value)
-    }, 800)
-
-    return () => {
-      if (saveTimerRef.current != null) {
-        window.clearTimeout(saveTimerRef.current)
-      }
-    }
-  }, [selected, value, setTaskPromptTemplate])
-
-  const scheduleScrollSync = (
-    sourceEl: HTMLTextAreaElement | HTMLDivElement,
-    targetEl: HTMLTextAreaElement | HTMLDivElement,
-  ) => {
-    if (isSyncScrollingRef.current) return
-
-    pendingSyncRef.current = { sourceEl, targetEl, sourceScrollTop: sourceEl.scrollTop }
-    if (syncRafRef.current != null) return
-
-    syncRafRef.current = window.requestAnimationFrame(() => {
-      syncRafRef.current = null
-      const pending = pendingSyncRef.current
-      pendingSyncRef.current = null
-      if (!pending) return
-
-      const sourceScrollable =
-        pending.sourceEl === editorRef.current
-          ? editorScrollableRef.current
-          : previewScrollableRef.current
-      const ratio = pending.sourceScrollTop / sourceScrollable
-
-      const targetScrollable =
-        pending.targetEl === editorRef.current
-          ? editorScrollableRef.current
-          : previewScrollableRef.current
-      const nextScrollTop = ratio * targetScrollable
-
-      isSyncScrollingRef.current = true
-      pending.targetEl.scrollTop = nextScrollTop
-      window.requestAnimationFrame(() => {
-        isSyncScrollingRef.current = false
-      })
-    })
-  }
-
-  const deferredValue = useDeferredValue(value)
-  const previewContent = useMemo(
-    () => renderTaskPromptPreview(deferredValue, selected),
-    [deferredValue, selected],
+  const templatesByKind = useMemo(() => new Map(templates.map((t) => [t.intent_kind, t.template])), [templates])
+  const defaultTemplatesByKind = useMemo(
+    () => new Map(defaultTemplates.map((t) => [t.intent_kind, t.template])),
+    [defaultTemplates],
   )
 
-  const recomputeScrollMetrics = () => {
+  const [selectedType, setSelectedType] = useState<TaskIntentKind>("fix")
+  const [typePrompts, setTypePrompts] = useState<Record<TaskIntentKind, string>>(() => {
+    const map = new Map(templates.map((t) => [t.intent_kind, t.template]))
+    const initial: Record<string, string> = {}
+    taskTypes.forEach((t) => {
+      initial[t.id] = map.get(t.id) ?? ""
+    })
+    return initial as Record<TaskIntentKind, string>
+  })
+
+  const editorRef = useRef<HTMLTextAreaElement>(null)
+  const highlightRef = useRef<HTMLDivElement>(null)
+  const highlighter = useShikiHighlighter()
+
+  const [showAutocomplete, setShowAutocomplete] = useState(false)
+  const [autocompletePosition, setAutocompletePosition] = useState({ top: 0, left: 0 })
+  const [autocompleteFilter, setAutocompleteFilter] = useState("")
+  const [selectedAutocompleteIndex, setSelectedAutocompleteIndex] = useState(0)
+
+  const availableVariables = variablesForTaskType(selectedType)
+  const filteredVariables = availableVariables.filter(
+    (v) =>
+      v.label.toLowerCase().includes(autocompleteFilter.toLowerCase()) ||
+      v.description.toLowerCase().includes(autocompleteFilter.toLowerCase()),
+  )
+
+  const handleEditorScroll = () => {
+    if (!editorRef.current || !highlightRef.current) return
+    highlightRef.current.scrollTop = editorRef.current.scrollTop
+    highlightRef.current.scrollLeft = editorRef.current.scrollLeft
+    setShowAutocomplete(false)
+  }
+
+  const insertVariable = (variableId: string) => {
     const editor = editorRef.current
-    if (editor) {
-      editorScrollableRef.current = Math.max(1, editor.scrollHeight - editor.clientHeight)
+    if (!editor) return
+
+    const start = editor.selectionStart
+    const end = editor.selectionEnd
+    const text = typePrompts[selectedType] ?? ""
+
+    const insertText = `{{${variableId}}}`
+    let newCursorPos = start + insertText.length
+
+    if (showAutocomplete) {
+      const beforeCursor = text.slice(0, start)
+      const triggerMatch = beforeCursor.match(/\{\{([^}]*)$/)
+      if (triggerMatch) {
+        const triggerStart = start - triggerMatch[0].length
+        const newText = text.slice(0, triggerStart) + insertText + text.slice(end)
+        setTypePrompts((prev) => ({ ...prev, [selectedType]: newText }))
+        newCursorPos = triggerStart + insertText.length
+        setShowAutocomplete(false)
+        setAutocompleteFilter("")
+
+        requestAnimationFrame(() => {
+          editor.focus()
+          editor.setSelectionRange(newCursorPos, newCursorPos)
+        })
+        return
+      }
     }
-    const preview = previewRef.current
-    if (preview) {
-      previewScrollableRef.current = Math.max(1, preview.scrollHeight - preview.clientHeight)
+
+    const newText = text.slice(0, start) + insertText + text.slice(end)
+    setTypePrompts((prev) => ({ ...prev, [selectedType]: newText }))
+
+    requestAnimationFrame(() => {
+      editor.focus()
+      editor.setSelectionRange(newCursorPos, newCursorPos)
+    })
+  }
+
+  const handleEditorChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const newValue = e.target.value
+    const cursorPos = e.target.selectionStart
+    setTypePrompts((prev) => ({ ...prev, [selectedType]: newValue }))
+
+    const beforeCursor = newValue.slice(0, cursorPos)
+    const triggerMatch = beforeCursor.match(/\{\{([^}\s]*)$/)
+
+    if (triggerMatch) {
+      setAutocompleteFilter(triggerMatch[1])
+      setSelectedAutocompleteIndex(0)
+
+      const textarea = editorRef.current
+      if (textarea) {
+        const lines = beforeCursor.split("\n")
+        const currentLineIndex = lines.length - 1
+        const currentLineStart = beforeCursor.lastIndexOf("\n") + 1
+        const charInLine = cursorPos - currentLineStart
+
+        const lineHeight = 20
+        const charWidth = 7.2
+        const paddingTop = 12
+        const paddingLeft = 12
+
+        setAutocompletePosition({
+          top: paddingTop + (currentLineIndex + 1) * lineHeight - textarea.scrollTop,
+          left: paddingLeft + charInLine * charWidth - triggerMatch[0].length * charWidth,
+        })
+        setShowAutocomplete(true)
+      }
+    } else {
+      setShowAutocomplete(false)
+      setAutocompleteFilter("")
     }
   }
 
-  useEffect(() => {
-    recomputeScrollMetrics()
-  }, [previewContent])
+  const handleEditorKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!showAutocomplete) return
 
-  useEffect(() => {
-    const editor = editorRef.current
-    const preview = previewRef.current
-    if (!editor || !preview) return
-
-    resizeObserverRef.current?.disconnect()
-    const ro = new ResizeObserver(() => {
-      recomputeScrollMetrics()
-    })
-    ro.observe(editor)
-    ro.observe(preview)
-    resizeObserverRef.current = ro
-
-    return () => {
-      ro.disconnect()
-      if (resizeObserverRef.current === ro) {
-        resizeObserverRef.current = null
+    if (e.key === "ArrowDown") {
+      e.preventDefault()
+      setSelectedAutocompleteIndex((prev) => (prev < filteredVariables.length - 1 ? prev + 1 : prev))
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault()
+      setSelectedAutocompleteIndex((prev) => (prev > 0 ? prev - 1 : 0))
+    } else if (e.key === "Enter" || e.key === "Tab") {
+      if (filteredVariables.length > 0) {
+        e.preventDefault()
+        insertVariable(filteredVariables[selectedAutocompleteIndex].id)
       }
+    } else if (e.key === "Escape") {
+      setShowAutocomplete(false)
+      setAutocompleteFilter("")
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }
+
+  const currentPrompt = typePrompts[selectedType] ?? ""
+  const currentTaskType = taskTypes.find((t) => t.id === selectedType)!
+  const saveDisabled = currentPrompt.trim().length === 0
 
   return (
-    <div data-testid="task-prompt-editor" className="border border-border rounded-xl overflow-hidden bg-card shadow-sm">
-      <div className="flex items-center gap-1 px-3 py-2 bg-muted/50 border-b border-border overflow-x-auto">
-        {kinds.map(({ kind, label, icon: Icon }) => {
-          const isSelected = selected === kind
-          return (
-            <button
-              key={kind}
-              data-testid={`task-prompt-tab-${kind}`}
-              onClick={() => setSelected(kind)}
-              className={cn(
-                "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap",
-                isSelected
-                  ? "bg-primary text-primary-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted",
-              )}
-            >
-              <Icon className="w-3.5 h-3.5" />
-              {label}
-            </button>
-          )
-        })}
-      </div>
+    <div data-testid="task-prompt-editor" className="border border-border rounded-lg overflow-hidden bg-sidebar">
+      <div className="flex h-[380px]">
+        <div className="w-40 border-r border-border flex flex-col">
+          <div className="flex items-center h-11 px-3 border-b border-border">
+            <span className="text-sm font-medium text-muted-foreground">Task Types</span>
+          </div>
+          <div className="flex-1 overflow-y-auto py-1.5">
+            {taskTypes.map((taskType) => {
+              const Icon = taskType.icon
+              const isSelected = selectedType === taskType.id
 
-      <div className="flex divide-x divide-border h-[400px]">
-        <div className="flex-1 flex flex-col min-w-0">
-          <textarea
-            ref={editorRef}
-            data-testid="task-prompt-template"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            onScroll={() => {
-              const editor = editorRef.current
-              const preview = previewRef.current
-              if (!editor || !preview) return
-              scheduleScrollSync(editor, preview)
-            }}
-            className="flex-1 w-full bg-transparent text-xs font-mono leading-relaxed resize-none focus:outline-none text-foreground p-3"
-            spellCheck={false}
-            placeholder="Edit the task prompt template..."
-          />
+              return (
+                <button
+                  key={taskType.id}
+                  data-testid={`task-prompt-tab-${taskType.id}`}
+                  onClick={() => setSelectedType(taskType.id)}
+                  className={cn(
+                    "w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors",
+                    isSelected
+                      ? "bg-sidebar-accent text-foreground"
+                      : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50",
+                  )}
+                >
+                  <Icon
+                    className={cn("w-4 h-4 shrink-0", isSelected ? "text-primary" : "text-muted-foreground")}
+                  />
+                  <span className="truncate">{taskType.label}</span>
+                </button>
+              )
+            })}
+          </div>
         </div>
-        <div className="flex-1 flex flex-col min-w-0 bg-background overflow-hidden">
-          <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border bg-muted/30 opacity-40">
-            <div className="h-2.5 w-24 rounded bg-muted-foreground/30" />
-            <div className="h-2 w-8 rounded bg-muted-foreground/20" />
-          </div>
 
-          <div className="flex items-center px-2 py-1.5 border-b border-border bg-muted/20 opacity-40">
-            <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-muted-foreground/20">
-              <div className="w-2.5 h-2.5 rounded bg-muted-foreground/30" />
-              <div className="h-2 w-12 rounded bg-muted-foreground/30" />
+        <div className="flex-1 flex flex-col min-w-0 bg-background">
+          <div className="flex items-center justify-between h-11 px-3 border-b border-border">
+            <div className="flex items-center gap-2">
+              <currentTaskType.icon className="w-4 h-4 text-primary" />
+              <span className="text-sm font-medium">{currentTaskType.label}</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                data-testid="task-prompt-reset"
+                onClick={() => {
+                  const next =
+                    defaultTemplatesByKind.get(selectedType) ?? templatesByKind.get(selectedType) ?? ""
+                  setTypePrompts((prev) => ({ ...prev, [selectedType]: next }))
+                }}
+                className="flex items-center gap-1.5 px-2 py-1 rounded text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                Reset
+              </button>
+              <button
+                data-testid="task-prompt-save"
+                disabled={saveDisabled}
+                onClick={() => {
+                  if (saveDisabled) return
+                  setTaskPromptTemplate(selectedType, currentPrompt)
+                }}
+                className={cn(
+                  "flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors",
+                  saveDisabled
+                    ? "bg-muted text-muted-foreground cursor-not-allowed"
+                    : "bg-primary text-primary-foreground hover:bg-primary/90",
+                )}
+              >
+                <Check className="w-3.5 h-3.5" />
+                Save
+              </button>
             </div>
           </div>
 
-          <div
-            ref={previewRef}
-            className="flex-1 overflow-y-auto p-3 [contain:layout_paint]"
-            onScroll={() => {
-              const editor = editorRef.current
-              const preview = previewRef.current
-              if (!editor || !preview) return
-              scheduleScrollSync(preview, editor)
-            }}
-          >
-            <div className="flex justify-end">
-              <div className="max-w-[85%] border border-border rounded-lg px-3 py-2.5 bg-muted/30 luban-font-chat">
-                <TaskPromptPreviewMessage content={previewContent} />
+          <div className="flex-1 relative overflow-hidden">
+            <div
+              ref={highlightRef}
+              className="absolute inset-0 p-4 text-sm font-mono leading-relaxed whitespace-pre-wrap break-words overflow-hidden pointer-events-none"
+              aria-hidden="true"
+            >
+              <MarkdownHighlight text={currentPrompt} highlighter={highlighter} />
+            </div>
+
+            <textarea
+              ref={editorRef}
+              data-testid="task-prompt-template"
+              value={currentPrompt}
+              onChange={handleEditorChange}
+              onKeyDown={handleEditorKeyDown}
+              onScroll={handleEditorScroll}
+              onBlur={() => setTimeout(() => setShowAutocomplete(false), 150)}
+              className="absolute inset-0 w-full h-full bg-transparent text-transparent caret-foreground text-sm font-mono leading-relaxed resize-none focus:outline-none p-4 selection:bg-primary/20 selection:text-transparent"
+              spellCheck={false}
+              placeholder="Enter prompt template..."
+            />
+
+            {showAutocomplete && filteredVariables.length > 0 && (
+              <div
+                className="absolute z-50 bg-popover border border-border rounded-lg shadow-lg overflow-hidden"
+                style={{ top: autocompletePosition.top, left: autocompletePosition.left }}
+              >
+                <div className="max-h-48 overflow-y-auto p-1">
+                  {filteredVariables.map((variable, idx) => (
+                    <button
+                      key={variable.id}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => insertVariable(variable.id)}
+                      className={cn(
+                        "w-full flex items-center gap-3 px-2.5 py-1.5 text-left text-xs transition-colors rounded-md",
+                        idx === selectedAutocompleteIndex
+                          ? "bg-primary/10 text-primary"
+                          : "hover:bg-accent text-foreground",
+                      )}
+                    >
+                      <span className="font-mono text-primary bg-primary/10 px-1.5 py-0.5 rounded">
+                        {variable.label}
+                      </span>
+                      <span className="text-muted-foreground truncate">{variable.description}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       </div>
@@ -1184,7 +1269,7 @@ function AllSettings() {
         </h3>
         <TaskPromptEditor
           templates={app?.task?.prompt_templates ?? []}
-          appRev={app?.rev}
+          defaultTemplates={app?.task?.default_prompt_templates ?? []}
           setTaskPromptTemplate={setTaskPromptTemplate}
         />
       </section>

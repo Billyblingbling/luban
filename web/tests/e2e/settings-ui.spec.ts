@@ -68,7 +68,8 @@ test("task prompt templates persist across reload", async ({ page }) => {
   const marker = `e2e-marker-${Date.now()}`
   await textarea.fill(`${original}\n${marker}\n`)
 
-  await page.waitForTimeout(1500)
+  await page.getByTestId("task-prompt-save").click()
+  await page.waitForTimeout(1200)
   await page.reload()
 
   await page.getByTestId("sidebar-open-settings").click()
@@ -76,9 +77,12 @@ test("task prompt templates persist across reload", async ({ page }) => {
 
   await page.getByRole("button", { name: "Task", exact: true }).click()
   await page.getByTestId("task-prompt-tab-other").click()
-  await expect(page.getByTestId("task-prompt-template")).toContainText(marker, { timeout: 10_000 })
+  await expect
+    .poll(async () => await page.getByTestId("task-prompt-template").inputValue(), { timeout: 10_000 })
+    .toContain(marker)
 
   await page.getByTestId("task-prompt-template").fill(original)
+  await page.getByTestId("task-prompt-save").click()
   await page.waitForTimeout(1200)
   await page.getByTitle("Close settings").click()
 })

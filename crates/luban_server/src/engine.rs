@@ -1441,6 +1441,14 @@ impl Engine {
                         })
                     })
                     .collect(),
+                default_prompt_templates: luban_domain::TaskIntentKind::ALL
+                    .iter()
+                    .copied()
+                    .map(|kind| luban_api::TaskPromptTemplateSnapshot {
+                        intent_kind: map_task_intent_kind(kind),
+                        template: luban_domain::default_task_prompt_template(kind),
+                    })
+                    .collect(),
             },
         }
     }

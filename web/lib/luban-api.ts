@@ -29,6 +29,7 @@ export type TaskPromptTemplateSnapshot = {
 
 export type TaskSettingsSnapshot = {
   prompt_templates: TaskPromptTemplateSnapshot[]
+  default_prompt_templates: TaskPromptTemplateSnapshot[]
 }
 
 export type AppSnapshot = {

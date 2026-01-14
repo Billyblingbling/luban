@@ -48,6 +48,8 @@ impl Default for AgentSettingsSnapshot {
 pub struct TaskSettingsSnapshot {
     #[serde(default)]
     pub prompt_templates: Vec<TaskPromptTemplateSnapshot>,
+    #[serde(default)]
+    pub default_prompt_templates: Vec<TaskPromptTemplateSnapshot>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
