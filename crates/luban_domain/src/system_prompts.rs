@@ -1,4 +1,3 @@
-use crate::TaskIntentKind;
 use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -64,23 +63,15 @@ Output JSON schema:
 }
 "#
         .to_owned(),
-        SystemTaskKind::RenameBranch => {
-            let allowed = TaskIntentKind::ALL
-                .iter()
-                .map(|k| k.as_key())
-                .collect::<Vec<_>>()
-                .join(", ");
-
-            format!(
-                r#"You are generating a git branch name for a new worktree.
+        SystemTaskKind::RenameBranch => r#"You are generating a git branch name.
 
 Rules:
 - Do NOT run commands.
 - Do NOT modify files.
-- Output ONLY a single JSON object, no markdown, no extra text.
-- Always output a result, even if the input is vague: use "luban/misc".
-- Do NOT include rationale, notes, or any extra fields in the output.
-- Do NOT ask the user for more info in the output.
+- Output ONLY a single line, no markdown, no extra text.
+- Always output a result, even if the input is vague: output "luban/misc".
+- Do NOT include rationale, notes, quotes, or code fences.
+- Do NOT ask the user for more info.
 
 Branch name requirements:
 - Must start with "luban/".
@@ -90,21 +81,9 @@ Branch name requirements:
 - Avoid trailing hyphens.
 - Include identifiers (like issue/pr number) only when helpful.
 
-Known intent kinds:
-- {allowed}
-
 Input:
 {{task_input}}
-
-Retrieved context (JSON):
-{{context_json}}
-
-Output JSON schema:
-{{
-  "branch_name": "luban/<short-name>"
-}}
 "#
-            )
-        }
+        .to_owned(),
     }
 }

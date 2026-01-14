@@ -427,15 +427,23 @@ impl AppState {
                 let input = self
                     .conversations
                     .get(&(workspace_id, thread_id))
-                    .and_then(|conversation| {
-                        conversation.entries.iter().find_map(|entry| match entry {
-                            ConversationEntry::UserMessage { text, .. } => {
-                                Some(text.trim().to_owned())
-                            }
-                            _ => None,
-                        })
+                    .map(|conversation| {
+                        const MAX_USER_MESSAGES: usize = 6;
+                        conversation
+                            .entries
+                            .iter()
+                            .filter_map(|entry| match entry {
+                                ConversationEntry::UserMessage { text, .. } => {
+                                    Some(text.trim().to_owned())
+                                }
+                                _ => None,
+                            })
+                            .filter(|text| !text.is_empty())
+                            .take(MAX_USER_MESSAGES)
+                            .collect::<Vec<_>>()
                     })
-                    .filter(|s| !s.is_empty())
+                    .filter(|messages| !messages.is_empty())
+                    .map(|messages| messages.join("\n\n"))
                     .unwrap_or_else(|| workspace.branch_name.clone());
 
                 vec![Effect::AiRenameWorkspaceBranch {
@@ -572,8 +580,7 @@ impl AppState {
                 }
 
                 if conversation.queue_paused && !conversation.pending_prompts.is_empty() {
-                    let auto_rename_input =
-                        auto_rename_started.then(|| text.clone());
+                    let auto_rename_input = auto_rename_started.then(|| text.clone());
                     conversation.entries.push(ConversationEntry::UserMessage {
                         text: text.clone(),
                         attachments: attachments.clone(),
@@ -590,14 +597,16 @@ impl AppState {
                         run_config,
                     }];
                     if let Some(input) = auto_rename_input {
-                        effects.push(Effect::AiRenameWorkspaceBranch { workspace_id, input });
+                        effects.push(Effect::AiRenameWorkspaceBranch {
+                            workspace_id,
+                            input,
+                        });
                     }
                     return effects;
                 }
 
                 if conversation.pending_prompts.is_empty() {
-                    let auto_rename_input =
-                        auto_rename_started.then(|| text.clone());
+                    let auto_rename_input = auto_rename_started.then(|| text.clone());
                     conversation.queue_paused = false;
                     conversation.entries.push(ConversationEntry::UserMessage {
                         text: text.clone(),
@@ -615,7 +624,10 @@ impl AppState {
                         run_config,
                     }];
                     if let Some(input) = auto_rename_input {
-                        effects.push(Effect::AiRenameWorkspaceBranch { workspace_id, input });
+                        effects.push(Effect::AiRenameWorkspaceBranch {
+                            workspace_id,
+                            input,
+                        });
                     }
                     return effects;
                 }

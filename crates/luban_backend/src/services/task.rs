@@ -202,12 +202,6 @@ struct TaskIntentModelOutput {
     intent_kind: Option<String>,
 }
 
-#[derive(Deserialize)]
-struct TaskRenameBranchModelOutput {
-    #[serde(default)]
-    branch_name: Option<String>,
-}
-
 fn render_system_prompt_template(template: &str, task_input: &str, context_json: &str) -> String {
     let mut out = template.to_owned();
     out = out.replace("{{task_input}}", task_input.trim());
@@ -276,6 +270,35 @@ fn normalize_branch_name(raw: &str) -> Option<String> {
     }
 
     Some(format!("luban/{suffix}"))
+}
+
+fn extract_branch_candidate(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    for token in trimmed.split_whitespace() {
+        let t =
+            token.trim_matches(|c: char| c == '"' || c == '\'' || c == ',' || c == ';' || c == ')');
+        if t.starts_with("luban/") {
+            return Some(t.to_owned());
+        }
+        if let Some(rest) = t.strip_prefix("refs/heads/luban/") {
+            return Some(format!("luban/{rest}"));
+        }
+        if let Some(rest) = t.strip_prefix("refs/heads/") {
+            return Some(rest.to_owned());
+        }
+    }
+
+    trimmed.lines().find_map(|line| {
+        let line = line.trim();
+        if line.is_empty() {
+            return None;
+        }
+        Some(line.to_owned())
+    })
 }
 
 fn intent_kind_label(kind: TaskIntentKind) -> &'static str {
@@ -695,6 +718,7 @@ pub(super) fn task_preview(
     })
 }
 
+#[allow(dead_code)]
 fn context_json_for_task_draft(draft: &TaskDraft) -> serde_json::Value {
     match &draft.project {
         TaskProjectSpec::Unspecified => serde_json::json!({
@@ -766,13 +790,7 @@ pub(super) fn task_suggest_branch_name(
     service: &GitWorkspaceService,
     draft: TaskDraft,
 ) -> anyhow::Result<String> {
-    let context_json = context_json_for_task_draft(&draft).to_string();
-    let prompt = system_prompt_for_task(
-        service,
-        SystemTaskKind::RenameBranch,
-        &draft.input,
-        &context_json,
-    );
+    let prompt = system_prompt_for_task(service, SystemTaskKind::RenameBranch, &draft.input, "");
 
     let cancel = Arc::new(AtomicBool::new(false));
     let mut agent_messages: Vec<String> = Vec::new();
@@ -804,14 +822,8 @@ pub(super) fn task_suggest_branch_name(
         .find(|s| !s.trim().is_empty())
         .ok_or_else(|| anyhow!("codex returned no agent_message output"))?;
 
-    let output = extract_first_json_object(raw.trim())
-        .and_then(|json| serde_json::from_str::<TaskRenameBranchModelOutput>(json).ok())
-        .unwrap_or(TaskRenameBranchModelOutput { branch_name: None });
-
-    let branch_name = output
-        .branch_name
-        .as_deref()
-        .and_then(normalize_branch_name)
+    let branch_name = extract_branch_candidate(raw.trim())
+        .and_then(|candidate| normalize_branch_name(&candidate))
         .unwrap_or_else(|| "luban/misc".to_owned());
 
     Ok(branch_name)
@@ -975,6 +987,31 @@ mod tests {
             }
             other => panic!("unexpected: {other:?}"),
         }
+    }
+
+    #[test]
+    fn extract_branch_candidate_prefers_luban_prefix_tokens() {
+        assert_eq!(
+            extract_branch_candidate("luban/hello-world\n"),
+            Some("luban/hello-world".to_owned())
+        );
+        assert_eq!(
+            extract_branch_candidate("branch: luban/foo-bar"),
+            Some("luban/foo-bar".to_owned())
+        );
+        assert_eq!(
+            extract_branch_candidate("refs/heads/luban/foo"),
+            Some("luban/foo".to_owned())
+        );
+    }
+
+    #[test]
+    fn normalize_branch_name_accepts_plain_suffixes() {
+        assert_eq!(normalize_branch_name("misc").as_deref(), Some("luban/misc"));
+        assert_eq!(
+            normalize_branch_name("luban/Feature X").as_deref(),
+            Some("luban/feature-x")
+        );
     }
 
     #[test]
