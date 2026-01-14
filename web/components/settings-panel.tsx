@@ -10,12 +10,11 @@ import {
   ChevronRight,
   Bot,
   CheckCircle2,
-  CirclePlus,
-  GitMerge,
   GitPullRequest,
   Lightbulb,
   ListTodo,
   MessageSquare,
+  HelpCircle,
   Bug,
   FileCode,
   FileText,
@@ -35,6 +34,7 @@ import {
 import { toast } from "sonner"
 
 import { useAppearance } from "@/components/appearance-provider"
+import { Markdown } from "@/components/markdown"
 import { useLuban } from "@/lib/luban-context"
 import { cn } from "@/lib/utils"
 import type { AppearanceTheme, CodexConfigEntrySnapshot, TaskIntentKind } from "@/lib/luban-api"
@@ -815,16 +815,15 @@ function AllSettings() {
     templateByKind.current = new Map(templates.map((t) => [t.intent_kind, t.template]))
 
     const kinds: { kind: TaskIntentKind; label: string; icon: ElementType }[] = [
-      { kind: "fix_issue", label: "Fix", icon: Bug },
-      { kind: "implement_feature", label: "Implement", icon: Lightbulb },
-      { kind: "review_pull_request", label: "Review", icon: GitPullRequest },
-      { kind: "resolve_pull_request_conflicts", label: "Conflicts", icon: GitMerge },
-      { kind: "add_project", label: "Add project", icon: CirclePlus },
-      { kind: "other", label: "Other", icon: MessageSquare },
+      { kind: "fix", label: "Fix", icon: Bug },
+      { kind: "implement", label: "Implement", icon: Lightbulb },
+      { kind: "review", label: "Review", icon: GitPullRequest },
+      { kind: "discuss", label: "Discuss", icon: MessageSquare },
+      { kind: "other", label: "Other", icon: HelpCircle },
     ]
 
-    const [selected, setSelected] = useState<TaskIntentKind>("fix_issue")
-    const [value, setValue] = useState(() => templateByKind.current.get("fix_issue") ?? "")
+    const [selected, setSelected] = useState<TaskIntentKind>("fix")
+    const [value, setValue] = useState(() => templateByKind.current.get("fix") ?? "")
     const saveTimerRef = useRef<number | null>(null)
 
     useEffect(() => {
@@ -847,6 +846,35 @@ function AllSettings() {
         }
       }
     }, [selected, value, setTaskPromptTemplate])
+
+    const intentLabel = (kind: TaskIntentKind): string => {
+      switch (kind) {
+        case "fix":
+          return "Fix"
+        case "implement":
+          return "Implement"
+        case "review":
+          return "Review"
+        case "discuss":
+          return "Discuss"
+        case "other":
+          return "Other"
+      }
+    }
+
+    const renderPreview = (template: string, kind: TaskIntentKind): string => {
+      const taskInput = "Example: Investigate why tests are flaky on CI and propose a fix."
+      const knownContext = [
+        "Known context:",
+        "- Project: Unspecified",
+        "- Context: None",
+      ].join("\n")
+
+      return template
+        .replaceAll("{{task_input}}", taskInput)
+        .replaceAll("{{intent_label}}", intentLabel(kind))
+        .replaceAll("{{known_context}}", knownContext)
+    }
 
     return (
       <div data-testid="task-prompt-editor" className="border border-border rounded-xl overflow-hidden bg-card shadow-sm">
@@ -872,7 +900,7 @@ function AllSettings() {
           })}
         </div>
 
-        <div className="flex divide-x divide-border h-[320px]">
+        <div className="flex divide-x divide-border h-[400px]">
           <div className="flex-1 flex flex-col min-w-0">
             <textarea
               data-testid="task-prompt-template"
@@ -883,17 +911,29 @@ function AllSettings() {
               placeholder="Edit the task prompt template..."
             />
           </div>
-          <div className="w-64 flex flex-col bg-muted/20">
+          <div className="flex-1 flex flex-col min-w-0 bg-background overflow-hidden">
             <div className="px-3 py-2 border-b border-border bg-muted/30">
-              <span className="text-xs font-medium text-muted-foreground">Variables</span>
+              <span className="text-xs font-medium text-muted-foreground">Preview</span>
             </div>
-            <div className="p-3 space-y-2 text-xs text-muted-foreground">
-              <div className="font-mono">{"{{task_input}}"}</div>
-              <div className="font-mono">{"{{intent_label}}"}</div>
-              <div className="font-mono">{"{{known_context}}"}</div>
-              <p className="text-[11px] leading-relaxed">
-                Templates are rendered when creating a new task. Unknown variables are left as-is.
-              </p>
+
+            <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border bg-muted/30 opacity-40">
+              <div className="h-2.5 w-24 rounded bg-muted-foreground/30" />
+              <div className="h-2 w-8 rounded bg-muted-foreground/20" />
+            </div>
+
+            <div className="flex items-center px-2 py-1.5 border-b border-border bg-muted/20 opacity-40">
+              <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-muted-foreground/20">
+                <div className="w-2.5 h-2.5 rounded bg-muted-foreground/30" />
+                <div className="h-2 w-12 rounded bg-muted-foreground/30" />
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-3">
+              <div className="flex justify-end">
+                <div className="max-w-[85%] border border-border rounded-lg px-3 py-2.5 bg-muted/30 luban-font-chat">
+                  <Markdown content={renderPreview(value, selected)} className="text-[12px]" />
+                </div>
+              </div>
             </div>
           </div>
         </div>

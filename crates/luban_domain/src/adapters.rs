@@ -61,53 +61,48 @@ pub struct RunAgentTurnRequest {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum TaskIntentKind {
-    FixIssue,
-    ImplementFeature,
-    ReviewPullRequest,
-    ResolvePullRequestConflicts,
-    AddProject,
+    Fix,
+    Implement,
+    Review,
+    Discuss,
     Other,
 }
 
 impl TaskIntentKind {
-    pub const ALL: [TaskIntentKind; 6] = [
-        TaskIntentKind::FixIssue,
-        TaskIntentKind::ImplementFeature,
-        TaskIntentKind::ReviewPullRequest,
-        TaskIntentKind::ResolvePullRequestConflicts,
-        TaskIntentKind::AddProject,
+    pub const ALL: [TaskIntentKind; 5] = [
+        TaskIntentKind::Fix,
+        TaskIntentKind::Implement,
+        TaskIntentKind::Review,
+        TaskIntentKind::Discuss,
         TaskIntentKind::Other,
     ];
 
     pub fn as_key(self) -> &'static str {
         match self {
-            TaskIntentKind::FixIssue => "fix_issue",
-            TaskIntentKind::ImplementFeature => "implement_feature",
-            TaskIntentKind::ReviewPullRequest => "review_pull_request",
-            TaskIntentKind::ResolvePullRequestConflicts => "resolve_pull_request_conflicts",
-            TaskIntentKind::AddProject => "add_project",
+            TaskIntentKind::Fix => "fix",
+            TaskIntentKind::Implement => "implement",
+            TaskIntentKind::Review => "review",
+            TaskIntentKind::Discuss => "discuss",
             TaskIntentKind::Other => "other",
         }
     }
 
     pub fn parse_key(raw: &str) -> TaskIntentKind {
         match raw.trim().to_ascii_lowercase().as_str() {
-            "fix_issue" => TaskIntentKind::FixIssue,
-            "implement_feature" => TaskIntentKind::ImplementFeature,
-            "review_pull_request" => TaskIntentKind::ReviewPullRequest,
-            "resolve_pull_request_conflicts" => TaskIntentKind::ResolvePullRequestConflicts,
-            "add_project" => TaskIntentKind::AddProject,
+            "fix" | "fix_issue" => TaskIntentKind::Fix,
+            "implement" | "implement_feature" => TaskIntentKind::Implement,
+            "review" | "review_pull_request" => TaskIntentKind::Review,
+            "discuss" => TaskIntentKind::Discuss,
             _ => TaskIntentKind::Other,
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
-            TaskIntentKind::FixIssue => "Fix issue",
-            TaskIntentKind::ImplementFeature => "Implement feature",
-            TaskIntentKind::ReviewPullRequest => "Review pull request",
-            TaskIntentKind::ResolvePullRequestConflicts => "Resolve pull request conflicts",
-            TaskIntentKind::AddProject => "Add project",
+            TaskIntentKind::Fix => "Fix",
+            TaskIntentKind::Implement => "Implement",
+            TaskIntentKind::Review => "Review",
+            TaskIntentKind::Discuss => "Discuss",
             TaskIntentKind::Other => "Other",
         }
     }

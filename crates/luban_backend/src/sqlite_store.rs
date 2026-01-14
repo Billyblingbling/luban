@@ -2133,7 +2133,7 @@ mod tests {
             )]),
             workspace_unread_completions: HashMap::from([(10, true)]),
             task_prompt_templates: HashMap::from([(
-                "fix_issue".to_owned(),
+                "fix".to_owned(),
                 "Fix issue template override".to_owned(),
             )]),
         };

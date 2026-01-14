@@ -213,11 +213,10 @@ Rules:
 - Do NOT ask the user for more info in the output.
 
 Allowed intent_kind values:
-- fix_issue
-- implement_feature
-- review_pull_request
-- resolve_pull_request_conflicts
-- add_project
+- fix
+- implement
+- review
+- discuss
 - other
 
 Input:
@@ -357,11 +356,10 @@ fn extract_first_json_object(raw: &str) -> Option<&str> {
 
 fn parse_intent_kind(raw: &str) -> TaskIntentKind {
     match raw.trim().to_ascii_lowercase().as_str() {
-        "fix_issue" => TaskIntentKind::FixIssue,
-        "implement_feature" => TaskIntentKind::ImplementFeature,
-        "review_pull_request" => TaskIntentKind::ReviewPullRequest,
-        "resolve_pull_request_conflicts" => TaskIntentKind::ResolvePullRequestConflicts,
-        "add_project" => TaskIntentKind::AddProject,
+        "fix" | "fix_issue" => TaskIntentKind::Fix,
+        "implement" | "implement_feature" => TaskIntentKind::Implement,
+        "review" | "review_pull_request" => TaskIntentKind::Review,
+        "discuss" => TaskIntentKind::Discuss,
         _ => TaskIntentKind::Other,
     }
 }
@@ -817,21 +815,14 @@ mod tests {
         let input = "example task";
         let project = TaskProjectSpec::Unspecified;
 
-        let fix = compose_agent_prompt(
-            input,
-            TaskIntentKind::FixIssue,
-            &project,
-            &None,
-            &None,
-            &None,
-        );
+        let fix = compose_agent_prompt(input, TaskIntentKind::Fix, &project, &None, &None, &None);
         assert!(fix.contains("Goal: identify the root cause"), "{fix}");
         assert!(fix.contains("Operating mode:"), "{fix}");
         assert_global_constraints(&fix);
 
         let feature = compose_agent_prompt(
             input,
-            TaskIntentKind::ImplementFeature,
+            TaskIntentKind::Implement,
             &project,
             &None,
             &None,
@@ -843,14 +834,8 @@ mod tests {
         );
         assert_global_constraints(&feature);
 
-        let review = compose_agent_prompt(
-            input,
-            TaskIntentKind::ReviewPullRequest,
-            &project,
-            &None,
-            &None,
-            &None,
-        );
+        let review =
+            compose_agent_prompt(input, TaskIntentKind::Review, &project, &None, &None, &None);
         assert!(
             review.contains("produce a high-quality code review"),
             "{review}"
@@ -858,34 +843,21 @@ mod tests {
         assert!(review.contains("Do NOT implement changes"), "{review}");
         assert_global_constraints(&review);
 
-        let conflicts = compose_agent_prompt(
+        let discuss = compose_agent_prompt(
             input,
-            TaskIntentKind::ResolvePullRequestConflicts,
+            TaskIntentKind::Discuss,
             &project,
             &None,
             &None,
             &None,
         );
         assert!(
-            conflicts.contains("resolve merge conflicts")
-                || conflicts.contains("resolve conflicts"),
-            "{conflicts}"
+            discuss.contains("explore a question")
+                || discuss.contains("converge on a concrete next step")
+                || discuss.contains("Goal: explore"),
+            "{discuss}"
         );
-        assert_global_constraints(&conflicts);
-
-        let add_project = compose_agent_prompt(
-            input,
-            TaskIntentKind::AddProject,
-            &project,
-            &None,
-            &None,
-            &None,
-        );
-        assert!(
-            add_project.contains("initialize/onboard") || add_project.contains("onboard"),
-            "{add_project}"
-        );
-        assert_global_constraints(&add_project);
+        assert_global_constraints(&discuss);
 
         let other =
             compose_agent_prompt(input, TaskIntentKind::Other, &project, &None, &None, &None);

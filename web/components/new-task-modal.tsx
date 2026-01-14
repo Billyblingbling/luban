@@ -6,13 +6,12 @@ import { toast } from "sonner"
 import {
   GitPullRequest,
   Loader2,
-  CirclePlus,
   Play,
   ChevronRight,
   Bug,
   Lightbulb,
-  GitMerge,
   MessageSquare,
+  HelpCircle,
   Plus,
   Sparkles,
 } from "lucide-react"
@@ -32,16 +31,14 @@ interface NewTaskModalProps {
 
 function intentLabel(kind: TaskIntentKind): string {
   switch (kind) {
-    case "fix_issue":
-      return "Fix issue"
-    case "implement_feature":
-      return "Implement feature"
-    case "review_pull_request":
-      return "Review PR"
-    case "resolve_pull_request_conflicts":
-      return "Resolve PR conflicts"
-    case "add_project":
-      return "Add project"
+    case "fix":
+      return "Fix"
+    case "implement":
+      return "Implement"
+    case "review":
+      return "Review"
+    case "discuss":
+      return "Discuss"
     case "other":
       return "Other"
   }
@@ -137,33 +134,29 @@ export function NewTaskModal({ open, onOpenChange }: NewTaskModalProps) {
 
   const intentIcon = (kind: TaskIntentKind): React.ReactNode => {
     switch (kind) {
-      case "fix_issue":
+      case "fix":
         return <Bug className="w-4 h-4" />
-      case "implement_feature":
+      case "implement":
         return <Lightbulb className="w-4 h-4" />
-      case "review_pull_request":
+      case "review":
         return <GitPullRequest className="w-4 h-4" />
-      case "resolve_pull_request_conflicts":
-        return <GitMerge className="w-4 h-4" />
-      case "add_project":
-        return <CirclePlus className="w-4 h-4" />
-      case "other":
+      case "discuss":
         return <MessageSquare className="w-4 h-4" />
+      case "other":
+        return <HelpCircle className="w-4 h-4" />
     }
   }
 
   const intentColor = (kind: TaskIntentKind): string => {
     switch (kind) {
-      case "fix_issue":
+      case "fix":
         return "text-status-error"
-      case "implement_feature":
+      case "implement":
         return "text-status-success"
-      case "review_pull_request":
+      case "review":
         return "text-status-running"
-      case "resolve_pull_request_conflicts":
-        return "text-status-warning"
-      case "add_project":
-        return "text-status-success"
+      case "discuss":
+        return "text-status-info"
       case "other":
         return "text-status-info"
     }

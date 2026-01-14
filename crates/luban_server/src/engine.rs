@@ -1528,17 +1528,10 @@ fn find_project_id_by_path(
 
 fn map_task_intent_kind(kind: luban_domain::TaskIntentKind) -> luban_api::TaskIntentKind {
     match kind {
-        luban_domain::TaskIntentKind::FixIssue => luban_api::TaskIntentKind::FixIssue,
-        luban_domain::TaskIntentKind::ImplementFeature => {
-            luban_api::TaskIntentKind::ImplementFeature
-        }
-        luban_domain::TaskIntentKind::ReviewPullRequest => {
-            luban_api::TaskIntentKind::ReviewPullRequest
-        }
-        luban_domain::TaskIntentKind::ResolvePullRequestConflicts => {
-            luban_api::TaskIntentKind::ResolvePullRequestConflicts
-        }
-        luban_domain::TaskIntentKind::AddProject => luban_api::TaskIntentKind::AddProject,
+        luban_domain::TaskIntentKind::Fix => luban_api::TaskIntentKind::Fix,
+        luban_domain::TaskIntentKind::Implement => luban_api::TaskIntentKind::Implement,
+        luban_domain::TaskIntentKind::Review => luban_api::TaskIntentKind::Review,
+        luban_domain::TaskIntentKind::Discuss => luban_api::TaskIntentKind::Discuss,
         luban_domain::TaskIntentKind::Other => luban_api::TaskIntentKind::Other,
     }
 }
@@ -1986,17 +1979,10 @@ fn map_client_action(action: luban_api::ClientAction) -> Option<Action> {
             template,
         } => Some(Action::TaskPromptTemplateChanged {
             intent_kind: match intent_kind {
-                luban_api::TaskIntentKind::FixIssue => luban_domain::TaskIntentKind::FixIssue,
-                luban_api::TaskIntentKind::ImplementFeature => {
-                    luban_domain::TaskIntentKind::ImplementFeature
-                }
-                luban_api::TaskIntentKind::ReviewPullRequest => {
-                    luban_domain::TaskIntentKind::ReviewPullRequest
-                }
-                luban_api::TaskIntentKind::ResolvePullRequestConflicts => {
-                    luban_domain::TaskIntentKind::ResolvePullRequestConflicts
-                }
-                luban_api::TaskIntentKind::AddProject => luban_domain::TaskIntentKind::AddProject,
+                luban_api::TaskIntentKind::Fix => luban_domain::TaskIntentKind::Fix,
+                luban_api::TaskIntentKind::Implement => luban_domain::TaskIntentKind::Implement,
+                luban_api::TaskIntentKind::Review => luban_domain::TaskIntentKind::Review,
+                luban_api::TaskIntentKind::Discuss => luban_domain::TaskIntentKind::Discuss,
                 luban_api::TaskIntentKind::Other => luban_domain::TaskIntentKind::Other,
             },
             template,

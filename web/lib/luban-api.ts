@@ -171,11 +171,10 @@ export type OperationStatus = "idle" | "running"
 export type ThinkingEffort = "minimal" | "low" | "medium" | "high" | "xhigh"
 
 export type TaskIntentKind =
-  | "fix_issue"
-  | "implement_feature"
-  | "review_pull_request"
-  | "resolve_pull_request_conflicts"
-  | "add_project"
+  | "fix"
+  | "implement"
+  | "review"
+  | "discuss"
   | "other"
 
 export type TaskRepoInfo = {

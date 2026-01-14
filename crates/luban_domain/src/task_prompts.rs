@@ -12,17 +12,16 @@ pub fn default_task_prompt_templates() -> HashMap<TaskIntentKind, String> {
 pub fn default_task_prompt_template(kind: TaskIntentKind) -> String {
     let mut out = BASE_HEADER.to_owned();
     out.push_str(match kind {
-        TaskIntentKind::FixIssue => FIX_ISSUE_INSTRUCTIONS,
-        TaskIntentKind::ImplementFeature => IMPLEMENT_FEATURE_INSTRUCTIONS,
-        TaskIntentKind::ReviewPullRequest => REVIEW_PULL_REQUEST_INSTRUCTIONS,
-        TaskIntentKind::ResolvePullRequestConflicts => RESOLVE_PULL_REQUEST_CONFLICTS_INSTRUCTIONS,
-        TaskIntentKind::AddProject => ADD_PROJECT_INSTRUCTIONS,
+        TaskIntentKind::Fix => FIX_INSTRUCTIONS,
+        TaskIntentKind::Implement => IMPLEMENT_INSTRUCTIONS,
+        TaskIntentKind::Review => REVIEW_INSTRUCTIONS,
+        TaskIntentKind::Discuss => DISCUSS_INSTRUCTIONS,
         TaskIntentKind::Other => OTHER_INSTRUCTIONS,
     });
     out
 }
 
-const BASE_HEADER: &str = r#"You are an AI coding agent working inside a git worktree.
+const BASE_HEADER: &str = r#"You are an AI coding agent working inside a project workspace directory.
 
 Task input:
 {{task_input}}
@@ -53,7 +52,7 @@ Operating mode:
 Instructions:
 "#;
 
-const FIX_ISSUE_INSTRUCTIONS: &str = r#"- Goal: identify the root cause of the reported problem and fix it.
+const FIX_INSTRUCTIONS: &str = r#"- Goal: identify the root cause of the reported problem and fix it.
 - Suggested flow:
   1) Reproduce (or create a minimal reproduction) and localize the fault.
   2) Explain the root cause in concrete terms (what/where/why).
@@ -62,27 +61,22 @@ const FIX_ISSUE_INSTRUCTIONS: &str = r#"- Goal: identify the root cause of the r
 - Output: root cause, fix summary, and verification.
 "#;
 
-const IMPLEMENT_FEATURE_INSTRUCTIONS: &str = r#"- Goal: implement the requested feature.
+const IMPLEMENT_INSTRUCTIONS: &str = r#"- Goal: implement the requested feature.
 - If requirements are unclear or the change is broad, propose a design/plan first and ask the user to confirm before implementing.
 - If requirements are clear and the change is small, implement it directly and verify.
 - Output: what changed (user-visible), key implementation notes, and verification.
 "#;
 
-const REVIEW_PULL_REQUEST_INSTRUCTIONS: &str = r#"- Goal: produce a high-quality code review of the referenced pull request.
+const REVIEW_INSTRUCTIONS: &str = r#"- Goal: produce a high-quality code review of the referenced pull request.
 - Constraints: Do NOT implement changes unless the user explicitly asks.
 - Steps: understand intent, evaluate correctness and edge cases, check tests/CI, identify risks, and suggest improvements.
 - Output: a structured review with actionable feedback, prioritized by severity.
 "#;
 
-const RESOLVE_PULL_REQUEST_CONFLICTS_INSTRUCTIONS: &str = r#"- Goal: resolve merge conflicts between the PR branch and the base branch.
-- Steps: fetch latest upstream refs, resolve conflicts carefully, and run tests/verification.
-- Constraints: Do NOT push or open PRs unless the user explicitly asks.
-- Output: what conflicted, how you resolved it, and verification.
-"#;
-
-const ADD_PROJECT_INSTRUCTIONS: &str = r#"- Goal: initialize/onboard the specified project so it can be worked on locally.
-- Steps: ensure the project is available locally, verify prerequisites, run basic checks, and summarize how to get started.
-- Output: a concise setup guide and what was verified.
+const DISCUSS_INSTRUCTIONS: &str = r#"- Goal: explore a question, uncertainty, or idea and converge on a concrete next step.
+- If the request is actionable and SIMPLE, proceed to complete it end-to-end.
+- If the request is ambiguous or COMPLEX, focus on root-cause analysis, tradeoffs, and a plan.
+- Output: a concise summary, key insights/tradeoffs, and the recommended next action.
 "#;
 
 const OTHER_INSTRUCTIONS: &str = r#"- Goal: understand the user's request and move it forward.
