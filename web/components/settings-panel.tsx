@@ -192,6 +192,9 @@ function TaskPromptEditor({
   const editorRef = useRef<HTMLTextAreaElement | null>(null)
   const previewRef = useRef<HTMLDivElement | null>(null)
   const isSyncScrollingRef = useRef(false)
+  const editorScrollableRef = useRef(1)
+  const previewScrollableRef = useRef(1)
+  const resizeObserverRef = useRef<ResizeObserver | null>(null)
   const pendingSyncRef = useRef<{
     sourceEl: HTMLTextAreaElement | HTMLDivElement
     targetEl: HTMLTextAreaElement | HTMLDivElement
@@ -235,14 +238,16 @@ function TaskPromptEditor({
       pendingSyncRef.current = null
       if (!pending) return
 
-      const sourceScrollHeight = pending.sourceEl.scrollHeight
-      const sourceClientHeight = pending.sourceEl.clientHeight
-      const sourceScrollable = Math.max(1, sourceScrollHeight - sourceClientHeight)
+      const sourceScrollable =
+        pending.sourceEl === editorRef.current
+          ? editorScrollableRef.current
+          : previewScrollableRef.current
       const ratio = pending.sourceScrollTop / sourceScrollable
 
-      const targetScrollHeight = pending.targetEl.scrollHeight
-      const targetClientHeight = pending.targetEl.clientHeight
-      const targetScrollable = Math.max(1, targetScrollHeight - targetClientHeight)
+      const targetScrollable =
+        pending.targetEl === editorRef.current
+          ? editorScrollableRef.current
+          : previewScrollableRef.current
       const nextScrollTop = ratio * targetScrollable
 
       isSyncScrollingRef.current = true
@@ -258,6 +263,43 @@ function TaskPromptEditor({
     () => renderTaskPromptPreview(deferredValue, selected),
     [deferredValue, selected],
   )
+
+  const recomputeScrollMetrics = () => {
+    const editor = editorRef.current
+    if (editor) {
+      editorScrollableRef.current = Math.max(1, editor.scrollHeight - editor.clientHeight)
+    }
+    const preview = previewRef.current
+    if (preview) {
+      previewScrollableRef.current = Math.max(1, preview.scrollHeight - preview.clientHeight)
+    }
+  }
+
+  useEffect(() => {
+    recomputeScrollMetrics()
+  }, [previewContent])
+
+  useEffect(() => {
+    const editor = editorRef.current
+    const preview = previewRef.current
+    if (!editor || !preview) return
+
+    resizeObserverRef.current?.disconnect()
+    const ro = new ResizeObserver(() => {
+      recomputeScrollMetrics()
+    })
+    ro.observe(editor)
+    ro.observe(preview)
+    resizeObserverRef.current = ro
+
+    return () => {
+      ro.disconnect()
+      if (resizeObserverRef.current === ro) {
+        resizeObserverRef.current = null
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   return (
     <div data-testid="task-prompt-editor" className="border border-border rounded-xl overflow-hidden bg-card shadow-sm">
