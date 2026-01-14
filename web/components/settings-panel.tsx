@@ -24,6 +24,7 @@ import {
   Moon,
   Palette,
   Pencil,
+  Play,
   RefreshCw,
   Settings,
   Sun,
@@ -150,7 +151,7 @@ function getHighlighter(): Promise<Highlighter> {
   if (!highlighterPromise) {
     highlighterPromise = createHighlighter({
       themes: ["github-light", "github-dark"],
-      langs: ["markdown"],
+      langs: ["markdown", "toml"],
     })
   }
   return highlighterPromise
@@ -164,17 +165,25 @@ function useShikiHighlighter(): Highlighter | null {
   return highlighter
 }
 
-function MarkdownHighlight({ text, highlighter }: { text: string; highlighter: Highlighter | null }) {
+function MarkdownHighlight({
+  text,
+  highlighter,
+  lang = "markdown",
+}: {
+  text: string
+  highlighter: Highlighter | null
+  lang?: string
+}) {
   const html = useMemo(() => {
     if (!highlighter) return null
     return highlighter.codeToHtml(text, {
-      lang: "markdown",
+      lang,
       themes: {
         light: "github-light",
         dark: "github-dark",
       },
     })
-  }, [text, highlighter])
+  }, [text, highlighter, lang])
 
   if (!html) return <span className="text-foreground">{text}</span>
 
@@ -337,9 +346,10 @@ function TaskPromptEditor({
   return (
     <div data-testid="task-prompt-editor" className="border border-border rounded-lg overflow-hidden bg-sidebar">
       <div className="flex h-[380px]">
-        <div className="w-40 border-r border-border flex flex-col">
-          <div className="flex items-center h-11 px-3 border-b border-border">
-            <span className="text-sm font-medium text-muted-foreground">Task Types</span>
+        <div className="w-44 border-r border-border flex flex-col">
+          <div className="flex items-center gap-2 h-11 px-3 border-b border-border">
+            <ListTodo className="w-4 h-4 text-muted-foreground" />
+            <span className="text-sm font-medium text-muted-foreground">Type</span>
           </div>
           <div className="flex-1 overflow-y-auto py-1.5">
             {taskTypes.map((taskType) => {
@@ -354,8 +364,8 @@ function TaskPromptEditor({
                   className={cn(
                     "w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors",
                     isSelected
-                      ? "bg-sidebar-accent text-foreground"
-                      : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50",
+                      ? "bg-primary/15 text-primary"
+                      : "text-muted-foreground hover:text-foreground hover:bg-accent",
                   )}
                 >
                   <Icon
@@ -401,8 +411,8 @@ function TaskPromptEditor({
                     : "bg-primary text-primary-foreground hover:bg-primary/90",
                 )}
               >
-                <Check className="w-3.5 h-3.5" />
-                Save
+                <Pencil className="w-3.5 h-3.5" />
+                Edit in Luban
               </button>
             </div>
           </div>
@@ -708,10 +718,10 @@ function WorkspacePreviewWithFonts({
   setTerminalFont: (v: string) => void
 }) {
   return (
-    <div className="w-full border border-border rounded-xl overflow-hidden bg-background shadow-lg pointer-events-none select-none">
+    <div className="w-full border border-border rounded-xl overflow-hidden bg-card shadow-sm pointer-events-none select-none">
       <div className="flex h-80">
-        <div className="w-40 border-r border-border bg-sidebar flex flex-col">
-          <div className="h-9 px-3 border-b border-border flex items-center gap-2">
+        <div className="w-44 border-r border-border bg-sidebar flex flex-col">
+          <div className="h-11 px-3 border-b border-border flex items-center gap-2">
             <div className="w-5 h-5 rounded bg-muted-foreground/20" />
             <div className="h-3 w-16 rounded bg-muted-foreground/20" />
           </div>
@@ -739,10 +749,14 @@ function WorkspacePreviewWithFonts({
         </div>
 
         <div className="flex-1 flex flex-col min-w-0">
-          <div className="h-9 border-b border-border px-3 flex items-center gap-2 opacity-40">
+          <div className="h-11 border-b border-border px-3 flex items-center gap-2 opacity-40">
             <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-muted-foreground/20">
               <div className="w-2 h-2 rounded-full bg-muted-foreground/40" />
-              <div className="h-2 w-10 rounded bg-muted-foreground/30" />
+              <div className="h-2 w-8 rounded bg-muted-foreground/30" />
+            </div>
+            <div className="flex items-center gap-1.5 px-2 py-1">
+              <div className="w-2 h-2 rounded-full bg-muted-foreground/40" />
+              <div className="h-2 w-12 rounded bg-muted-foreground/30" />
             </div>
           </div>
 
@@ -758,7 +772,7 @@ function WorkspacePreviewWithFonts({
                     fonts={mockLocalFonts}
                   />
                 </div>
-                <div className="bg-secondary/50 border border-border rounded-lg p-3" style={{ fontFamily: `"${chatFont}", sans-serif` }}>
+                <div className="bg-secondary/40 rounded-lg p-3" style={{ fontFamily: `"${chatFont}", sans-serif` }}>
                   <p className="text-sm leading-relaxed text-muted-foreground">The quick brown fox jumps over the lazy dog</p>
                 </div>
               </div>
@@ -776,12 +790,15 @@ function WorkspacePreviewWithFonts({
                 </div>
                 <div className="bg-secondary/60 border border-border rounded-lg p-3" style={{ fontFamily: `"${monoFont}", monospace` }}>
                   <pre className="text-sm leading-relaxed">
-                    <span className="text-blue-600">fn</span> <span className="text-amber-600">hello</span>
-                    <span className="text-muted-foreground">()</span> <span className="text-blue-600">{"->"}</span>{" "}
-                    <span className="text-green-600">String</span> <span className="text-muted-foreground">{"{"}</span>
+                    <span className="text-[#cf222e] dark:text-[#ff7b72]">fn</span>{" "}
+                    <span className="text-[#8250df] dark:text-[#d2a8ff]">hello</span>
+                    <span className="text-muted-foreground">()</span>{" "}
+                    <span className="text-[#cf222e] dark:text-[#ff7b72]">{"->"}</span>{" "}
+                    <span className="text-[#0550ae] dark:text-[#79c0ff]">String</span>{" "}
+                    <span className="text-muted-foreground">{"{"}</span>
                     {"\n"}
                     {"    "}
-                    <span className="text-orange-500">"The quick brown fox"</span>
+                    <span className="text-[#0a3069] dark:text-[#a5d6ff]">"The quick brown fox"</span>
                     <span className="text-muted-foreground">.to_string()</span>
                     {"\n"}
                     <span className="text-muted-foreground">{"}"}</span>
@@ -793,7 +810,7 @@ function WorkspacePreviewWithFonts({
         </div>
 
         <div className="w-48 border-l border-border flex flex-col">
-          <div className="h-9 border-b border-border px-3 flex items-center opacity-40">
+          <div className="h-11 border-b border-border px-3 flex items-center opacity-40">
             <div className="h-2 w-12 rounded bg-muted-foreground/30" />
           </div>
           <div className="flex-1 bg-secondary/40 flex flex-col">
@@ -874,7 +891,7 @@ function CodexConfigTree({
               }}
               className={cn(
                 "w-full flex items-center gap-1.5 px-2 py-1 rounded text-left transition-colors text-xs",
-                isSelected ? "bg-primary/15 text-primary" : "hover:bg-secondary/50 text-foreground/80",
+                isSelected ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground hover:bg-accent",
               )}
               style={{ paddingLeft: `${8 + level * 12}px` }}
             >
@@ -909,22 +926,25 @@ function CodexConfigTree({
   )
 }
 
-function CodexConfigEditor({
-  enabled,
-  saveStatus,
-  onSaveStatusChange,
-}: {
-  enabled: boolean
-  saveStatus: SaveStatus
-  onSaveStatusChange: (status: SaveStatus) => void
-}) {
-  const { getCodexConfigTree, readCodexConfigFile, writeCodexConfigFile } = useLuban()
+function CodexSettings() {
+  const { app, setCodexEnabled, checkCodex, addProject, getCodexConfigTree, readCodexConfigFile, writeCodexConfigFile } = useLuban()
+  const [enabled, setEnabled] = useState(true)
+  const [checkStatus, setCheckStatus] = useState<CheckStatus>("idle")
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle")
   const [tree, setTree] = useState<CodexConfigEntrySnapshot[]>([])
   const [selectedFile, setSelectedFile] = useState<CodexSelectedFile | null>(null)
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set(["skills"]))
   const [fileContents, setFileContents] = useState<Record<string, string>>({})
   const saveTimeoutRef = useRef<number | null>(null)
   const saveIdleTimeoutRef = useRef<number | null>(null)
+  const editorRef = useRef<HTMLTextAreaElement>(null)
+  const highlightRef = useRef<HTMLDivElement>(null)
+  const highlighter = useShikiHighlighter()
+
+  useEffect(() => {
+    const next = app?.agent?.codex_enabled ?? true
+    setEnabled(next)
+  }, [app?.rev])
 
   useEffect(() => {
     if (!enabled) return
@@ -939,6 +959,44 @@ function CodexConfigEditor({
       if (saveIdleTimeoutRef.current != null) window.clearTimeout(saveIdleTimeoutRef.current)
     }
   }, [])
+
+  const handleEditorScroll = () => {
+    if (!editorRef.current || !highlightRef.current) return
+    highlightRef.current.scrollTop = editorRef.current.scrollTop
+    highlightRef.current.scrollLeft = editorRef.current.scrollLeft
+  }
+
+  const getFileLanguage = (fileName: string): string => {
+    if (fileName.endsWith(".md")) return "markdown"
+    if (fileName.endsWith(".toml")) return "toml"
+    return "markdown"
+  }
+
+  const handleCheck = async (e: MouseEvent) => {
+    e.stopPropagation()
+    setCheckStatus("checking")
+    try {
+      const res = await checkCodex()
+      setCheckStatus(res.ok ? "success" : "error")
+      if (res.message) toast(res.message)
+    } catch (err) {
+      setCheckStatus("error")
+      toast.error(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  const handleToggleEnabled = (e: MouseEvent) => {
+    e.stopPropagation()
+    const next = !enabled
+    setEnabled(next)
+    setCodexEnabled(next)
+  }
+
+  const handleEditInLuban = (e: MouseEvent) => {
+    e.stopPropagation()
+    addProject("~/.codex")
+    toast("Added ~/.codex as a project.")
+  }
 
   const handleToggleFolder = (path: string) => {
     setExpandedFolders((prev) => {
@@ -964,206 +1022,190 @@ function CodexConfigEditor({
     if (!selectedFile) return
 
     setFileContents((prev) => ({ ...prev, [selectedFile.path]: content }))
-    onSaveStatusChange("unsaved")
+    setSaveStatus("unsaved")
 
     if (saveTimeoutRef.current != null) window.clearTimeout(saveTimeoutRef.current)
     if (saveIdleTimeoutRef.current != null) window.clearTimeout(saveIdleTimeoutRef.current)
 
     saveTimeoutRef.current = window.setTimeout(() => {
-      onSaveStatusChange("saving")
+      setSaveStatus("saving")
       const path = selectedFile.path
       void writeCodexConfigFile(path, content)
         .then(() => {
-          onSaveStatusChange("saved")
+          setSaveStatus("saved")
           saveIdleTimeoutRef.current = window.setTimeout(() => {
-            onSaveStatusChange("idle")
+            setSaveStatus("idle")
           }, 1500)
         })
         .catch((err) => {
-          onSaveStatusChange("unsaved")
+          setSaveStatus("unsaved")
           toast.error(err instanceof Error ? err.message : String(err))
         })
     }, 800)
   }
 
   const currentContent = selectedFile ? (fileContents[selectedFile.path] ?? "") : ""
+  const selectedFileIcon = selectedFile
+    ? codexEntryIcon({ kind: "file", path: selectedFile.path, name: selectedFile.name, children: [] })
+    : null
 
   return (
-    <div className="flex h-64 border-t border-border">
-      <div className="w-44 border-r border-border bg-secondary/20 overflow-y-auto py-1.5">
-        {tree.length === 0 ? (
-          <div className="px-2 py-1.5 text-xs text-muted-foreground">No config found.</div>
-        ) : (
-          <CodexConfigTree
-            entries={tree}
-            selectedPath={selectedFile?.path ?? null}
-            expandedFolders={expandedFolders}
-            onSelectFile={handleSelectFile}
-            onToggleFolder={handleToggleFolder}
-          />
-        )}
-      </div>
-
-      <div className="flex-1 overflow-hidden flex flex-col">
-        {selectedFile ? (
-          <textarea
-            data-testid="settings-codex-editor"
-            value={currentContent}
-            onChange={(e) => handleContentChange(e.target.value)}
-            className="flex-1 p-3 bg-background text-xs font-mono text-foreground/80 leading-relaxed resize-none focus:outline-none"
-            spellCheck={false}
-          />
-        ) : (
-          <div className="flex-1 flex items-center justify-center text-muted-foreground">
-            <div className="text-center">
-              <FileText className="w-8 h-8 mx-auto mb-2 opacity-30" />
-              <p className="text-xs">Select a file to edit</p>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function CodexSettings() {
-  const { app, setCodexEnabled, checkCodex, addProject } = useLuban()
-  const [enabled, setEnabled] = useState(true)
-  const [checkStatus, setCheckStatus] = useState<CheckStatus>("idle")
-  const [checkMessage, setCheckMessage] = useState<string | null>(null)
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle")
-
-  useEffect(() => {
-    const next = app?.agent?.codex_enabled ?? true
-    setEnabled(next)
-  }, [app?.rev])
-
-  const handleCheck = async (e: MouseEvent) => {
-    e.stopPropagation()
-    setCheckStatus("checking")
-    setCheckMessage(null)
-    try {
-      const res = await checkCodex()
-      setCheckStatus(res.ok ? "success" : "error")
-      setCheckMessage(res.message)
-    } catch (err) {
-      setCheckStatus("error")
-      setCheckMessage(err instanceof Error ? err.message : String(err))
-    }
-  }
-
-  const handleToggleEnabled = (e: MouseEvent) => {
-    e.stopPropagation()
-    const next = !enabled
-    setEnabled(next)
-    setCodexEnabled(next)
-  }
-
-  const handleEditInLuban = (e: MouseEvent) => {
-    e.stopPropagation()
-    addProject("~/.codex")
-    toast("Added ~/.codex as a project.")
-  }
-
-  return (
-    <div className="rounded-lg border border-border bg-card overflow-hidden">
-      <div className={cn("w-full flex items-center justify-between px-4 py-3 transition-colors", enabled ? "" : "opacity-60")}>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-black dark:bg-white text-white dark:text-black">
-            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-              <path d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.985 5.985 0 0 0-3.998 2.9 6.046 6.046 0 0 0 .743 7.097 5.98 5.98 0 0 0 4.529 2.094h.71l.147 1.02a2.5 2.5 0 0 0 2.478 2.149h5.02a2.5 2.5 0 0 0 2.478-2.149l.147-1.02h.71a5.98 5.98 0 0 0 4.529-2.094 6.046 6.046 0 0 0 1.0-4.457z" />
-            </svg>
-          </div>
-          <div>
+    <div className={cn("rounded-xl border border-border bg-card overflow-hidden shadow-sm", !enabled && "w-44")}>
+      <div className={cn("flex", enabled ? "h-[320px]" : "h-11")}>
+        <div
+          className={cn(
+            "w-44 flex flex-col bg-sidebar",
+            enabled && "border-r border-border",
+            !enabled && "opacity-60",
+          )}
+        >
+          <div className={cn("flex items-center justify-between h-11 px-3", enabled && "border-b border-border")}>
             <div className="flex items-center gap-2">
-              <h4 className="text-sm font-medium">Codex</h4>
-              {checkStatus === "success" && (
-                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-green-500/10 text-green-600 dark:text-green-400">
-                  <CheckCircle2 className="w-2.5 h-2.5" />
-                  Ready
-                </span>
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                <path d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.985 5.985 0 0 0-3.998 2.9 6.046 6.046 0 0 0 .743 7.097 5.98 5.98 0 0 0 .51 4.911 6.051 6.051 0 0 0 6.515 2.9A5.985 5.985 0 0 0 13.26 24a6.056 6.056 0 0 0 5.772-4.206 5.99 5.99 0 0 0 3.997-2.9 6.056 6.056 0 0 0-.747-7.073zM13.26 22.43a4.476 4.476 0 0 1-2.876-1.04l.141-.081 4.779-2.758a.795.795 0 0 0 .392-.681v-6.737l2.02 1.168a.071.071 0 0 1 .038.052v5.583a4.504 4.504 0 0 1-4.494 4.494zM3.6 18.304a4.47 4.47 0 0 1-.535-3.014l.142.085 4.783 2.759a.771.771 0 0 0 .78 0l5.843-3.369v2.332a.08.08 0 0 1-.033.062L9.74 19.95a4.5 4.5 0 0 1-6.14-1.646zM2.34 7.896a4.485 4.485 0 0 1 2.366-1.973V11.6a.766.766 0 0 0 .388.676l5.815 3.355-2.02 1.168a.076.076 0 0 1-.071 0l-4.83-2.786A4.504 4.504 0 0 1 2.34 7.872zm16.597 3.855-5.833-3.387L15.119 7.2a.076.076 0 0 1 .071 0l4.83 2.791a4.494 4.494 0 0 1-.676 8.105v-5.678a.79.79 0 0 0-.407-.667zm2.01-3.023-.141-.085-4.774-2.782a.776.776 0 0 0-.785 0L9.409 9.23V6.897a.066.066 0 0 1 .028-.061l4.83-2.787a4.5 4.5 0 0 1 6.68 4.66zm-12.64 4.135-2.02-1.164a.08.08 0 0 1-.038-.057V6.075a4.5 4.5 0 0 1 7.375-3.453l-.142.08-4.778 2.758a.795.795 0 0 0-.393.681zm1.097-2.365 2.602-1.5 2.607 1.5v2.999l-2.597 1.5-2.607-1.5z" />
+              </svg>
+              <span className="text-sm font-medium">Codex</span>
+            </div>
+            <button
+              data-testid="settings-codex-toggle"
+              onClick={handleToggleEnabled}
+              className={cn("relative w-9 h-5 rounded-full transition-colors", enabled ? "bg-primary" : "bg-muted")}
+              title={enabled ? "Disable Codex" : "Enable Codex"}
+            >
+              <div
+                className={cn(
+                  "absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform",
+                  enabled ? "translate-x-4" : "translate-x-0.5",
+                )}
+              />
+            </button>
+          </div>
+
+          {enabled && (
+            <div className="flex-1 overflow-y-auto py-1.5">
+              {tree.length === 0 ? (
+                <div className="px-2 py-1.5 text-xs text-muted-foreground">No config found.</div>
+              ) : (
+                <CodexConfigTree
+                  entries={tree}
+                  selectedPath={selectedFile?.path ?? null}
+                  expandedFolders={expandedFolders}
+                  onSelectFile={handleSelectFile}
+                  onToggleFolder={handleToggleFolder}
+                />
               )}
-              {checkStatus === "error" && (
-                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-red-500/10 text-red-600 dark:text-red-400">
-                  <XCircle className="w-2.5 h-2.5" />
-                  Error
-                </span>
-              )}
-              {saveStatus !== "idle" && (
-                <span
+            </div>
+          )}
+        </div>
+
+        {enabled && (
+          <div className="flex-1 flex flex-col min-w-0 bg-background">
+            <div className="flex items-center justify-between h-11 px-3 border-b border-border">
+              <div className="flex items-center gap-2">
+                {selectedFile && selectedFileIcon ? (
+                  <>
+                    <selectedFileIcon.icon className={cn("w-4 h-4", selectedFileIcon.className)} />
+                    <span className="text-sm font-medium">{selectedFile.name}</span>
+                  </>
+                ) : (
+                  <span className="text-sm text-muted-foreground">Select a file</span>
+                )}
+                {saveStatus !== "idle" && (
+                  <span
+                    className={cn(
+                      "flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px]",
+                      saveStatus === "saved"
+                        ? "bg-green-500/10 text-green-600 dark:text-green-400"
+                        : "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+                    )}
+                  >
+                    {saveStatus === "saving" && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
+                    {saveStatus === "saved" && <CheckCircle2 className="w-2.5 h-2.5" />}
+                    {saveStatus === "saving" ? "Saving..." : saveStatus === "unsaved" ? "Unsaved" : "Saved"}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  data-testid="settings-codex-check"
+                  onClick={handleCheck}
+                  disabled={checkStatus === "checking"}
                   className={cn(
-                    "inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px]",
-                    saveStatus === "saved"
-                      ? "bg-green-500/10 text-green-600 dark:text-green-400"
-                      : "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+                    "flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-all",
+                    checkStatus === "checking"
+                      ? "text-muted-foreground cursor-not-allowed"
+                      : "text-muted-foreground hover:text-foreground hover:bg-accent",
                   )}
                 >
-                  {saveStatus === "saving" && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
-                  {saveStatus === "saved" && <CheckCircle2 className="w-2.5 h-2.5" />}
-                  {saveStatus === "saving" ? "Saving..." : saveStatus === "unsaved" ? "Unsaved" : "Saved"}
-                </span>
-              )}
+                  {checkStatus === "checking" ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      Checking...
+                    </>
+                  ) : checkStatus === "success" ? (
+                    <>
+                      <CheckCircle2 className="w-3.5 h-3.5 text-green-600 dark:text-green-400" />
+                      Connected
+                    </>
+                  ) : checkStatus === "error" ? (
+                    <>
+                      <XCircle className="w-3.5 h-3.5 text-red-600 dark:text-red-400" />
+                      Failed
+                    </>
+                  ) : (
+                    <>
+                      <Play className="w-3.5 h-3.5" />
+                      Check
+                    </>
+                  )}
+                </button>
+                <button
+                  data-testid="settings-codex-edit-in-luban"
+                  onClick={handleEditInLuban}
+                  className="flex items-center gap-1.5 px-2 py-1 rounded text-xs bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                  Edit in Luban
+                </button>
+              </div>
             </div>
-            <p className="text-xs text-muted-foreground">OpenAI Codex CLI agent</p>
-            {checkMessage && <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-1">{checkMessage}</p>}
-          </div>
-        </div>
 
-        <div className="flex items-center gap-2">
-          {enabled && (
-            <button
-              data-testid="settings-codex-check"
-              onClick={handleCheck}
-              disabled={checkStatus === "checking"}
-              className={cn(
-                "flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-all",
-                checkStatus === "checking"
-                  ? "bg-muted text-muted-foreground cursor-not-allowed"
-                  : "bg-secondary hover:bg-secondary/80 text-foreground",
-              )}
-            >
-              {checkStatus === "checking" ? (
+            <div className="flex-1 relative overflow-hidden">
+              {selectedFile ? (
                 <>
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                  Checking...
+                  <div
+                    ref={highlightRef}
+                    className="absolute inset-0 p-4 text-sm font-mono leading-relaxed whitespace-pre-wrap break-words overflow-hidden pointer-events-none"
+                    aria-hidden="true"
+                  >
+                    <MarkdownHighlight
+                      text={currentContent}
+                      highlighter={highlighter}
+                      lang={getFileLanguage(selectedFile.name)}
+                    />
+                  </div>
+                  <textarea
+                    ref={editorRef}
+                    data-testid="settings-codex-editor"
+                    value={currentContent}
+                    onChange={(e) => handleContentChange(e.target.value)}
+                    onScroll={handleEditorScroll}
+                    className="absolute inset-0 p-4 bg-transparent text-sm font-mono text-transparent caret-foreground leading-relaxed resize-none focus:outline-none"
+                    spellCheck={false}
+                  />
                 </>
               ) : (
-                <>
-                  <RefreshCw className="w-3 h-3" />
-                  Check
-                </>
+                <div className="flex-1 h-full flex items-center justify-center text-muted-foreground">
+                  <div className="text-center">
+                    <FileText className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                    <p className="text-xs">Select a file to edit</p>
+                  </div>
+                </div>
               )}
-            </button>
-          )}
-
-          {enabled && (
-            <button
-              data-testid="settings-codex-edit-in-luban"
-              onClick={handleEditInLuban}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
-            >
-              <Pencil className="w-3 h-3" />
-              Edit in Luban
-            </button>
-          )}
-
-          <button
-            data-testid="settings-codex-toggle"
-            onClick={handleToggleEnabled}
-            className={cn("relative w-9 h-5 rounded-full transition-colors", enabled ? "bg-primary" : "bg-muted")}
-            title={enabled ? "Disable Codex" : "Enable Codex"}
-          >
-            <div
-              className={cn(
-                "absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform",
-                enabled ? "translate-x-4" : "translate-x-0.5",
-              )}
-            />
-          </button>
-        </div>
+            </div>
+          </div>
+        )}
       </div>
-
-      {enabled && <CodexConfigEditor enabled={enabled} saveStatus={saveStatus} onSaveStatusChange={setSaveStatus} />}
     </div>
   )
 }
