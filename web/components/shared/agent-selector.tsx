@@ -3,7 +3,7 @@
 import type { ThinkingEffort } from "@/lib/luban-api"
 
 import { useMemo, useState } from "react"
-import { ChevronDown } from "lucide-react"
+import { ChevronDown, Settings } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { AGENT_MODELS, supportedThinkingEffortsForModel } from "@/lib/agent-settings"
@@ -22,6 +22,9 @@ export function CodexAgentSelector({
   thinkingEffort,
   onChangeModelId,
   onChangeThinkingEffort,
+  defaultModelId,
+  defaultThinkingEffort,
+  onOpenAgentSettings,
   disabled = false,
   dropdownPosition = "bottom",
   className,
@@ -30,6 +33,9 @@ export function CodexAgentSelector({
   thinkingEffort: ThinkingEffort | null | undefined
   onChangeModelId: (modelId: string) => void
   onChangeThinkingEffort: (effort: ThinkingEffort) => void
+  defaultModelId?: string | null
+  defaultThinkingEffort?: ThinkingEffort | null
+  onOpenAgentSettings?: (agentId: string) => void
   disabled?: boolean
   dropdownPosition?: "top" | "bottom"
   className?: string
@@ -112,18 +118,39 @@ export function CodexAgentSelector({
                 </div>
                 {AGENT_MODELS.map((m) => {
                   const selected = m.id === panelModelId || (panelModelId === "" && m.id === currentModelId)
+                  const isDefault = defaultModelId != null && m.id === defaultModelId
                   return (
-                    <button
-                      key={m.id}
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => setTempModelId(m.id)}
-                      className={cn(
-                        "w-full flex items-center px-2.5 py-1.5 text-left text-xs transition-colors rounded-md whitespace-nowrap",
-                        selected ? "bg-primary/10 text-primary" : "text-foreground hover:bg-accent",
+                    <div key={m.id} className="relative group">
+                      <button
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => setTempModelId(m.id)}
+                        className={cn(
+                          "w-full flex items-center px-2.5 py-1.5 text-left text-xs transition-colors rounded-md whitespace-nowrap",
+                          selected ? "bg-primary/10 text-primary" : "text-foreground hover:bg-accent",
+                        )}
+                      >
+                        <span className="pr-10">{m.label}</span>
+                      </button>
+                      {isDefault && (
+                        <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 px-1.5 py-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-popover/95 rounded">
+                          <span className="text-[10px] text-muted-foreground">default</span>
+                          {onOpenAgentSettings && (
+                            <button
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                close()
+                                onOpenAgentSettings("codex")
+                              }}
+                              className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                              title="Edit Codex defaults"
+                            >
+                              <Settings className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
                       )}
-                    >
-                      {m.label}
-                    </button>
+                    </div>
                   )
                 })}
               </div>
@@ -134,18 +161,39 @@ export function CodexAgentSelector({
                 </div>
                 {effortOptions.map((effort) => {
                   const selected = effort === (currentEffort ?? "")
+                  const isDefault = defaultThinkingEffort != null && effort === defaultThinkingEffort
                   return (
-                    <button
-                      key={effort}
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => apply(panelModelId, effort)}
-                      className={cn(
-                        "w-full flex items-center px-2.5 py-1.5 text-left text-xs transition-colors rounded-md whitespace-nowrap",
-                        selected ? "bg-primary/10 text-primary" : "text-foreground hover:bg-accent",
+                    <div key={effort} className="relative group">
+                      <button
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => apply(panelModelId, effort)}
+                        className={cn(
+                          "w-full flex items-center px-2.5 py-1.5 text-left text-xs transition-colors rounded-md whitespace-nowrap",
+                          selected ? "bg-primary/10 text-primary" : "text-foreground hover:bg-accent",
+                        )}
+                      >
+                        <span className="pr-10">{thinkingEffortLabel(effort)}</span>
+                      </button>
+                      {isDefault && (
+                        <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 px-1.5 py-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-popover/95 rounded">
+                          <span className="text-[10px] text-muted-foreground">default</span>
+                          {onOpenAgentSettings && (
+                            <button
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                close()
+                                onOpenAgentSettings("codex")
+                              }}
+                              className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                              title="Edit Codex defaults"
+                            >
+                              <Settings className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
                       )}
-                    >
-                      {thinkingEffortLabel(effort)}
-                    </button>
+                    </div>
                   )
                 })}
               </div>

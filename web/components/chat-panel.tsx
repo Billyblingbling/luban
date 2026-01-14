@@ -44,6 +44,7 @@ import {
 import type { ChangedFile } from "./right-sidebar"
 import { MultiFileDiff, type FileContents } from "@pierre/diffs/react"
 import { CodexAgentSelector } from "@/components/shared/agent-selector"
+import { openSettingsPanel } from "@/lib/open-settings"
 
 interface ChatTab {
   id: string
@@ -853,6 +854,9 @@ export function ChatPanel({
                     disabled={activeWorkspaceId == null || activeThreadId == null}
                     modelId={conversation?.agent_model_id}
                     thinkingEffort={conversation?.thinking_effort}
+                    defaultModelId={app?.agent.default_model_id ?? null}
+                    defaultThinkingEffort={app?.agent.default_thinking_effort ?? null}
+                    onOpenAgentSettings={() => openSettingsPanel("agent")}
                     onChangeModelId={(modelId) => {
                       if (activeWorkspaceId == null || activeThreadId == null) return
                       setChatModel(activeWorkspaceId, activeThreadId, modelId)

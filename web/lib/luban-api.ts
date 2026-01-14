@@ -20,6 +20,8 @@ export type AppearanceSnapshot = {
 
 export type AgentSettingsSnapshot = {
   codex_enabled: boolean
+  default_model_id?: string
+  default_thinking_effort?: ThinkingEffort
 }
 
 export type TaskPromptTemplateSnapshot = {

@@ -1427,6 +1427,14 @@ impl Engine {
             },
             agent: luban_api::AgentSettingsSnapshot {
                 codex_enabled: self.state.agent_codex_enabled(),
+                default_model_id: Some(self.state.agent_default_model_id().to_owned()),
+                default_thinking_effort: Some(match self.state.agent_default_thinking_effort() {
+                    ThinkingEffort::Minimal => luban_api::ThinkingEffort::Minimal,
+                    ThinkingEffort::Low => luban_api::ThinkingEffort::Low,
+                    ThinkingEffort::Medium => luban_api::ThinkingEffort::Medium,
+                    ThinkingEffort::High => luban_api::ThinkingEffort::High,
+                    ThinkingEffort::XHigh => luban_api::ThinkingEffort::XHigh,
+                }),
             },
             task: luban_api::TaskSettingsSnapshot {
                 prompt_templates: luban_domain::TaskIntentKind::ALL

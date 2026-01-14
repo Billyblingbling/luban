@@ -21,6 +21,7 @@ import type { ConversationEntry, ConversationSnapshot } from "@/lib/luban-api"
 import { ConversationView } from "@/components/conversation-view"
 import { AgentStatusIcon, PRBadge } from "@/components/shared/status-indicator"
 import { CodexAgentSelector } from "@/components/shared/agent-selector"
+import { openSettingsPanel } from "@/lib/open-settings"
 import { buildKanbanBoardVm, type KanbanWorktreeVm } from "@/lib/kanban-view-model"
 import { kanbanColumns, type KanbanColumn } from "@/lib/worktree-ui"
 import { pickThreadId } from "@/lib/thread-ui"
@@ -82,7 +83,7 @@ function WorktreePreviewPanel({
   onClose: () => void
   onNavigate: () => void
 }) {
-  const { sendAgentMessageTo, setChatModel, setThinkingEffort } = useLuban()
+  const { app, sendAgentMessageTo, setChatModel, setThinkingEffort } = useLuban()
 
   const [input, setInput] = useState("")
   const [isLoading, setIsLoading] = useState(false)
@@ -216,6 +217,9 @@ function WorktreePreviewPanel({
               disabled={threadId == null}
               modelId={conversation?.agent_model_id}
               thinkingEffort={conversation?.thinking_effort}
+              defaultModelId={app?.agent.default_model_id ?? null}
+              defaultThinkingEffort={app?.agent.default_thinking_effort ?? null}
+              onOpenAgentSettings={() => openSettingsPanel("agent")}
               onChangeModelId={(modelId) => {
                 if (threadId == null) return
                 setChatModel(worktree.workspaceId, threadId, modelId)

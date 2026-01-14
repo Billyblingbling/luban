@@ -28,6 +28,7 @@ import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { SettingsPanel } from "@/components/settings-panel"
 import type { AgentStatus } from "@/lib/worktree-ui"
+import type { SettingsSectionId } from "@/lib/open-settings"
 
 interface SidebarProps {
   viewMode: "workspace" | "kanban"
@@ -65,6 +66,17 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
   const [projectToDelete, setProjectToDelete] = useState<{ id: number; name: string } | null>(null)
   const [newTaskOpen, setNewTaskOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsInitialSectionId, setSettingsInitialSectionId] = useState<SettingsSectionId | null>(null)
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ sectionId?: SettingsSectionId } | null>).detail
+      setSettingsInitialSectionId(detail?.sectionId ?? "agent")
+      setSettingsOpen(true)
+    }
+    window.addEventListener("luban:open-settings", handler)
+    return () => window.removeEventListener("luban:open-settings", handler)
+  }, [])
 
   useEffect(() => {
     if (!app) return
@@ -461,7 +473,14 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
       </div>
 
       <NewTaskModal open={newTaskOpen} onOpenChange={setNewTaskOpen} />
-      <SettingsPanel open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <SettingsPanel
+        open={settingsOpen}
+        onOpenChange={(open) => {
+          setSettingsOpen(open)
+          if (!open) setSettingsInitialSectionId(null)
+        }}
+        initialSectionId={settingsInitialSectionId ?? undefined}
+      />
 
       <Dialog open={projectToDelete !== null} onOpenChange={(open) => !open && setProjectToDelete(null)}>
         <DialogContent

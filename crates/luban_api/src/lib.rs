@@ -34,12 +34,18 @@ pub struct AppearanceSnapshot {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AgentSettingsSnapshot {
     pub codex_enabled: bool,
+    #[serde(default)]
+    pub default_model_id: Option<String>,
+    #[serde(default)]
+    pub default_thinking_effort: Option<ThinkingEffort>,
 }
 
 impl Default for AgentSettingsSnapshot {
     fn default() -> Self {
         Self {
             codex_enabled: true,
+            default_model_id: None,
+            default_thinking_effort: None,
         }
     }
 }

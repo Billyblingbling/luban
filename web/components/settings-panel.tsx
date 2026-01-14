@@ -44,6 +44,7 @@ import type { AppearanceTheme, CodexConfigEntrySnapshot, TaskIntentKind } from "
 interface SettingsPanelProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  initialSectionId?: "theme" | "fonts" | "agent" | "task"
 }
 
 type TocItem = {
@@ -1319,12 +1320,25 @@ function AllSettings() {
   )
 }
 
-export function SettingsPanel({ open, onOpenChange }: SettingsPanelProps) {
-  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set(["appearance"]))
-  const [activeItem, setActiveItem] = useState<string>("theme")
+export function SettingsPanel({ open, onOpenChange, initialSectionId }: SettingsPanelProps) {
+  const [expandedItems, setExpandedItems] = useState<Set<string>>(() => {
+    const next = new Set<string>(["appearance"])
+    if (initialSectionId === "theme" || initialSectionId === "fonts") next.add("appearance")
+    return next
+  })
+  const [activeItem, setActiveItem] = useState<string>(initialSectionId ?? "theme")
   const contentRef = useRef<HTMLDivElement>(null)
-
-  if (!open) return null
+  useEffect(() => {
+    if (!open) return
+    if (!initialSectionId) return
+    if (initialSectionId === "theme" || initialSectionId === "fonts") {
+      setExpandedItems((prev) => new Set(prev).add("appearance"))
+    }
+    setActiveItem(initialSectionId)
+    window.requestAnimationFrame(() => {
+      document.getElementById(initialSectionId)?.scrollIntoView({ behavior: "smooth", block: "start" })
+    })
+  }, [open, initialSectionId])
 
   const toggleExpanded = (id: string) => {
     setExpandedItems((prev) => {
@@ -1342,6 +1356,7 @@ export function SettingsPanel({ open, onOpenChange }: SettingsPanelProps) {
       element.scrollIntoView({ behavior: "smooth", block: "start" })
     }
   }
+  if (!open) return null
 
   return (
     <div data-testid="settings-panel" className="fixed inset-0 z-50 bg-background flex">

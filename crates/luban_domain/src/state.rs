@@ -501,6 +501,14 @@ impl AppState {
     pub fn agent_codex_enabled(&self) -> bool {
         self.agent_codex_enabled
     }
+
+    pub fn agent_default_model_id(&self) -> &str {
+        &self.agent_default_model_id
+    }
+
+    pub fn agent_default_thinking_effort(&self) -> ThinkingEffort {
+        self.agent_default_thinking_effort
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
