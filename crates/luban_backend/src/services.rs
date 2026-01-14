@@ -5,12 +5,12 @@ use luban_domain::{
     AttachmentKind, AttachmentRef, CodexConfigEntry, CodexConfigEntryKind, CodexThreadEvent,
     CodexThreadItem, ContextImage, ConversationEntry, ConversationSnapshot, CreatedWorkspace,
     PersistedAppState, ProjectWorkspaceService, PullRequestCiState, PullRequestInfo,
-    PullRequestState, RunAgentTurnRequest, TaskIntentKind,
+    PullRequestState, RunAgentTurnRequest, SystemTaskKind, TaskIntentKind,
 };
 use rand::{Rng as _, rngs::OsRng};
 use std::{
     collections::HashSet,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::Command,
     sync::Arc,
     sync::atomic::{AtomicBool, Ordering},
@@ -272,6 +272,10 @@ impl GitWorkspaceService {
         self.task_prompts_root.join(format!("{}.md", kind.as_key()))
     }
 
+    fn system_prompt_template_path(&self, kind: SystemTaskKind) -> PathBuf {
+        self.task_prompts_root.join(format!("{}.md", kind.as_key()))
+    }
+
     fn codex_executable(&self) -> PathBuf {
         std::env::var_os(paths::LUBAN_CODEX_BIN_ENV)
             .map(PathBuf::from)
@@ -303,6 +307,7 @@ impl ProjectWorkspaceService for GitWorkspaceService {
         &self,
         project_path: PathBuf,
         project_slug: String,
+        branch_name_hint: Option<String>,
     ) -> Result<CreatedWorkspace, String> {
         let result: anyhow::Result<CreatedWorkspace> = (|| {
             let remote = "origin";
@@ -322,6 +327,111 @@ impl ProjectWorkspaceService for GitWorkspaceService {
             std::fs::create_dir_all(self.worktrees_root.join(&project_slug))
                 .context("failed to create worktrees root")?;
 
+            fn normalize_branch_suffix(raw: &str) -> Option<String> {
+                let trimmed = raw.trim();
+                if trimmed.is_empty() {
+                    return None;
+                }
+
+                let mut rest = trimmed;
+                if let Some(stripped) = rest.strip_prefix("refs/heads/") {
+                    rest = stripped;
+                }
+                if let Some(stripped) = rest.strip_prefix("luban/") {
+                    rest = stripped;
+                }
+
+                let mut out = String::new();
+                let mut prev_hyphen = false;
+                for ch in rest.chars() {
+                    let next = if ch.is_ascii_alphanumeric() {
+                        ch.to_ascii_lowercase()
+                    } else {
+                        '-'
+                    };
+                    if next == '-' {
+                        if prev_hyphen {
+                            continue;
+                        }
+                        prev_hyphen = true;
+                        out.push('-');
+                        continue;
+                    }
+                    prev_hyphen = false;
+                    out.push(next);
+                }
+
+                let trimmed = out.trim_matches('-');
+                if trimmed.is_empty() {
+                    return None;
+                }
+
+                const MAX_SUFFIX_LEN: usize = 24;
+                let limited = trimmed.chars().take(MAX_SUFFIX_LEN).collect::<String>();
+                let limited = limited.trim_matches('-').to_owned();
+                if limited.is_empty() {
+                    return None;
+                }
+                Some(limited)
+            }
+
+            fn branch_exists(project_path: &Path, branch_name: &str) -> bool {
+                let branch_ref = format!("refs/heads/{branch_name}");
+                Command::new("git")
+                    .args(["show-ref", "--verify", "--quiet", &branch_ref])
+                    .current_dir(project_path)
+                    .status()
+                    .ok()
+                    .map(|s| s.success())
+                    .unwrap_or(false)
+            }
+
+            if let Some(hint) = branch_name_hint
+                .as_deref()
+                .and_then(normalize_branch_suffix)
+            {
+                for attempt in 0..64 {
+                    let workspace_name = if attempt == 0 {
+                        hint.clone()
+                    } else {
+                        format!("{hint}-{attempt}")
+                    };
+
+                    let branch_name = format!("luban/{workspace_name}");
+                    let worktree_path = self.worktree_path(&project_slug, &workspace_name);
+
+                    if worktree_path.exists() {
+                        continue;
+                    }
+                    if branch_exists(&project_path, &branch_name) {
+                        continue;
+                    }
+
+                    self.run_git(
+                        &project_path,
+                        [
+                            "worktree",
+                            "add",
+                            "-b",
+                            &branch_name,
+                            worktree_path
+                                .to_str()
+                                .ok_or_else(|| anyhow!("invalid worktree path"))?,
+                            upstream_commit.trim(),
+                        ],
+                    )
+                    .with_context(|| {
+                        format!("failed to create worktree at {}", worktree_path.display())
+                    })?;
+
+                    return Ok(CreatedWorkspace {
+                        workspace_name,
+                        branch_name,
+                        worktree_path,
+                    });
+                }
+            }
+
             for _ in 0..64 {
                 let workspace_name = self.generate_workspace_name()?;
                 let branch_name = format!("luban/{workspace_name}");
@@ -331,16 +441,7 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                     continue;
                 }
 
-                let branch_ref = format!("refs/heads/{branch_name}");
-                let branch_exists = Command::new("git")
-                    .args(["show-ref", "--verify", "--quiet", &branch_ref])
-                    .current_dir(&project_path)
-                    .status()
-                    .ok()
-                    .map(|s| s.success())
-                    .unwrap_or(false);
-
-                if branch_exists {
+                if branch_exists(&project_path, &branch_name) {
                     continue;
                 }
 
@@ -1167,6 +1268,107 @@ impl ProjectWorkspaceService for GitWorkspaceService {
         }
     }
 
+    fn system_prompt_templates_load(
+        &self,
+    ) -> Result<std::collections::HashMap<SystemTaskKind, String>, String> {
+        fn inner(
+            service: &GitWorkspaceService,
+        ) -> anyhow::Result<std::collections::HashMap<SystemTaskKind, String>> {
+            let mut out = std::collections::HashMap::new();
+            for kind in SystemTaskKind::ALL {
+                let path = service.system_prompt_template_path(kind);
+                let contents = match std::fs::read_to_string(&path) {
+                    Ok(contents) => contents,
+                    Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+                    Err(err) => {
+                        return Err(anyhow!(err).context(format!(
+                            "failed to read system prompt template {}",
+                            path.display()
+                        )));
+                    }
+                };
+                let trimmed = contents.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                out.insert(kind, trimmed.to_owned());
+            }
+            Ok(out)
+        }
+
+        inner(self).map_err(|e| format!("{e:#}"))
+    }
+
+    fn system_prompt_template_store(
+        &self,
+        kind: SystemTaskKind,
+        template: String,
+    ) -> Result<(), String> {
+        fn inner(
+            service: &GitWorkspaceService,
+            kind: SystemTaskKind,
+            template: String,
+        ) -> anyhow::Result<()> {
+            std::fs::create_dir_all(&service.task_prompts_root).with_context(|| {
+                format!(
+                    "failed to create task prompts dir {}",
+                    service.task_prompts_root.display()
+                )
+            })?;
+
+            let path = service.system_prompt_template_path(kind);
+            let nanos = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            let pid = std::process::id();
+            let tmp =
+                service
+                    .task_prompts_root
+                    .join(format!(".{}.{}.{}.tmp", kind.as_key(), pid, nanos));
+
+            let mut normalized = template;
+            if !normalized.ends_with('\n') {
+                normalized.push('\n');
+            }
+
+            std::fs::write(&tmp, normalized.as_bytes())
+                .with_context(|| format!("failed to write {}", tmp.display()))?;
+
+            if std::fs::rename(&tmp, &path).is_err() {
+                if path.exists() {
+                    let _ = std::fs::remove_file(&path);
+                }
+                std::fs::rename(&tmp, &path).with_context(|| {
+                    format!(
+                        "failed to replace system prompt template {}",
+                        path.display()
+                    )
+                })?;
+            }
+
+            Ok(())
+        }
+
+        inner(self, kind, template).map_err(|e| format!("{e:#}"))
+    }
+
+    fn system_prompt_template_delete(&self, kind: SystemTaskKind) -> Result<(), String> {
+        let path = self.system_prompt_template_path(kind);
+        match std::fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(format!(
+                "{:#}",
+                anyhow!(err).context(format!("failed to remove {}", path.display()))
+            )),
+        }
+    }
+
+    fn task_suggest_branch_name(&self, draft: luban_domain::TaskDraft) -> Result<String, String> {
+        task::task_suggest_branch_name(self, draft).map_err(|e| format!("{e:#}"))
+    }
+
     fn codex_check(&self) -> Result<(), String> {
         let result: anyhow::Result<()> = (|| {
             let codex = self.codex_executable();
@@ -1538,6 +1740,51 @@ mod tests {
     }
 
     #[test]
+    fn system_prompt_templates_roundtrip_via_files() {
+        let _guard = lock_env();
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be valid")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "luban-system-prompts-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&root).expect("temp dir should be created");
+        unsafe {
+            std::env::set_var(paths::LUBAN_ROOT_ENV, root.as_os_str());
+        }
+
+        let service = GitWorkspaceService::new().expect("service should init");
+        service
+            .system_prompt_template_store(SystemTaskKind::InferType, "hello".to_owned())
+            .expect("store should succeed");
+
+        let loaded = service
+            .system_prompt_templates_load()
+            .expect("load should succeed");
+        assert_eq!(
+            loaded.get(&SystemTaskKind::InferType).map(String::as_str),
+            Some("hello")
+        );
+
+        service
+            .system_prompt_template_delete(SystemTaskKind::InferType)
+            .expect("delete should succeed");
+        let loaded = service
+            .system_prompt_templates_load()
+            .expect("load should succeed");
+        assert!(!loaded.contains_key(&SystemTaskKind::InferType));
+
+        unsafe {
+            std::env::remove_var(paths::LUBAN_ROOT_ENV);
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn codex_runner_reports_missing_executable() {
         let _guard = lock_env();
 
@@ -1845,6 +2092,7 @@ mod tests {
             &service,
             project_dir.clone(),
             "proj".to_owned(),
+            None,
         )
         .expect("create_workspace should succeed");
 

@@ -1,6 +1,6 @@
 use crate::{
     AttachmentRef, CodexThreadEvent, ContextItem, ConversationSnapshot, ConversationThreadMeta,
-    PersistedAppState,
+    PersistedAppState, SystemTaskKind,
 };
 use std::collections::HashMap;
 use std::{path::PathBuf, sync::Arc, sync::atomic::AtomicBool};
@@ -182,6 +182,7 @@ pub trait ProjectWorkspaceService: Send + Sync {
         &self,
         project_path: PathBuf,
         project_slug: String,
+        branch_name_hint: Option<String>,
     ) -> Result<CreatedWorkspace, String>;
 
     fn open_workspace_in_ide(&self, worktree_path: PathBuf) -> Result<(), String>;
@@ -291,6 +292,26 @@ pub trait ProjectWorkspaceService: Send + Sync {
 
     fn task_prompt_template_delete(&self, _intent_kind: TaskIntentKind) -> Result<(), String> {
         Ok(())
+    }
+
+    fn system_prompt_templates_load(&self) -> Result<HashMap<SystemTaskKind, String>, String> {
+        Ok(HashMap::new())
+    }
+
+    fn system_prompt_template_store(
+        &self,
+        _kind: SystemTaskKind,
+        _template: String,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn system_prompt_template_delete(&self, _kind: SystemTaskKind) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn task_suggest_branch_name(&self, _draft: TaskDraft) -> Result<String, String> {
+        Err("unimplemented".to_owned())
     }
 
     fn codex_check(&self) -> Result<(), String> {

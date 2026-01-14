@@ -5,8 +5,8 @@ use crate::{
     Workspace, WorkspaceId, WorkspaceStatus, WorkspaceTabs, WorkspaceThreadId,
 };
 use crate::{
-    TaskIntentKind, default_agent_model_id, default_task_prompt_templates, default_thinking_effort,
-    normalize_thinking_effort,
+    TaskIntentKind, default_agent_model_id, default_system_prompt_templates,
+    default_task_prompt_templates, default_thinking_effort, normalize_thinking_effort,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -59,6 +59,7 @@ pub(crate) fn apply_persisted_app_state(
     state.agent_codex_enabled = persisted.agent_codex_enabled.unwrap_or(true);
 
     state.task_prompt_templates = default_task_prompt_templates();
+    state.system_prompt_templates = default_system_prompt_templates();
 
     let (projects, projects_upgraded) = load_projects(persisted.projects);
     state.projects = projects;
@@ -197,6 +198,7 @@ pub(crate) fn apply_persisted_app_state(
     }
     effects.push(Effect::LoadCodexDefaults);
     effects.push(Effect::LoadTaskPromptTemplates);
+    effects.push(Effect::LoadSystemPromptTemplates);
     if projects_upgraded || clear_legacy_templates {
         effects.push(Effect::SaveAppState);
     }

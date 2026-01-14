@@ -7,9 +7,9 @@ use crate::{
     Action, AgentRunConfig, AppState, CodexThreadEvent, ConversationEntry, DraftAttachment, Effect,
     MainPane, OperationStatus, PersistedAppState, Project, ProjectId, QueuedPrompt, RightPane,
     ThinkingEffort, Workspace, WorkspaceConversation, WorkspaceId, WorkspaceStatus, WorkspaceTabs,
-    WorkspaceThreadId, default_agent_model_id, default_task_prompt_template,
-    default_task_prompt_templates, default_thinking_effort, normalize_thinking_effort,
-    thinking_effort_supported,
+    WorkspaceThreadId, default_agent_model_id, default_system_prompt_template,
+    default_system_prompt_templates, default_task_prompt_template, default_task_prompt_templates,
+    default_thinking_effort, normalize_thinking_effort, thinking_effort_supported,
 };
 use std::collections::VecDeque;
 use std::{
@@ -44,6 +44,7 @@ impl AppState {
             workspace_chat_scroll_anchor: HashMap::new(),
             workspace_unread_completions: HashSet::new(),
             task_prompt_templates: default_task_prompt_templates(),
+            system_prompt_templates: default_system_prompt_templates(),
         }
     }
 
@@ -161,7 +162,10 @@ impl AppState {
                 Vec::new()
             }
 
-            Action::CreateWorkspace { project_id } => {
+            Action::CreateWorkspace {
+                project_id,
+                branch_name_hint,
+            } => {
                 if let Some(project) = self.projects.iter_mut().find(|p| p.id == project_id) {
                     if !project.is_git {
                         self.last_error =
@@ -176,7 +180,10 @@ impl AppState {
                         self.insert_main_workspace(project_id);
                     }
                 }
-                vec![Effect::CreateWorkspace { project_id }]
+                vec![Effect::CreateWorkspace {
+                    project_id,
+                    branch_name_hint,
+                }]
             }
             Action::EnsureMainWorkspace { project_id } => {
                 let Some(project) = self.projects.iter().find(|p| p.id == project_id) else {
@@ -990,6 +997,39 @@ impl AppState {
                 self.task_prompt_templates = next;
                 Vec::new()
             }
+            Action::SystemPromptTemplateChanged { kind, template } => {
+                let trimmed = template.trim();
+                if trimmed.is_empty() {
+                    return Vec::new();
+                }
+                let existing = self.system_prompt_templates.get(&kind).map(|t| t.as_str());
+                if existing == Some(trimmed) {
+                    return Vec::new();
+                }
+                self.system_prompt_templates
+                    .insert(kind, trimmed.to_owned());
+                let default = default_system_prompt_template(kind);
+                if trimmed == default.trim() {
+                    vec![Effect::DeleteSystemPromptTemplate { kind }]
+                } else {
+                    vec![Effect::StoreSystemPromptTemplate {
+                        kind,
+                        template: trimmed.to_owned(),
+                    }]
+                }
+            }
+            Action::SystemPromptTemplatesLoaded { templates } => {
+                let mut next = default_system_prompt_templates();
+                for (kind, template) in templates {
+                    let trimmed = template.trim();
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    next.insert(kind, trimmed.to_owned());
+                }
+                self.system_prompt_templates = next;
+                Vec::new()
+            }
             Action::WorkspaceChatScrollSaved {
                 workspace_id,
                 thread_id,
@@ -1489,7 +1529,10 @@ mod tests {
             is_git: true,
         });
         let project_id = state.projects[0].id;
-        state.apply(Action::CreateWorkspace { project_id });
+        state.apply(Action::CreateWorkspace {
+            project_id,
+            branch_name_hint: None,
+        });
         state.apply(Action::WorkspaceCreated {
             project_id,
             workspace_name: "w1".to_owned(),
@@ -1538,7 +1581,10 @@ mod tests {
             is_git: true,
         });
         let project_id = state.projects[0].id;
-        state.apply(Action::CreateWorkspace { project_id });
+        state.apply(Action::CreateWorkspace {
+            project_id,
+            branch_name_hint: None,
+        });
         state.apply(Action::WorkspaceCreated {
             project_id,
             workspace_name: "w1".to_owned(),
@@ -1601,7 +1647,10 @@ mod tests {
             is_git: true,
         });
         let project_id = state.projects[0].id;
-        state.apply(Action::CreateWorkspace { project_id });
+        state.apply(Action::CreateWorkspace {
+            project_id,
+            branch_name_hint: None,
+        });
         state.apply(Action::WorkspaceCreated {
             project_id,
             workspace_name: "w1".to_owned(),
@@ -1690,7 +1739,10 @@ mod tests {
             is_git: true,
         });
         let project_id = state.projects[0].id;
-        state.apply(Action::CreateWorkspace { project_id });
+        state.apply(Action::CreateWorkspace {
+            project_id,
+            branch_name_hint: None,
+        });
         state.apply(Action::WorkspaceCreated {
             project_id,
             workspace_name: "w1".to_owned(),
@@ -2260,7 +2312,10 @@ mod tests {
             is_git: true,
         });
         let project_id = state.projects[0].id;
-        state.apply(Action::CreateWorkspace { project_id });
+        state.apply(Action::CreateWorkspace {
+            project_id,
+            branch_name_hint: None,
+        });
 
         let workspace_id = main_workspace_id(&state);
         let effects = state.apply(Action::ArchiveWorkspace { workspace_id });
@@ -2359,7 +2414,10 @@ mod tests {
         });
         let project_id = state.projects[0].id;
 
-        let effects = state.apply(Action::CreateWorkspace { project_id });
+        let effects = state.apply(Action::CreateWorkspace {
+            project_id,
+            branch_name_hint: None,
+        });
         assert_eq!(effects.len(), 1);
         assert!(matches!(effects[0], Effect::CreateWorkspace { .. }));
 
@@ -2409,12 +2467,13 @@ mod tests {
             "expected main pane to restore workspace"
         );
         assert_eq!(loaded.right_pane, RightPane::Terminal);
-        assert_eq!(effects.len(), 4);
+        assert_eq!(effects.len(), 5);
         assert!(matches!(effects[0], Effect::LoadCodexDefaults));
         assert!(matches!(effects[1], Effect::LoadTaskPromptTemplates));
-        assert!(matches!(effects[2], Effect::LoadWorkspaceThreads { .. }));
+        assert!(matches!(effects[2], Effect::LoadSystemPromptTemplates));
+        assert!(matches!(effects[3], Effect::LoadWorkspaceThreads { .. }));
         assert!(matches!(
-            effects[3],
+            effects[4],
             Effect::LoadConversation { workspace_id: id, .. } if id == workspace_id
         ));
     }

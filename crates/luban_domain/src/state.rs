@@ -1,4 +1,6 @@
-use crate::{CodexThreadItem, CodexUsage, ContextTokenKind, TaskIntentKind, ThinkingEffort};
+use crate::{
+    CodexThreadItem, CodexUsage, ContextTokenKind, SystemTaskKind, TaskIntentKind, ThinkingEffort,
+};
 use std::{
     collections::{BTreeMap, HashMap, HashSet, VecDeque},
     path::PathBuf,
@@ -495,6 +497,7 @@ pub struct AppState {
     pub workspace_chat_scroll_anchor: HashMap<(WorkspaceId, WorkspaceThreadId), ChatScrollAnchor>,
     pub workspace_unread_completions: HashSet<WorkspaceId>,
     pub task_prompt_templates: HashMap<TaskIntentKind, String>,
+    pub system_prompt_templates: HashMap<SystemTaskKind, String>,
 }
 
 impl AppState {

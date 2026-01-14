@@ -8,8 +8,11 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  AlertTriangle,
   Bot,
   CheckCircle2,
+  ClipboardType,
+  GitBranch,
   GitPullRequest,
   Lightbulb,
   ListTodo,
@@ -27,8 +30,11 @@ import {
   Play,
   RefreshCw,
   Settings,
+  ShieldCheck,
+  Sparkle,
   Sun,
   Type,
+  UserPen,
   X,
   XCircle,
 } from "lucide-react"
@@ -39,7 +45,7 @@ import { toast } from "sonner"
 import { useAppearance } from "@/components/appearance-provider"
 import { useLuban } from "@/lib/luban-context"
 import { cn } from "@/lib/utils"
-import type { AppearanceTheme, CodexConfigEntrySnapshot, TaskIntentKind } from "@/lib/luban-api"
+import type { AppearanceTheme, CodexConfigEntrySnapshot, SystemTaskKind, TaskIntentKind } from "@/lib/luban-api"
 import { addProjectAndOpen } from "@/lib/add-project-and-open"
 
 interface SettingsPanelProps {
@@ -105,13 +111,21 @@ const themeColors = {
 }
 
 type TaskPromptTemplate = { intent_kind: TaskIntentKind; template: string }
+type SystemPromptTemplate = { kind: SystemTaskKind; template: string }
 
 type TaskTypeConfig = {
-  id: TaskIntentKind
+  id: TaskIntentKind | SystemTaskKind
   label: string
   icon: ElementType
   description: string
 }
+
+type TaskType = TaskIntentKind | SystemTaskKind
+
+const systemTaskTypes: TaskTypeConfig[] = [
+  { id: "infer-type", label: "Infer Type", icon: Sparkle, description: "Infer task type from the input" },
+  { id: "rename-branch", label: "Rename Branch", icon: GitBranch, description: "Generate a branch name from the task" },
+]
 
 const taskTypes: TaskTypeConfig[] = [
   { id: "fix", label: "Fix", icon: Bug, description: "Fix bugs or issues in the code" },
@@ -120,6 +134,8 @@ const taskTypes: TaskTypeConfig[] = [
   { id: "discuss", label: "Discuss", icon: MessageSquare, description: "Discuss and explore ideas or questions" },
   { id: "other", label: "Other", icon: HelpCircle, description: "Other types of tasks" },
 ]
+
+const allTaskTypes: TaskTypeConfig[] = [...systemTaskTypes, ...taskTypes]
 
 type TemplateVariable = {
   id: string
@@ -134,9 +150,12 @@ const templateVariables: TemplateVariable[] = [
   { id: "task_input", label: "task_input", description: "Raw task input from the user" },
   { id: "intent_label", label: "intent_label", description: "Intent label derived from task analysis" },
   { id: "known_context", label: "known_context", description: "Known context retrieved during task preview" },
+  { id: "context_json", label: "context_json", description: "Structured JSON context from task preview" },
 ]
 
-const variablesByTaskType: Record<TaskIntentKind, string[]> = {
+const variablesByTaskType: Record<string, string[]> = {
+  "infer-type": ["task_input", "context_json"],
+  "rename-branch": ["task_input", "context_json"],
   fix: ["repo", "issue", "task_input", "intent_label", "known_context"],
   implement: ["repo", "issue", "task_input", "intent_label", "known_context"],
   review: ["repo", "pr", "task_input", "intent_label", "known_context"],
@@ -144,7 +163,7 @@ const variablesByTaskType: Record<TaskIntentKind, string[]> = {
   other: ["repo", "issue", "task_input", "intent_label", "known_context"],
 }
 
-function variablesForTaskType(taskType: TaskIntentKind): TemplateVariable[] {
+function variablesForTaskType(taskType: TaskType): TemplateVariable[] {
   const ids = variablesByTaskType[taskType] ?? []
   return ids.map((id) => templateVariables.find((v) => v.id === id)).filter(Boolean) as TemplateVariable[]
 }
@@ -203,26 +222,49 @@ function MarkdownHighlight({
 function TaskPromptEditor({
   templates,
   defaultTemplates,
+  systemTemplates,
+  defaultSystemTemplates,
   setTaskPromptTemplate,
+  setSystemPromptTemplate,
 }: {
   templates: TaskPromptTemplate[]
   defaultTemplates: TaskPromptTemplate[]
+  systemTemplates: SystemPromptTemplate[]
+  defaultSystemTemplates: SystemPromptTemplate[]
   setTaskPromptTemplate: (kind: TaskIntentKind, template: string) => void
+  setSystemPromptTemplate: (kind: SystemTaskKind, template: string) => void
 }) {
-  const templatesByKind = useMemo(() => new Map(templates.map((t) => [t.intent_kind, t.template])), [templates])
-  const defaultTemplatesByKind = useMemo(
+  const userTemplatesByKind = useMemo(
+    () => new Map(templates.map((t) => [t.intent_kind, t.template])),
+    [templates],
+  )
+  const defaultUserTemplatesByKind = useMemo(
     () => new Map(defaultTemplates.map((t) => [t.intent_kind, t.template])),
     [defaultTemplates],
   )
+  const systemTemplatesByKind = useMemo(
+    () => new Map(systemTemplates.map((t) => [t.kind, t.template])),
+    [systemTemplates],
+  )
+  const defaultSystemTemplatesByKind = useMemo(
+    () => new Map(defaultSystemTemplates.map((t) => [t.kind, t.template])),
+    [defaultSystemTemplates],
+  )
 
-  const [selectedType, setSelectedType] = useState<TaskIntentKind>("fix")
-  const [typePrompts, setTypePrompts] = useState<Record<TaskIntentKind, string>>(() => {
-    const map = new Map(templates.map((t) => [t.intent_kind, t.template]))
+  const isSystemTask = (taskType: TaskType): taskType is SystemTaskKind =>
+    taskType === "infer-type" || taskType === "rename-branch"
+
+  const [selectedType, setSelectedType] = useState<TaskType>("infer-type")
+  const [typePrompts, setTypePrompts] = useState<Record<string, string>>(() => {
     const initial: Record<string, string> = {}
-    taskTypes.forEach((t) => {
-      initial[t.id] = map.get(t.id) ?? ""
+    allTaskTypes.forEach((t) => {
+      if (isSystemTask(t.id)) {
+        initial[t.id] = systemTemplatesByKind.get(t.id) ?? defaultSystemTemplatesByKind.get(t.id) ?? ""
+      } else {
+        initial[t.id] = userTemplatesByKind.get(t.id) ?? defaultUserTemplatesByKind.get(t.id) ?? ""
+      }
     })
-    return initial as Record<TaskIntentKind, string>
+    return initial
   })
 
   const editorRef = useRef<HTMLTextAreaElement>(null)
@@ -344,7 +386,8 @@ function TaskPromptEditor({
   }
 
   const currentPrompt = typePrompts[selectedType] ?? ""
-  const currentTaskType = taskTypes.find((t) => t.id === selectedType)!
+  const currentTaskType = allTaskTypes.find((t) => t.id === selectedType)!
+  const isCurrentSystemTask = isSystemTask(selectedType)
   const saveDisabled = currentPrompt.trim().length === 0
 
   return (
@@ -352,10 +395,42 @@ function TaskPromptEditor({
       <div className="flex h-[380px]">
         <div className="w-44 border-r border-border flex flex-col">
           <div className="flex items-center gap-2 h-11 px-3 border-b border-border">
-            <ListTodo className="w-4 h-4 text-muted-foreground" />
+            <ClipboardType className="w-4 h-4 text-muted-foreground" />
             <span className="text-sm font-medium text-muted-foreground">Type</span>
           </div>
           <div className="flex-1 overflow-y-auto py-1.5">
+            <div className="flex items-center gap-2 px-3 py-1.5">
+              <ShieldCheck className="w-3 h-3 text-muted-foreground/60" />
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-medium">System</span>
+            </div>
+
+            {systemTaskTypes.map((taskType) => {
+              const Icon = taskType.icon
+              const isSelected = selectedType === taskType.id
+
+              return (
+                <button
+                  key={taskType.id}
+                  data-testid={`task-prompt-tab-${taskType.id}`}
+                  onClick={() => setSelectedType(taskType.id)}
+                  className={cn(
+                    "w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors",
+                    isSelected
+                      ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                      : "text-muted-foreground hover:text-foreground hover:bg-accent",
+                  )}
+                >
+                  <Icon className={cn("w-4 h-4 shrink-0", isSelected ? "text-amber-500" : "text-muted-foreground")} />
+                  <span className="truncate">{taskType.label}</span>
+                </button>
+              )
+            })}
+
+            <div className="flex items-center gap-2 px-3 py-1.5 mt-2 border-t border-border pt-3">
+              <UserPen className="w-3 h-3 text-muted-foreground/60" />
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-medium">User</span>
+            </div>
+
             {taskTypes.map((taskType) => {
               const Icon = taskType.icon
               const isSelected = selectedType === taskType.id
@@ -372,9 +447,7 @@ function TaskPromptEditor({
                       : "text-muted-foreground hover:text-foreground hover:bg-accent",
                   )}
                 >
-                  <Icon
-                    className={cn("w-4 h-4 shrink-0", isSelected ? "text-primary" : "text-muted-foreground")}
-                  />
+                  <Icon className={cn("w-4 h-4 shrink-0", isSelected ? "text-primary" : "text-muted-foreground")} />
                   <span className="truncate">{taskType.label}</span>
                 </button>
               )
@@ -392,8 +465,13 @@ function TaskPromptEditor({
               <button
                 data-testid="task-prompt-reset"
                 onClick={() => {
-                  const next =
-                    defaultTemplatesByKind.get(selectedType) ?? templatesByKind.get(selectedType) ?? ""
+                  const next = isCurrentSystemTask
+                    ? defaultSystemTemplatesByKind.get(selectedType as SystemTaskKind) ??
+                      systemTemplatesByKind.get(selectedType as SystemTaskKind) ??
+                      ""
+                    : defaultUserTemplatesByKind.get(selectedType as TaskIntentKind) ??
+                      userTemplatesByKind.get(selectedType as TaskIntentKind) ??
+                      ""
                   setTypePrompts((prev) => ({ ...prev, [selectedType]: next }))
                 }}
                 className="flex items-center gap-1.5 px-2 py-1 rounded text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
@@ -414,7 +492,11 @@ function TaskPromptEditor({
                 disabled={saveDisabled}
                 onClick={() => {
                   if (saveDisabled) return
-                  setTaskPromptTemplate(selectedType, currentPrompt)
+                  if (isCurrentSystemTask) {
+                    setSystemPromptTemplate(selectedType as SystemTaskKind, currentPrompt)
+                  } else {
+                    setTaskPromptTemplate(selectedType as TaskIntentKind, currentPrompt)
+                  }
                 }}
                 className={cn(
                   "flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors",
@@ -428,6 +510,17 @@ function TaskPromptEditor({
               </button>
             </div>
           </div>
+
+          {isCurrentSystemTask && (
+            <div className="flex items-start gap-2.5 px-3 py-2.5 bg-amber-500/10 border-b border-amber-500/20">
+              <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-amber-700 dark:text-amber-400 leading-relaxed">
+                  <span className="font-medium">System Prompt</span> — Luban&apos;s core functionality depends on this prompt. Please avoid modifying unless you have specific requirements.
+                </p>
+              </div>
+            </div>
+          )}
 
           <div className="flex-1 relative overflow-hidden">
             <div
@@ -1289,7 +1382,7 @@ function AllSettings({
 }) {
   const { theme, setTheme } = useTheme()
   const { fonts, setFonts } = useAppearance()
-  const { app, setAppearanceTheme, setAppearanceFonts, setTaskPromptTemplate } = useLuban()
+  const { app, setAppearanceTheme, setAppearanceFonts, setTaskPromptTemplate, setSystemPromptTemplate } = useLuban()
   const resolvedTheme = theme ?? "system"
 
   return (
@@ -1391,7 +1484,10 @@ function AllSettings({
         <TaskPromptEditor
           templates={app?.task?.prompt_templates ?? []}
           defaultTemplates={app?.task?.default_prompt_templates ?? []}
+          systemTemplates={app?.task?.system_prompt_templates ?? []}
+          defaultSystemTemplates={app?.task?.default_system_prompt_templates ?? []}
           setTaskPromptTemplate={setTaskPromptTemplate}
+          setSystemPromptTemplate={setSystemPromptTemplate}
         />
       </section>
     </div>

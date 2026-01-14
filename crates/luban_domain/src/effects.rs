@@ -1,5 +1,6 @@
 use crate::{
-    AgentRunConfig, AttachmentRef, ProjectId, TaskIntentKind, WorkspaceId, WorkspaceThreadId,
+    AgentRunConfig, AttachmentRef, ProjectId, SystemTaskKind, TaskIntentKind, WorkspaceId,
+    WorkspaceThreadId,
 };
 use std::collections::HashMap;
 
@@ -11,6 +12,7 @@ pub enum Effect {
     LoadCodexDefaults,
 
     LoadTaskPromptTemplates,
+    LoadSystemPromptTemplates,
     MigrateLegacyTaskPromptTemplates {
         templates: HashMap<TaskIntentKind, String>,
     },
@@ -21,9 +23,17 @@ pub enum Effect {
     DeleteTaskPromptTemplate {
         intent_kind: TaskIntentKind,
     },
+    StoreSystemPromptTemplate {
+        kind: SystemTaskKind,
+        template: String,
+    },
+    DeleteSystemPromptTemplate {
+        kind: SystemTaskKind,
+    },
 
     CreateWorkspace {
         project_id: ProjectId,
+        branch_name_hint: Option<String>,
     },
     OpenWorkspaceInIde {
         workspace_id: WorkspaceId,

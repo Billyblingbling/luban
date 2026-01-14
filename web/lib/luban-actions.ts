@@ -6,6 +6,7 @@ import type {
   AttachmentRef,
   ClientAction,
   CodexConfigEntrySnapshot,
+  SystemTaskKind,
   TaskIntentKind,
   TaskDraft,
   TaskExecuteMode,
@@ -32,6 +33,7 @@ export type LubanActions = {
   toggleProjectExpanded: (projectId: number) => void
   setCodexEnabled: (enabled: boolean) => void
   setTaskPromptTemplate: (intentKind: TaskIntentKind, template: string) => void
+  setSystemPromptTemplate: (kind: SystemTaskKind, template: string) => void
   checkCodex: () => Promise<{ ok: boolean; message: string | null }>
   getCodexConfigTree: () => Promise<CodexConfigEntrySnapshot[]>
   readCodexConfigFile: (path: string) => Promise<string>
@@ -129,8 +131,13 @@ export function createLubanActions(args: {
 
     store.setApp((prev) => {
       if (!prev) return prev
-      const existing = prev.task?.prompt_templates ?? []
-      const defaults = prev.task?.default_prompt_templates ?? []
+      const task = prev.task ?? {
+        prompt_templates: [],
+        default_prompt_templates: [],
+        system_prompt_templates: [],
+        default_system_prompt_templates: [],
+      }
+      const existing = task.prompt_templates
       const nextTemplates = [...existing]
       const idx = nextTemplates.findIndex((t) => t.intent_kind === intentKind)
       if (idx >= 0) nextTemplates[idx] = { intent_kind: intentKind, template: trimmed }
@@ -138,13 +145,42 @@ export function createLubanActions(args: {
       return {
         ...prev,
         task: {
+          ...task,
           prompt_templates: nextTemplates,
-          default_prompt_templates: defaults,
         },
       }
     })
 
     args.sendAction({ type: "task_prompt_template_changed", intent_kind: intentKind, template: trimmed })
+  }
+
+  function setSystemPromptTemplate(kind: SystemTaskKind, template: string) {
+    const trimmed = template.trim()
+    if (!trimmed) return
+
+    store.setApp((prev) => {
+      if (!prev) return prev
+      const task = prev.task ?? {
+        prompt_templates: [],
+        default_prompt_templates: [],
+        system_prompt_templates: [],
+        default_system_prompt_templates: [],
+      }
+      const existing = task.system_prompt_templates
+      const nextTemplates = [...existing]
+      const idx = nextTemplates.findIndex((t) => t.kind === kind)
+      if (idx >= 0) nextTemplates[idx] = { kind, template: trimmed }
+      else nextTemplates.push({ kind, template: trimmed })
+      return {
+        ...prev,
+        task: {
+          ...task,
+          system_prompt_templates: nextTemplates,
+        },
+      }
+    })
+
+    args.sendAction({ type: "system_prompt_template_changed", kind, template: trimmed })
   }
 
   function checkCodex(): Promise<{ ok: boolean; message: string | null }> {
@@ -402,6 +438,7 @@ export function createLubanActions(args: {
     toggleProjectExpanded,
     setCodexEnabled,
     setTaskPromptTemplate,
+    setSystemPromptTemplate,
     checkCodex,
     getCodexConfigTree,
     readCodexConfigFile,

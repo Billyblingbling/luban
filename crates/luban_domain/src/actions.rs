@@ -1,7 +1,7 @@
 use crate::{
     AppearanceTheme, AttachmentRef, ChatScrollAnchor, CodexThreadEvent, ContextTokenKind,
-    ConversationSnapshot, ConversationThreadMeta, PersistedAppState, ProjectId, TaskIntentKind,
-    ThinkingEffort, WorkspaceId, WorkspaceThreadId,
+    ConversationSnapshot, ConversationThreadMeta, PersistedAppState, ProjectId, SystemTaskKind,
+    TaskIntentKind, ThinkingEffort, WorkspaceId, WorkspaceThreadId,
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -32,6 +32,7 @@ pub enum Action {
 
     CreateWorkspace {
         project_id: ProjectId,
+        branch_name_hint: Option<String>,
     },
     EnsureMainWorkspace {
         project_id: ProjectId,
@@ -219,6 +220,13 @@ pub enum Action {
     },
     TaskPromptTemplatesLoaded {
         templates: HashMap<TaskIntentKind, String>,
+    },
+    SystemPromptTemplateChanged {
+        kind: SystemTaskKind,
+        template: String,
+    },
+    SystemPromptTemplatesLoaded {
+        templates: HashMap<SystemTaskKind, String>,
     },
     WorkspaceChatScrollSaved {
         workspace_id: WorkspaceId,

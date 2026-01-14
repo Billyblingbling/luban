@@ -531,8 +531,38 @@ impl Engine {
                         return;
                     };
 
-                    self.process_action_queue(Action::CreateWorkspace { project_id })
-                        .await;
+                    let branch_name_hint = self
+                        .state
+                        .projects
+                        .iter()
+                        .find(|p| p.id == project_id)
+                        .map(|p| p.is_git)
+                        .unwrap_or(false)
+                        .then(|| {
+                            let services = self.services.clone();
+                            let domain_draft = unmap_task_draft(draft.as_ref());
+                            tokio::task::spawn_blocking(move || {
+                                services.task_suggest_branch_name(domain_draft)
+                            })
+                        });
+
+                    let branch_name_hint = match branch_name_hint {
+                        None => None,
+                        Some(task) => match task.await {
+                            Ok(Ok(name)) => {
+                                let trimmed = name.trim();
+                                (!trimmed.is_empty()).then(|| trimmed.to_owned())
+                            }
+                            Ok(Err(_message)) => None,
+                            Err(_) => None,
+                        },
+                    };
+
+                    self.process_action_queue(Action::CreateWorkspace {
+                        project_id,
+                        branch_name_hint,
+                    })
+                    .await;
 
                     let after_workspace_ids = self
                         .state
@@ -1017,6 +1047,25 @@ impl Engine {
                     }
                 }
             }
+            Effect::LoadSystemPromptTemplates => {
+                let services = self.services.clone();
+                let loaded =
+                    tokio::task::spawn_blocking(move || services.system_prompt_templates_load())
+                        .await
+                        .ok()
+                        .unwrap_or_else(|| {
+                            Err("failed to join system prompt templates load task".to_owned())
+                        });
+                match loaded {
+                    Ok(templates) => Ok(VecDeque::from([Action::SystemPromptTemplatesLoaded {
+                        templates,
+                    }])),
+                    Err(message) => {
+                        tracing::warn!(message = %message, "failed to load system prompt templates");
+                        Ok(VecDeque::new())
+                    }
+                }
+            }
             Effect::MigrateLegacyTaskPromptTemplates { templates } => {
                 if templates.is_empty() {
                     return Ok(VecDeque::new());
@@ -1075,7 +1124,40 @@ impl Engine {
                 }
                 Ok(VecDeque::new())
             }
-            Effect::CreateWorkspace { project_id } => {
+            Effect::StoreSystemPromptTemplate { kind, template } => {
+                let services = self.services.clone();
+                let saved = tokio::task::spawn_blocking(move || {
+                    services.system_prompt_template_store(kind, template)
+                })
+                .await
+                .ok()
+                .unwrap_or_else(|| {
+                    Err("failed to join system prompt template store task".to_owned())
+                });
+                if let Err(message) = saved {
+                    tracing::warn!(message = %message, "failed to store system prompt template");
+                }
+                Ok(VecDeque::new())
+            }
+            Effect::DeleteSystemPromptTemplate { kind } => {
+                let services = self.services.clone();
+                let deleted = tokio::task::spawn_blocking(move || {
+                    services.system_prompt_template_delete(kind)
+                })
+                .await
+                .ok()
+                .unwrap_or_else(|| {
+                    Err("failed to join system prompt template delete task".to_owned())
+                });
+                if let Err(message) = deleted {
+                    tracing::warn!(message = %message, "failed to delete system prompt template");
+                }
+                Ok(VecDeque::new())
+            }
+            Effect::CreateWorkspace {
+                project_id,
+                branch_name_hint,
+            } => {
                 let Some(project) = self.state.projects.iter().find(|p| p.id == project_id) else {
                     return Ok(VecDeque::from([Action::WorkspaceCreateFailed {
                         project_id,
@@ -1087,7 +1169,7 @@ impl Engine {
                 let services = self.services.clone();
 
                 let created = tokio::task::spawn_blocking(move || {
-                    services.create_workspace(project_path, project_slug)
+                    services.create_workspace(project_path, project_slug, branch_name_hint)
                 })
                 .await
                 .ok()
@@ -1564,6 +1646,27 @@ impl Engine {
                         template: luban_domain::default_task_prompt_template(kind),
                     })
                     .collect(),
+                system_prompt_templates: luban_domain::SystemTaskKind::ALL
+                    .iter()
+                    .copied()
+                    .filter_map(|kind| {
+                        self.state
+                            .system_prompt_templates
+                            .get(&kind)
+                            .map(|template| luban_api::SystemPromptTemplateSnapshot {
+                                kind: map_system_task_kind(kind),
+                                template: template.clone(),
+                            })
+                    })
+                    .collect(),
+                default_system_prompt_templates: luban_domain::SystemTaskKind::ALL
+                    .iter()
+                    .copied()
+                    .map(|kind| luban_api::SystemPromptTemplateSnapshot {
+                        kind: map_system_task_kind(kind),
+                        template: luban_domain::default_system_prompt_template(kind),
+                    })
+                    .collect(),
             },
         }
     }
@@ -1659,6 +1762,13 @@ fn map_task_intent_kind(kind: luban_domain::TaskIntentKind) -> luban_api::TaskIn
     }
 }
 
+fn map_system_task_kind(kind: luban_domain::SystemTaskKind) -> luban_api::SystemTaskKind {
+    match kind {
+        luban_domain::SystemTaskKind::InferType => luban_api::SystemTaskKind::InferType,
+        luban_domain::SystemTaskKind::RenameBranch => luban_api::SystemTaskKind::RenameBranch,
+    }
+}
+
 fn map_task_project_spec(spec: &luban_domain::TaskProjectSpec) -> luban_api::TaskProjectSpec {
     match spec {
         luban_domain::TaskProjectSpec::Unspecified => luban_api::TaskProjectSpec::Unspecified,
@@ -1696,6 +1806,63 @@ fn map_task_draft(draft: &luban_domain::TaskDraft) -> luban_api::TaskDraft {
             .pull_request
             .as_ref()
             .map(|pr| luban_api::TaskPullRequestInfo {
+                number: pr.number,
+                title: pr.title.clone(),
+                url: pr.url.clone(),
+                head_ref: pr.head_ref.clone(),
+                base_ref: pr.base_ref.clone(),
+                mergeable: pr.mergeable.clone(),
+            }),
+    }
+}
+
+fn unmap_task_intent_kind(kind: luban_api::TaskIntentKind) -> luban_domain::TaskIntentKind {
+    match kind {
+        luban_api::TaskIntentKind::Fix => luban_domain::TaskIntentKind::Fix,
+        luban_api::TaskIntentKind::Implement => luban_domain::TaskIntentKind::Implement,
+        luban_api::TaskIntentKind::Review => luban_domain::TaskIntentKind::Review,
+        luban_api::TaskIntentKind::Discuss => luban_domain::TaskIntentKind::Discuss,
+        luban_api::TaskIntentKind::Other => luban_domain::TaskIntentKind::Other,
+    }
+}
+
+fn unmap_task_project_spec(spec: &luban_api::TaskProjectSpec) -> luban_domain::TaskProjectSpec {
+    match spec {
+        luban_api::TaskProjectSpec::Unspecified => luban_domain::TaskProjectSpec::Unspecified,
+        luban_api::TaskProjectSpec::LocalPath { path } => {
+            luban_domain::TaskProjectSpec::LocalPath {
+                path: expand_user_path(path),
+            }
+        }
+        luban_api::TaskProjectSpec::GitHubRepo { full_name } => {
+            luban_domain::TaskProjectSpec::GitHubRepo {
+                full_name: full_name.clone(),
+            }
+        }
+    }
+}
+
+fn unmap_task_draft(draft: &luban_api::TaskDraft) -> luban_domain::TaskDraft {
+    luban_domain::TaskDraft {
+        input: draft.input.clone(),
+        project: unmap_task_project_spec(&draft.project),
+        intent_kind: unmap_task_intent_kind(draft.intent_kind),
+        summary: draft.summary.clone(),
+        prompt: draft.prompt.clone(),
+        repo: draft.repo.as_ref().map(|r| luban_domain::TaskRepoInfo {
+            full_name: r.full_name.clone(),
+            url: r.url.clone(),
+            default_branch: r.default_branch.clone(),
+        }),
+        issue: draft.issue.as_ref().map(|i| luban_domain::TaskIssueInfo {
+            number: i.number,
+            title: i.title.clone(),
+            url: i.url.clone(),
+        }),
+        pull_request: draft
+            .pull_request
+            .as_ref()
+            .map(|pr| luban_domain::TaskPullRequestInfo {
                 number: pr.number,
                 title: pr.title.clone(),
                 url: pr.url.clone(),
@@ -2066,6 +2233,7 @@ fn map_client_action(action: luban_api::ClientAction) -> Option<Action> {
         }
         luban_api::ClientAction::CreateWorkspace { project_id } => Some(Action::CreateWorkspace {
             project_id: luban_domain::ProjectId::from_u64(project_id.0),
+            branch_name_hint: None,
         }),
         luban_api::ClientAction::OpenWorkspace { workspace_id } => Some(Action::OpenWorkspace {
             workspace_id: WorkspaceId::from_u64(workspace_id.0),
@@ -2205,6 +2373,17 @@ fn map_client_action(action: luban_api::ClientAction) -> Option<Action> {
             },
             template,
         }),
+        luban_api::ClientAction::SystemPromptTemplateChanged { kind, template } => {
+            Some(Action::SystemPromptTemplateChanged {
+                kind: match kind {
+                    luban_api::SystemTaskKind::InferType => luban_domain::SystemTaskKind::InferType,
+                    luban_api::SystemTaskKind::RenameBranch => {
+                        luban_domain::SystemTaskKind::RenameBranch
+                    }
+                },
+                template,
+            })
+        }
         luban_api::ClientAction::CodexCheck
         | luban_api::ClientAction::CodexConfigTree
         | luban_api::ClientAction::CodexConfigReadFile { .. }
@@ -2278,6 +2457,7 @@ mod tests {
             &self,
             _project_path: PathBuf,
             _project_slug: String,
+            _branch_name_hint: Option<String>,
         ) -> Result<luban_domain::CreatedWorkspace, String> {
             Err("unimplemented".to_owned())
         }
@@ -2454,6 +2634,7 @@ mod tests {
             &self,
             _project_path: PathBuf,
             _project_slug: String,
+            _branch_name_hint: Option<String>,
         ) -> Result<luban_domain::CreatedWorkspace, String> {
             Err("unimplemented".to_owned())
         }
@@ -2878,6 +3059,7 @@ mod tests {
             &self,
             _project_path: PathBuf,
             _project_slug: String,
+            _branch_name_hint: Option<String>,
         ) -> Result<luban_domain::CreatedWorkspace, String> {
             Err("unimplemented".to_owned())
         }
@@ -3129,6 +3311,7 @@ mod tests {
             &self,
             _project_path: PathBuf,
             _project_slug: String,
+            _branch_name_hint: Option<String>,
         ) -> Result<luban_domain::CreatedWorkspace, String> {
             Err("unimplemented".to_owned())
         }
@@ -3361,6 +3544,7 @@ mod tests {
             &self,
             _project_path: PathBuf,
             _project_slug: String,
+            _branch_name_hint: Option<String>,
         ) -> Result<luban_domain::CreatedWorkspace, String> {
             Err("unimplemented".to_owned())
         }

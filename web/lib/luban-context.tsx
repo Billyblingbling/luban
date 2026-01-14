@@ -13,6 +13,7 @@ import type {
   CodexConfigEntrySnapshot,
   ConversationSnapshot,
   ServerEvent,
+  SystemTaskKind,
   ThreadMeta,
   TaskDraft,
   TaskExecuteMode,
@@ -77,6 +78,7 @@ type LubanContextValue = {
 
   setCodexEnabled: (enabled: boolean) => void
   setTaskPromptTemplate: (intentKind: TaskIntentKind, template: string) => void
+  setSystemPromptTemplate: (kind: SystemTaskKind, template: string) => void
   checkCodex: () => Promise<{ ok: boolean; message: string | null }>
   getCodexConfigTree: () => Promise<CodexConfigEntrySnapshot[]>
   readCodexConfigFile: (path: string) => Promise<string>
@@ -163,6 +165,7 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     setAppearanceFonts: actions.setAppearanceFonts,
     setCodexEnabled: actions.setCodexEnabled,
     setTaskPromptTemplate: actions.setTaskPromptTemplate,
+    setSystemPromptTemplate: actions.setSystemPromptTemplate,
     checkCodex: actions.checkCodex,
     getCodexConfigTree: actions.getCodexConfigTree,
     readCodexConfigFile: actions.readCodexConfigFile,

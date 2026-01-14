@@ -2,7 +2,8 @@ use crate::services::GitWorkspaceService;
 use anyhow::{Context as _, anyhow};
 use luban_domain::ProjectWorkspaceService;
 use luban_domain::{
-    TaskDraft, TaskIntentKind, TaskIssueInfo, TaskProjectSpec, TaskPullRequestInfo, TaskRepoInfo,
+    SystemTaskKind, TaskDraft, TaskIntentKind, TaskIssueInfo, TaskProjectSpec, TaskPullRequestInfo,
+    TaskRepoInfo, default_system_prompt_template,
 };
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -201,37 +202,80 @@ struct TaskIntentModelOutput {
     intent_kind: Option<String>,
 }
 
-fn model_prompt_for_task_intent(input: &str, context_json: &str) -> String {
-    format!(
-        r#"You are classifying a user's input into a task intent kind.
+#[derive(Deserialize)]
+struct TaskRenameBranchModelOutput {
+    #[serde(default)]
+    branch_name: Option<String>,
+}
 
-Rules:
-- Do NOT run commands.
-- Do NOT modify files.
-- Output ONLY a single JSON object, no markdown, no extra text.
-- Always output a result, even if the input is vague: choose intent_kind="other".
-- Do NOT include rationale, notes, or any extra fields in the output.
-- Do NOT ask the user for more info in the output.
+fn render_system_prompt_template(template: &str, task_input: &str, context_json: &str) -> String {
+    let mut out = template.to_owned();
+    out = out.replace("{{task_input}}", task_input.trim());
+    out = out.replace("{{context_json}}", context_json.trim());
+    out
+}
 
-Allowed intent_kind values:
-- fix
-- implement
-- review
-- discuss
-- other
+fn system_prompt_for_task(
+    service: &GitWorkspaceService,
+    kind: SystemTaskKind,
+    task_input: &str,
+    context_json: &str,
+) -> String {
+    let template = service
+        .system_prompt_templates_load()
+        .ok()
+        .and_then(|templates| templates.get(&kind).cloned())
+        .filter(|template| !template.trim().is_empty())
+        .unwrap_or_else(|| default_system_prompt_template(kind));
+    render_system_prompt_template(&template, task_input, context_json)
+}
 
-Input:
-{input}
+fn normalize_branch_name(raw: &str) -> Option<String> {
+    let mut value = raw.trim();
+    if value.is_empty() {
+        return None;
+    }
 
-Retrieved context (JSON):
-{context_json}
+    if let Some(stripped) = value.strip_prefix("refs/heads/") {
+        value = stripped;
+    }
+    if let Some(stripped) = value.strip_prefix("luban/") {
+        value = stripped;
+    }
 
-Output JSON schema:
-{{
-  "intent_kind": "<one of the allowed values>"
-}}
-"#
-    )
+    let mut out = String::new();
+    let mut prev_hyphen = false;
+    for ch in value.chars() {
+        let next = if ch.is_ascii_alphanumeric() {
+            ch.to_ascii_lowercase()
+        } else {
+            '-'
+        };
+        if next == '-' {
+            if prev_hyphen {
+                continue;
+            }
+            prev_hyphen = true;
+            out.push('-');
+            continue;
+        }
+        prev_hyphen = false;
+        out.push(next);
+    }
+
+    let trimmed = out.trim_matches('-');
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    const MAX_SUFFIX_LEN: usize = 24;
+    let suffix = trimmed.chars().take(MAX_SUFFIX_LEN).collect::<String>();
+    let suffix = suffix.trim_matches('-');
+    if suffix.is_empty() {
+        return None;
+    }
+
+    Some(format!("luban/{suffix}"))
 }
 
 fn intent_kind_label(kind: TaskIntentKind) -> &'static str {
@@ -582,7 +626,12 @@ pub(super) fn task_preview(
         }
     };
 
-    let prompt = model_prompt_for_task_intent(&input, &context_json.to_string());
+    let prompt = system_prompt_for_task(
+        service,
+        SystemTaskKind::InferType,
+        &input,
+        &context_json.to_string(),
+    );
 
     let cancel = Arc::new(AtomicBool::new(false));
     let mut agent_messages: Vec<String> = Vec::new();
@@ -644,6 +693,128 @@ pub(super) fn task_preview(
         issue,
         pull_request,
     })
+}
+
+fn context_json_for_task_draft(draft: &TaskDraft) -> serde_json::Value {
+    match &draft.project {
+        TaskProjectSpec::Unspecified => serde_json::json!({
+            "kind": "unspecified",
+            "input": draft.input.trim(),
+        }),
+        TaskProjectSpec::LocalPath { path } => serde_json::json!({
+            "kind": "local_path",
+            "path": path.display().to_string(),
+        }),
+        TaskProjectSpec::GitHubRepo { full_name } => {
+            if let Some(issue) = &draft.issue {
+                serde_json::json!({
+                    "kind": "issue",
+                    "full_name": full_name,
+                    "number": issue.number,
+                    "repo": draft.repo.as_ref().map(|r| {
+                        serde_json::json!({
+                            "full_name": r.full_name,
+                            "url": r.url,
+                            "default_branch": r.default_branch,
+                        })
+                    }),
+                    "issue": serde_json::json!({
+                        "number": issue.number,
+                        "title": issue.title,
+                        "url": issue.url,
+                    }),
+                })
+            } else if let Some(pr) = &draft.pull_request {
+                serde_json::json!({
+                    "kind": "pull_request",
+                    "full_name": full_name,
+                    "number": pr.number,
+                    "repo": draft.repo.as_ref().map(|r| {
+                        serde_json::json!({
+                            "full_name": r.full_name,
+                            "url": r.url,
+                            "default_branch": r.default_branch,
+                        })
+                    }),
+                    "pull_request": serde_json::json!({
+                        "number": pr.number,
+                        "title": pr.title,
+                        "url": pr.url,
+                        "head_ref": pr.head_ref,
+                        "base_ref": pr.base_ref,
+                        "mergeable": pr.mergeable,
+                    }),
+                })
+            } else {
+                serde_json::json!({
+                    "kind": "repo",
+                    "full_name": full_name,
+                    "repo": draft.repo.as_ref().map(|r| {
+                        serde_json::json!({
+                            "full_name": r.full_name,
+                            "url": r.url,
+                            "default_branch": r.default_branch,
+                        })
+                    }),
+                })
+            }
+        }
+    }
+}
+
+pub(super) fn task_suggest_branch_name(
+    service: &GitWorkspaceService,
+    draft: TaskDraft,
+) -> anyhow::Result<String> {
+    let context_json = context_json_for_task_draft(&draft).to_string();
+    let prompt = system_prompt_for_task(
+        service,
+        SystemTaskKind::RenameBranch,
+        &draft.input,
+        &context_json,
+    );
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    let mut agent_messages: Vec<String> = Vec::new();
+    service.run_codex_turn_streamed_via_cli(
+        super::CodexTurnParams {
+            thread_id: None,
+            worktree_path: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            prompt,
+            image_paths: Vec::new(),
+            model: Some("gpt-5.2-codex".to_owned()),
+            model_reasoning_effort: Some("low".to_owned()),
+            sandbox_mode: Some("read-only".to_owned()),
+        },
+        cancel,
+        |event| {
+            if let luban_domain::CodexThreadEvent::ItemCompleted {
+                item: luban_domain::CodexThreadItem::AgentMessage { text, .. },
+            } = event
+            {
+                agent_messages.push(text);
+            }
+            Ok(())
+        },
+    )?;
+
+    let raw = agent_messages
+        .into_iter()
+        .rev()
+        .find(|s| !s.trim().is_empty())
+        .ok_or_else(|| anyhow!("codex returned no agent_message output"))?;
+
+    let output = extract_first_json_object(raw.trim())
+        .and_then(|json| serde_json::from_str::<TaskRenameBranchModelOutput>(json).ok())
+        .unwrap_or(TaskRenameBranchModelOutput { branch_name: None });
+
+    let branch_name = output
+        .branch_name
+        .as_deref()
+        .and_then(normalize_branch_name)
+        .unwrap_or_else(|| "luban/misc".to_owned());
+
+    Ok(branch_name)
 }
 
 pub(super) fn task_prepare_project(

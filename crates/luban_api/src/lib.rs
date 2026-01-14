@@ -56,11 +56,28 @@ pub struct TaskSettingsSnapshot {
     pub prompt_templates: Vec<TaskPromptTemplateSnapshot>,
     #[serde(default)]
     pub default_prompt_templates: Vec<TaskPromptTemplateSnapshot>,
+    #[serde(default)]
+    pub system_prompt_templates: Vec<SystemPromptTemplateSnapshot>,
+    #[serde(default)]
+    pub default_system_prompt_templates: Vec<SystemPromptTemplateSnapshot>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TaskPromptTemplateSnapshot {
     pub intent_kind: TaskIntentKind,
+    pub template: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SystemTaskKind {
+    InferType,
+    RenameBranch,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SystemPromptTemplateSnapshot {
+    pub kind: SystemTaskKind,
     pub template: String,
 }
 
@@ -541,6 +558,10 @@ pub enum ClientAction {
     },
     TaskPromptTemplateChanged {
         intent_kind: TaskIntentKind,
+        template: String,
+    },
+    SystemPromptTemplateChanged {
+        kind: SystemTaskKind,
         template: String,
     },
     CodexCheck,

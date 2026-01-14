@@ -87,6 +87,41 @@ test("task prompt templates persist across reload", async ({ page }) => {
   await page.getByTitle("Close settings").click()
 })
 
+test("system prompt templates persist across reload", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  await page.getByTestId("sidebar-open-settings").click()
+  await expect(page.getByTestId("settings-panel")).toBeVisible({ timeout: 10_000 })
+
+  await page.getByRole("button", { name: "Task", exact: true }).click()
+  await expect(page.getByTestId("task-prompt-editor")).toBeVisible({ timeout: 10_000 })
+
+  await page.getByTestId("task-prompt-tab-infer-type").click()
+  const textarea = page.getByTestId("task-prompt-template")
+  const original = await textarea.inputValue()
+
+  const marker = `e2e-system-marker-${Date.now()}`
+  await textarea.fill(`${original}\n${marker}\n`)
+
+  await page.getByTestId("task-prompt-save").click()
+  await page.waitForTimeout(1200)
+  await page.reload()
+
+  await page.getByTestId("sidebar-open-settings").click()
+  await expect(page.getByTestId("settings-panel")).toBeVisible({ timeout: 10_000 })
+
+  await page.getByRole("button", { name: "Task", exact: true }).click()
+  await page.getByTestId("task-prompt-tab-infer-type").click()
+  await expect
+    .poll(async () => await page.getByTestId("task-prompt-template").inputValue(), { timeout: 10_000 })
+    .toContain(marker)
+
+  await page.getByTestId("task-prompt-template").fill(original)
+  await page.getByTestId("task-prompt-save").click()
+  await page.waitForTimeout(1200)
+  await page.getByTitle("Close settings").click()
+})
+
 test("agent selector defaults come from Codex config", async ({ page }) => {
   await ensureWorkspace(page)
 

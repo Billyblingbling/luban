@@ -33,6 +33,10 @@ pub use agent_settings::{
     default_thinking_effort, normalize_thinking_effort, thinking_effort_supported,
 };
 pub use task_prompts::{default_task_prompt_template, default_task_prompt_templates};
+mod system_prompts;
+pub use system_prompts::{
+    SystemTaskKind, default_system_prompt_template, default_system_prompt_templates,
+};
 mod dashboard;
 pub use dashboard::{
     DashboardCardModel, DashboardPreviewMessage, DashboardPreviewModel, DashboardStage,

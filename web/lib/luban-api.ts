@@ -29,9 +29,18 @@ export type TaskPromptTemplateSnapshot = {
   template: string
 }
 
+export type SystemTaskKind = "infer-type" | "rename-branch"
+
+export type SystemPromptTemplateSnapshot = {
+  kind: SystemTaskKind
+  template: string
+}
+
 export type TaskSettingsSnapshot = {
   prompt_templates: TaskPromptTemplateSnapshot[]
   default_prompt_templates: TaskPromptTemplateSnapshot[]
+  system_prompt_templates: SystemPromptTemplateSnapshot[]
+  default_system_prompt_templates: SystemPromptTemplateSnapshot[]
 }
 
 export type AppSnapshot = {
@@ -304,6 +313,7 @@ export type ClientAction =
   | { type: "appearance_fonts_changed"; fonts: AppearanceFontsSnapshot }
   | { type: "codex_enabled_changed"; enabled: boolean }
   | { type: "task_prompt_template_changed"; intent_kind: TaskIntentKind; template: string }
+  | { type: "system_prompt_template_changed"; kind: SystemTaskKind; template: string }
   | { type: "codex_check" }
   | { type: "codex_config_tree" }
   | { type: "codex_config_read_file"; path: string }
