@@ -132,6 +132,11 @@ export function ChatPanel({
   const [branchRenameValue, setBranchRenameValue] = useState("")
   const branchInputRef = useRef<HTMLInputElement | null>(null)
   const [copySuccess, setCopySuccess] = useState(false)
+  const [branchRenamePending, setBranchRenamePending] = useState<{ initialBranch: string; startedAt: number } | null>(
+    null,
+  )
+  const branchRenameSawRunningRef = useRef(false)
+  const branchRenameTimeoutRef = useRef<number | null>(null)
 
   useEffect(() => {
     return onAddChatAttachments((incoming) => {
@@ -187,7 +192,40 @@ export function ChatPanel({
     return { name: "Luban", branch: "", isGit: false, isMainBranch: false }
   }, [app, activeWorkspaceId])
 
-  const isBranchRenaming = activeWorkspace?.branch_rename_status === "running"
+  const isBranchRenaming = activeWorkspace?.branch_rename_status === "running" || branchRenamePending != null
+
+  useEffect(() => {
+    if (branchRenamePending == null) {
+      branchRenameSawRunningRef.current = false
+      if (branchRenameTimeoutRef.current != null) {
+        window.clearTimeout(branchRenameTimeoutRef.current)
+        branchRenameTimeoutRef.current = null
+      }
+      return
+    }
+
+    if (projectInfo.branch !== branchRenamePending.initialBranch) {
+      setBranchRenamePending(null)
+      return
+    }
+
+    if (activeWorkspace?.branch_rename_status === "running") {
+      branchRenameSawRunningRef.current = true
+      return
+    }
+
+    if (branchRenameSawRunningRef.current) {
+      setBranchRenamePending(null)
+      return
+    }
+
+    if (branchRenameTimeoutRef.current == null) {
+      branchRenameTimeoutRef.current = window.setTimeout(() => {
+        branchRenameTimeoutRef.current = null
+        setBranchRenamePending(null)
+      }, 2000)
+    }
+  }, [activeWorkspace?.branch_rename_status, branchRenamePending, projectInfo.branch])
 
   useEffect(() => {
     if (!isRenamingBranch) return
@@ -482,32 +520,35 @@ export function ChatPanel({
                   value={branchRenameValue}
                   onChange={(e) => setBranchRenameValue(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      if (activeWorkspaceId == null) return
-                      setIsRenamingBranch(false)
-                      renameWorkspaceBranch(activeWorkspaceId, branchRenameValue)
-                    }
-                    if (e.key === "Escape") {
-                      setIsRenamingBranch(false)
-                    }
-                  }}
-                  onBlur={() => {
-                    if (activeWorkspaceId == null) return
-                    setIsRenamingBranch(false)
-                    renameWorkspaceBranch(activeWorkspaceId, branchRenameValue)
-                  }}
-                  className="text-xs bg-muted border border-border rounded px-1.5 py-0.5 w-40 focus:outline-none focus:ring-1 focus:ring-primary"
-                />
-                <button
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => {
-                    if (activeWorkspaceId == null) return
-                    setIsRenamingBranch(false)
-                    renameWorkspaceBranch(activeWorkspaceId, branchRenameValue)
-                  }}
-                  className="p-0.5 text-muted-foreground hover:text-primary transition-colors"
-                  title="Confirm"
-                >
+                        if (e.key === "Enter") {
+                          if (activeWorkspaceId == null) return
+                          setIsRenamingBranch(false)
+                          setBranchRenamePending({ initialBranch: projectInfo.branch, startedAt: Date.now() })
+                          renameWorkspaceBranch(activeWorkspaceId, branchRenameValue)
+                        }
+                        if (e.key === "Escape") {
+                          setIsRenamingBranch(false)
+                        }
+                      }}
+                      onBlur={() => {
+                        if (activeWorkspaceId == null) return
+                        setIsRenamingBranch(false)
+                        setBranchRenamePending({ initialBranch: projectInfo.branch, startedAt: Date.now() })
+                        renameWorkspaceBranch(activeWorkspaceId, branchRenameValue)
+                      }}
+                      className="text-xs bg-muted border border-border rounded px-1.5 py-0.5 w-40 focus:outline-none focus:ring-1 focus:ring-primary"
+                    />
+                    <button
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        if (activeWorkspaceId == null) return
+                        setIsRenamingBranch(false)
+                        setBranchRenamePending({ initialBranch: projectInfo.branch, startedAt: Date.now() })
+                        renameWorkspaceBranch(activeWorkspaceId, branchRenameValue)
+                      }}
+                      className="p-0.5 text-muted-foreground hover:text-primary transition-colors"
+                      title="Confirm"
+                    >
                   <Check className="w-3 h-3" />
                 </button>
               </div>
@@ -535,6 +576,7 @@ export function ChatPanel({
                         <button
                           onClick={() => {
                             if (activeWorkspaceId == null || activeThreadId == null) return
+                            setBranchRenamePending({ initialBranch: projectInfo.branch, startedAt: Date.now() })
                             aiRenameWorkspaceBranch(activeWorkspaceId, activeThreadId)
                           }}
                           className="p-0.5 text-muted-foreground hover:text-primary transition-colors"

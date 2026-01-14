@@ -1977,6 +1977,55 @@ mod tests {
     }
 
     #[test]
+    fn manual_ai_branch_rename_uses_first_user_messages_as_input() {
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+            is_git: true,
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "w1".to_owned(),
+            branch_name: "luban/feature-x".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/w1"),
+            branch_name_hint_provided: true,
+        });
+        let workspace_id = workspace_id_by_name(&state, "w1");
+        let thread_id = default_thread_id();
+
+        let snapshot = ConversationSnapshot {
+            thread_id: None,
+            entries: (1..=8)
+                .map(|idx| ConversationEntry::UserMessage {
+                    text: format!("Message {idx}"),
+                    attachments: Vec::new(),
+                })
+                .collect(),
+        };
+        state.apply(Action::ConversationLoaded {
+            workspace_id,
+            thread_id,
+            snapshot,
+        });
+
+        let effects = state.apply(Action::WorkspaceBranchAiRenameRequested {
+            workspace_id,
+            thread_id,
+        });
+
+        assert_eq!(effects.len(), 1);
+        match &effects[0] {
+            Effect::AiRenameWorkspaceBranch { input, .. } => {
+                assert!(input.contains("Message 1"), "{input}");
+                assert!(input.contains("Message 6"), "{input}");
+                assert!(!input.contains("Message 7"), "{input}");
+            }
+            other => panic!("unexpected effect: {other:?}"),
+        }
+    }
+
+    #[test]
     fn open_dashboard_loads_conversations_for_non_main_workspaces() {
         let mut state = AppState::new();
         state.apply(Action::AddProject {
