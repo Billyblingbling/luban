@@ -34,7 +34,6 @@ import {
 import { toast } from "sonner"
 
 import { useAppearance } from "@/components/appearance-provider"
-import { Markdown } from "@/components/markdown"
 import { useLuban } from "@/lib/luban-context"
 import { cn } from "@/lib/utils"
 import type { AppearanceTheme, CodexConfigEntrySnapshot, TaskIntentKind } from "@/lib/luban-api"
@@ -121,6 +120,50 @@ function renderTaskPromptPreview(template: string, kind: TaskIntentKind): string
     .replaceAll("{{task_input}}", taskInput)
     .replaceAll("{{intent_label}}", intentLabel(kind))
     .replaceAll("{{known_context}}", knownContext)
+}
+
+function TaskPromptPreviewMessage({ content }: { content: string }) {
+  const lines = useMemo(() => content.split("\n"), [content])
+
+  return (
+    <div className="text-[12px] leading-relaxed text-foreground/90 break-words overflow-hidden">
+      {lines.map((line, idx) => {
+        const trimmed = line.trim()
+        if (!trimmed) return <div key={idx} className="h-2" />
+
+        if (trimmed.startsWith("## ")) {
+          return (
+            <p key={idx} className="font-semibold text-foreground pt-1">
+              {trimmed.slice(3)}
+            </p>
+          )
+        }
+
+        if (trimmed.startsWith("### ")) {
+          return (
+            <p key={idx} className="font-semibold text-foreground pt-1">
+              {trimmed.slice(4)}
+            </p>
+          )
+        }
+
+        if (trimmed.startsWith("- ")) {
+          return (
+            <div key={idx} className="flex gap-2">
+              <span className="text-muted-foreground">•</span>
+              <span className="flex-1 whitespace-pre-wrap">{trimmed.slice(2)}</span>
+            </div>
+          )
+        }
+
+        return (
+          <p key={idx} className="whitespace-pre-wrap">
+            {line}
+          </p>
+        )
+      })}
+    </div>
+  )
 }
 
 function TaskPromptEditor({
@@ -273,7 +316,7 @@ function TaskPromptEditor({
 
           <div
             ref={previewRef}
-            className="flex-1 overflow-y-auto p-3"
+            className="flex-1 overflow-y-auto p-3 [contain:layout_paint]"
             onScroll={() => {
               const editor = editorRef.current
               const preview = previewRef.current
@@ -283,7 +326,7 @@ function TaskPromptEditor({
           >
             <div className="flex justify-end">
               <div className="max-w-[85%] border border-border rounded-lg px-3 py-2.5 bg-muted/30 luban-font-chat">
-                <Markdown content={previewContent} className="text-[12px]" />
+                <TaskPromptPreviewMessage content={previewContent} />
               </div>
             </div>
           </div>
