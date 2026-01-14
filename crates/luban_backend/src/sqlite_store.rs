@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
-const LATEST_SCHEMA_VERSION: u32 = 9;
+const LATEST_SCHEMA_VERSION: u32 = 10;
 const WORKSPACE_CHAT_SCROLL_PREFIX: &str = "workspace_chat_scroll_y10_";
 const WORKSPACE_CHAT_SCROLL_ANCHOR_PREFIX: &str = "workspace_chat_scroll_anchor_";
 const WORKSPACE_ACTIVE_THREAD_PREFIX: &str = "workspace_active_thread_id_";
@@ -90,6 +90,13 @@ const MIGRATIONS: &[(u32, &str)] = &[
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/migrations/0009_project_is_git.sql"
+        )),
+    ),
+    (
+        10,
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/migrations/0010_workspace_branch_renamed.sql"
         )),
     ),
 ];
@@ -673,7 +680,7 @@ impl SqliteDatabase {
         }
 
         let mut stmt = self.conn.prepare(
-            "SELECT id, project_id, workspace_name, branch_name, worktree_path, status, last_activity_at
+            "SELECT id, project_id, workspace_name, branch_name, worktree_path, status, last_activity_at, branch_renamed
              FROM workspaces ORDER BY id ASC",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -685,6 +692,7 @@ impl SqliteDatabase {
                 row.get::<_, String>(4)?,
                 row.get::<_, i64>(5)?,
                 row.get::<_, Option<i64>>(6)?,
+                row.get::<_, i64>(7)?,
             ))
         })?;
 
@@ -697,6 +705,7 @@ impl SqliteDatabase {
                 worktree_path,
                 status,
                 last_activity_at,
+                branch_renamed,
             ) = row?;
             let status = workspace_status_from_i64(status)?;
             let last_activity_at_unix_seconds = last_activity_at.map(|v| v as u64);
@@ -712,6 +721,7 @@ impl SqliteDatabase {
                 worktree_path: PathBuf::from(worktree_path),
                 status,
                 last_activity_at_unix_seconds,
+                branch_renamed: branch_renamed != 0,
             });
         }
 
@@ -1173,8 +1183,8 @@ impl SqliteDatabase {
                 workspace_ids.push(workspace.id);
                 let worktree_path = workspace.worktree_path.to_string_lossy().into_owned();
                 tx.execute(
-                    "INSERT INTO workspaces (id, project_id, workspace_name, branch_name, worktree_path, status, last_activity_at, created_at, updated_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, COALESCE((SELECT created_at FROM workspaces WHERE id = ?1), ?8), ?8)
+                    "INSERT INTO workspaces (id, project_id, workspace_name, branch_name, worktree_path, status, last_activity_at, branch_renamed, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, COALESCE((SELECT created_at FROM workspaces WHERE id = ?1), ?9), ?9)
                      ON CONFLICT(id) DO UPDATE SET
                        project_id = excluded.project_id,
                        workspace_name = excluded.workspace_name,
@@ -1182,6 +1192,7 @@ impl SqliteDatabase {
                        worktree_path = excluded.worktree_path,
                        status = excluded.status,
                        last_activity_at = excluded.last_activity_at,
+                       branch_renamed = excluded.branch_renamed,
                        updated_at = excluded.updated_at",
                     params![
                         workspace.id as i64,
@@ -1191,6 +1202,7 @@ impl SqliteDatabase {
                         worktree_path,
                         workspace_status_to_i64(workspace.status),
                         workspace.last_activity_at_unix_seconds.map(|v| v as i64),
+                        if workspace.branch_renamed { 1i64 } else { 0i64 },
                         now,
                     ],
                 )?;
@@ -2105,6 +2117,7 @@ mod tests {
                     worktree_path: PathBuf::from("/tmp/my-project/worktrees/alpha"),
                     status: WorkspaceStatus::Active,
                     last_activity_at_unix_seconds: None,
+                    branch_renamed: true,
                 }],
             }],
             sidebar_width: Some(280),
@@ -2163,6 +2176,7 @@ mod tests {
                     worktree_path: PathBuf::from("/tmp/p/worktrees/w"),
                     status: WorkspaceStatus::Active,
                     last_activity_at_unix_seconds: None,
+                    branch_renamed: true,
                 }],
             }],
             sidebar_width: None,
@@ -2231,6 +2245,7 @@ mod tests {
                     worktree_path: PathBuf::from("/tmp/p/worktrees/w"),
                     status: WorkspaceStatus::Active,
                     last_activity_at_unix_seconds: None,
+                    branch_renamed: true,
                 }],
             }],
             sidebar_width: None,
@@ -2316,6 +2331,7 @@ mod tests {
                         worktree_path: PathBuf::from("/tmp/p1/worktrees/w1"),
                         status: WorkspaceStatus::Active,
                         last_activity_at_unix_seconds: None,
+                        branch_renamed: true,
                     }],
                 },
                 PersistedProject {
@@ -2332,6 +2348,7 @@ mod tests {
                         worktree_path: PathBuf::from("/tmp/p2/worktrees/w"),
                         status: WorkspaceStatus::Active,
                         last_activity_at_unix_seconds: None,
+                        branch_renamed: true,
                     }],
                 },
             ],
@@ -2382,6 +2399,7 @@ mod tests {
                         worktree_path: PathBuf::from("/tmp/p1/worktrees/w1"),
                         status: WorkspaceStatus::Active,
                         last_activity_at_unix_seconds: None,
+                        branch_renamed: true,
                     },
                     PersistedWorkspace {
                         id: 20,
@@ -2390,6 +2408,7 @@ mod tests {
                         worktree_path: PathBuf::from("/tmp/p2/worktrees/w"),
                         status: WorkspaceStatus::Active,
                         last_activity_at_unix_seconds: None,
+                        branch_renamed: true,
                     },
                 ],
             }],
@@ -2448,6 +2467,7 @@ mod tests {
                     worktree_path: PathBuf::from("/tmp/p/worktrees/w"),
                     status: WorkspaceStatus::Active,
                     last_activity_at_unix_seconds: None,
+                    branch_renamed: true,
                 }],
             }],
             sidebar_width: None,

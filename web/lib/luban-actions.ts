@@ -395,6 +395,14 @@ export function createLubanActions(args: {
     args.sendAction({ type: "cancel_agent_turn", workspace_id: ids.workspaceId, thread_id: ids.threadId })
   }
 
+  function renameWorkspaceBranch(workspaceId: WorkspaceId, branchName: string) {
+    args.sendAction({ type: "workspace_rename_branch", workspace_id: workspaceId, branch_name: branchName })
+  }
+
+  function aiRenameWorkspaceBranch(workspaceId: WorkspaceId, threadId: WorkspaceThreadId) {
+    args.sendAction({ type: "workspace_ai_rename_branch", workspace_id: workspaceId, thread_id: threadId })
+  }
+
   function setChatModel(workspaceId: WorkspaceId, threadId: WorkspaceThreadId, modelId: string) {
     args.sendAction({
       type: "chat_model_changed",
@@ -454,6 +462,8 @@ export function createLubanActions(args: {
     sendAgentMessage,
     sendAgentMessageTo,
     cancelAgentTurn,
+    renameWorkspaceBranch,
+    aiRenameWorkspaceBranch,
     setChatModel,
     setThinkingEffort,
     setAppearanceTheme,

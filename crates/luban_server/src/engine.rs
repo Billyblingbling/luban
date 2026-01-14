@@ -1167,6 +1167,7 @@ impl Engine {
                 let project_path = project.path.clone();
                 let project_slug = project.slug.clone();
                 let services = self.services.clone();
+                let branch_name_hint_provided = branch_name_hint.is_some();
 
                 let created = tokio::task::spawn_blocking(move || {
                     services.create_workspace(project_path, project_slug, branch_name_hint)
@@ -1181,9 +1182,100 @@ impl Engine {
                         workspace_name: created.workspace_name,
                         branch_name: created.branch_name,
                         worktree_path: created.worktree_path,
+                        branch_name_hint_provided,
                     },
                     Err(message) => Action::WorkspaceCreateFailed {
                         project_id,
+                        message,
+                    },
+                };
+                Ok(VecDeque::from([action]))
+            }
+            Effect::RenameWorkspaceBranch {
+                workspace_id,
+                requested_branch_name,
+            } => {
+                let Some(workspace) = self.state.workspace(workspace_id) else {
+                    return Ok(VecDeque::from([Action::WorkspaceBranchRenameFailed {
+                        workspace_id,
+                        message: "workspace not found".to_owned(),
+                    }]));
+                };
+
+                let worktree_path = workspace.worktree_path.clone();
+                let services = self.services.clone();
+                let result = tokio::task::spawn_blocking(move || {
+                    services.rename_workspace_branch(worktree_path, requested_branch_name)
+                })
+                .await
+                .ok()
+                .unwrap_or_else(|| Err("failed to join rename workspace branch task".to_owned()));
+
+                let action = match result {
+                    Ok(branch_name) => Action::WorkspaceBranchRenamed {
+                        workspace_id,
+                        branch_name,
+                    },
+                    Err(message) => Action::WorkspaceBranchRenameFailed {
+                        workspace_id,
+                        message,
+                    },
+                };
+                Ok(VecDeque::from([action]))
+            }
+            Effect::AiRenameWorkspaceBranch {
+                workspace_id,
+                input,
+            } => {
+                let Some(scope) = workspace_scope(&self.state, workspace_id) else {
+                    return Ok(VecDeque::from([Action::WorkspaceBranchRenameFailed {
+                        workspace_id,
+                        message: "workspace not found".to_owned(),
+                    }]));
+                };
+
+                let worktree_path = self
+                    .state
+                    .workspace(workspace_id)
+                    .map(|w| w.worktree_path.clone())
+                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+
+                let services = self.services.clone();
+                let project_path = self
+                    .state
+                    .projects
+                    .iter()
+                    .find(|p| p.slug == scope.project_slug)
+                    .map(|p| p.path.clone())
+                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+
+                let result = tokio::task::spawn_blocking(move || {
+                    let draft = luban_domain::TaskDraft {
+                        input,
+                        project: luban_domain::TaskProjectSpec::LocalPath { path: project_path },
+                        intent_kind: luban_domain::TaskIntentKind::Other,
+                        summary: String::new(),
+                        prompt: String::new(),
+                        repo: None,
+                        issue: None,
+                        pull_request: None,
+                    };
+                    let suggested = services.task_suggest_branch_name(draft)?;
+                    services.rename_workspace_branch(worktree_path, suggested)
+                })
+                .await
+                .ok()
+                .unwrap_or_else(|| {
+                    Err("failed to join ai rename workspace branch task".to_owned())
+                });
+
+                let action = match result {
+                    Ok(branch_name) => Action::WorkspaceBranchRenamed {
+                        workspace_id,
+                        branch_name,
+                    },
+                    Err(message) => Action::WorkspaceBranchRenameFailed {
+                        workspace_id,
                         message,
                     },
                 };
@@ -1580,6 +1672,10 @@ impl Engine {
                                 }
                             },
                             archive_status: match w.archive_status {
+                                OperationStatus::Idle => luban_api::OperationStatus::Idle,
+                                OperationStatus::Running => luban_api::OperationStatus::Running,
+                            },
+                            branch_rename_status: match w.branch_rename_status {
                                 OperationStatus::Idle => luban_api::OperationStatus::Idle,
                                 OperationStatus::Running => luban_api::OperationStatus::Running,
                             },
@@ -2298,6 +2394,20 @@ fn map_client_action(action: luban_api::ClientAction) -> Option<Action> {
             text,
             attachments: attachments.into_iter().map(map_api_attachment).collect(),
         }),
+        luban_api::ClientAction::WorkspaceRenameBranch {
+            workspace_id,
+            branch_name,
+        } => Some(Action::WorkspaceBranchRenameRequested {
+            workspace_id: WorkspaceId::from_u64(workspace_id.0),
+            requested_branch_name: branch_name,
+        }),
+        luban_api::ClientAction::WorkspaceAiRenameBranch {
+            workspace_id,
+            thread_id,
+        } => Some(Action::WorkspaceBranchAiRenameRequested {
+            workspace_id: WorkspaceId::from_u64(workspace_id.0),
+            thread_id: WorkspaceThreadId::from_u64(thread_id.0),
+        }),
         luban_api::ClientAction::CancelAgentTurn {
             workspace_id,
             thread_id,
@@ -2471,6 +2581,14 @@ mod tests {
             _project_path: PathBuf,
             _worktree_path: PathBuf,
         ) -> Result<(), String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn rename_workspace_branch(
+            &self,
+            _worktree_path: PathBuf,
+            _requested_branch_name: String,
+        ) -> Result<String, String> {
             Err("unimplemented".to_owned())
         }
 
@@ -2651,6 +2769,14 @@ mod tests {
             Err("unimplemented".to_owned())
         }
 
+        fn rename_workspace_branch(
+            &self,
+            _worktree_path: PathBuf,
+            _requested_branch_name: String,
+        ) -> Result<String, String> {
+            Err("unimplemented".to_owned())
+        }
+
         fn ensure_conversation(
             &self,
             _project_slug: String,
@@ -2797,6 +2923,7 @@ mod tests {
             workspace_name: "main".to_owned(),
             branch_name: "main".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban-server-test"),
+            branch_name_hint_provided: true,
         });
 
         let workspace_id = state.projects[0].workspaces[0].id;
@@ -2856,6 +2983,7 @@ mod tests {
             workspace_name: "main".to_owned(),
             branch_name: "main".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban-server-test"),
+            branch_name_hint_provided: true,
         });
 
         let workspace_id = state.projects[0].workspaces[0].id;
@@ -2915,6 +3043,7 @@ mod tests {
             workspace_name: "main".to_owned(),
             branch_name: "main".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban-server-test"),
+            branch_name_hint_provided: true,
         });
 
         let workspace_id = state.projects[0].workspaces[0].id;
@@ -3080,6 +3209,14 @@ mod tests {
             Ok(())
         }
 
+        fn rename_workspace_branch(
+            &self,
+            _worktree_path: PathBuf,
+            _requested_branch_name: String,
+        ) -> Result<String, String> {
+            Err("unimplemented".to_owned())
+        }
+
         fn ensure_conversation(
             &self,
             _project_slug: String,
@@ -3232,6 +3369,7 @@ mod tests {
             workspace_name: "wt".to_owned(),
             branch_name: "feature".to_owned(),
             worktree_path: worktree_path.clone(),
+            branch_name_hint_provided: true,
         });
 
         let workspace_id = state
@@ -3329,6 +3467,14 @@ mod tests {
             _project_path: PathBuf,
             _worktree_path: PathBuf,
         ) -> Result<(), String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn rename_workspace_branch(
+            &self,
+            _worktree_path: PathBuf,
+            _requested_branch_name: String,
+        ) -> Result<String, String> {
             Err("unimplemented".to_owned())
         }
 
@@ -3481,6 +3627,7 @@ mod tests {
             workspace_name: "main".to_owned(),
             branch_name: "main".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban-server-open-ide-test"),
+            branch_name_hint_provided: true,
         });
         let workspace_id = state.projects[0].workspaces[0].id;
         let worktree_path = state.projects[0].workspaces[0].worktree_path.clone();
@@ -3558,6 +3705,14 @@ mod tests {
             _project_path: PathBuf,
             _worktree_path: PathBuf,
         ) -> Result<(), String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn rename_workspace_branch(
+            &self,
+            _worktree_path: PathBuf,
+            _requested_branch_name: String,
+        ) -> Result<String, String> {
             Err("unimplemented".to_owned())
         }
 
@@ -3710,6 +3865,7 @@ mod tests {
             workspace_name: "main".to_owned(),
             branch_name: "main".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban-server-agent-turn-test"),
+            branch_name_hint_provided: true,
         });
 
         let workspace_id = state.projects[0].workspaces[0].id;

@@ -69,6 +69,7 @@ impl AppState {
             "abandon-about",
             "luban/abandon-about",
             PathBuf::from("/Users/example/luban/worktrees/luban/abandon-about"),
+            true,
         );
 
         this
@@ -222,9 +223,15 @@ impl AppState {
                 workspace_name,
                 branch_name,
                 worktree_path,
+                branch_name_hint_provided,
             } => {
-                let workspace_id =
-                    self.insert_workspace(project_id, &workspace_name, &branch_name, worktree_path);
+                let workspace_id = self.insert_workspace(
+                    project_id,
+                    &workspace_name,
+                    &branch_name,
+                    worktree_path,
+                    branch_name_hint_provided,
+                );
                 if let Some(project) = self.projects.iter_mut().find(|p| p.id == project_id) {
                     project.create_workspace_status = OperationStatus::Idle;
                 }
@@ -364,6 +371,106 @@ impl AppState {
                 Vec::new()
             }
 
+            Action::WorkspaceBranchRenameRequested {
+                workspace_id,
+                requested_branch_name,
+            } => {
+                let Some((project_idx, workspace_idx)) = self.find_workspace_indices(workspace_id)
+                else {
+                    return Vec::new();
+                };
+
+                let project = &self.projects[project_idx];
+                let workspace = &project.workspaces[workspace_idx];
+                if !project.is_git {
+                    return Vec::new();
+                }
+                if workspace.branch_name == Self::MAIN_WORKSPACE_BRANCH {
+                    return Vec::new();
+                }
+
+                let workspace = &mut self.projects[project_idx].workspaces[workspace_idx];
+                if workspace.branch_rename_status == OperationStatus::Running {
+                    return Vec::new();
+                }
+                workspace.branch_rename_status = OperationStatus::Running;
+
+                vec![Effect::RenameWorkspaceBranch {
+                    workspace_id,
+                    requested_branch_name,
+                }]
+            }
+            Action::WorkspaceBranchAiRenameRequested {
+                workspace_id,
+                thread_id,
+            } => {
+                let Some((project_idx, workspace_idx)) = self.find_workspace_indices(workspace_id)
+                else {
+                    return Vec::new();
+                };
+
+                let project = &self.projects[project_idx];
+                let workspace = &project.workspaces[workspace_idx];
+                if !project.is_git {
+                    return Vec::new();
+                }
+                if workspace.branch_name == Self::MAIN_WORKSPACE_BRANCH {
+                    return Vec::new();
+                }
+
+                let workspace = &mut self.projects[project_idx].workspaces[workspace_idx];
+                if workspace.branch_rename_status == OperationStatus::Running {
+                    return Vec::new();
+                }
+                workspace.branch_rename_status = OperationStatus::Running;
+
+                let input = self
+                    .conversations
+                    .get(&(workspace_id, thread_id))
+                    .and_then(|conversation| {
+                        conversation.entries.iter().find_map(|entry| match entry {
+                            ConversationEntry::UserMessage { text, .. } => {
+                                Some(text.trim().to_owned())
+                            }
+                            _ => None,
+                        })
+                    })
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| workspace.branch_name.clone());
+
+                vec![Effect::AiRenameWorkspaceBranch {
+                    workspace_id,
+                    input,
+                }]
+            }
+            Action::WorkspaceBranchRenamed {
+                workspace_id,
+                branch_name,
+            } => {
+                if let Some((project_idx, workspace_idx)) =
+                    self.find_workspace_indices(workspace_id)
+                {
+                    let workspace = &mut self.projects[project_idx].workspaces[workspace_idx];
+                    workspace.branch_name = branch_name;
+                    workspace.branch_renamed = true;
+                    workspace.branch_rename_status = OperationStatus::Idle;
+                }
+                vec![Effect::SaveAppState]
+            }
+            Action::WorkspaceBranchRenameFailed {
+                workspace_id,
+                message,
+            } => {
+                if let Some((project_idx, workspace_idx)) =
+                    self.find_workspace_indices(workspace_id)
+                {
+                    let workspace = &mut self.projects[project_idx].workspaces[workspace_idx];
+                    workspace.branch_rename_status = OperationStatus::Idle;
+                }
+                self.last_error = Some(message);
+                Vec::new()
+            }
+
             Action::ConversationLoaded {
                 workspace_id,
                 thread_id,
@@ -409,6 +516,36 @@ impl AppState {
                 let tabs = self.ensure_workspace_tabs_mut(workspace_id);
                 tabs.activate(thread_id);
 
+                let auto_rename_allowed = self
+                    .find_workspace_indices(workspace_id)
+                    .map(|(project_idx, workspace_idx)| {
+                        let project = &self.projects[project_idx];
+                        let workspace = &project.workspaces[workspace_idx];
+                        project.is_git
+                            && workspace.branch_name != Self::MAIN_WORKSPACE_BRANCH
+                            && !workspace.branch_renamed
+                    })
+                    .unwrap_or(false);
+
+                let is_first_message = self
+                    .conversations
+                    .get(&(workspace_id, thread_id))
+                    .map(|conversation| conversation.entries.is_empty())
+                    .unwrap_or(true);
+
+                let mut auto_rename_started = false;
+                if auto_rename_allowed
+                    && is_first_message
+                    && let Some((project_idx, workspace_idx)) =
+                        self.find_workspace_indices(workspace_id)
+                {
+                    let workspace = &mut self.projects[project_idx].workspaces[workspace_idx];
+                    if workspace.branch_rename_status != OperationStatus::Running {
+                        workspace.branch_rename_status = OperationStatus::Running;
+                        auto_rename_started = true;
+                    }
+                }
+
                 let conversation = self.ensure_conversation_mut(workspace_id, thread_id);
                 conversation.draft.clear();
                 conversation.draft_attachments.clear();
@@ -435,6 +572,8 @@ impl AppState {
                 }
 
                 if conversation.queue_paused && !conversation.pending_prompts.is_empty() {
+                    let auto_rename_input =
+                        auto_rename_started.then(|| text.clone());
                     conversation.entries.push(ConversationEntry::UserMessage {
                         text: text.clone(),
                         attachments: attachments.clone(),
@@ -443,16 +582,22 @@ impl AppState {
                     conversation.current_run_config = Some(run_config.clone());
                     conversation.in_progress_items.clear();
                     conversation.in_progress_order.clear();
-                    return vec![Effect::RunAgentTurn {
+                    let mut effects = vec![Effect::RunAgentTurn {
                         workspace_id,
                         thread_id,
                         text,
                         attachments,
                         run_config,
                     }];
+                    if let Some(input) = auto_rename_input {
+                        effects.push(Effect::AiRenameWorkspaceBranch { workspace_id, input });
+                    }
+                    return effects;
                 }
 
                 if conversation.pending_prompts.is_empty() {
+                    let auto_rename_input =
+                        auto_rename_started.then(|| text.clone());
                     conversation.queue_paused = false;
                     conversation.entries.push(ConversationEntry::UserMessage {
                         text: text.clone(),
@@ -462,13 +607,17 @@ impl AppState {
                     conversation.current_run_config = Some(run_config.clone());
                     conversation.in_progress_items.clear();
                     conversation.in_progress_order.clear();
-                    return vec![Effect::RunAgentTurn {
+                    let mut effects = vec![Effect::RunAgentTurn {
                         workspace_id,
                         thread_id,
                         text,
                         attachments,
                         run_config,
                     }];
+                    if let Some(input) = auto_rename_input {
+                        effects.push(Effect::AiRenameWorkspaceBranch { workspace_id, input });
+                    }
+                    return effects;
                 }
 
                 conversation.pending_prompts.push_back(QueuedPrompt {
@@ -1306,6 +1455,8 @@ impl AppState {
             status: WorkspaceStatus::Active,
             last_activity_at: None,
             archive_status: OperationStatus::Idle,
+            branch_renamed: true,
+            branch_rename_status: OperationStatus::Idle,
         });
 
         workspace_id
@@ -1322,6 +1473,7 @@ impl AppState {
         workspace_name: &str,
         branch_name: &str,
         worktree_path: PathBuf,
+        branch_renamed: bool,
     ) -> WorkspaceId {
         let workspace_id = WorkspaceId(self.next_workspace_id);
         self.next_workspace_id += 1;
@@ -1335,6 +1487,8 @@ impl AppState {
                 status: WorkspaceStatus::Active,
                 last_activity_at: None,
                 archive_status: OperationStatus::Idle,
+                branch_renamed,
+                branch_rename_status: OperationStatus::Idle,
             });
             project.expanded = true;
             self.main_pane = MainPane::Workspace(workspace_id);
@@ -1538,6 +1692,7 @@ mod tests {
             workspace_name: "w1".to_owned(),
             branch_name: "repo/w1".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/w1"),
+            branch_name_hint_provided: true,
         });
 
         let workspace_id = workspace_id_by_name(&state, "w1");
@@ -1590,6 +1745,7 @@ mod tests {
             workspace_name: "w1".to_owned(),
             branch_name: "repo/w1".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/w1"),
+            branch_name_hint_provided: true,
         });
         let workspace_id = workspace_id_by_name(&state, "w1");
         let thread_id = WorkspaceThreadId(1);
@@ -1656,6 +1812,7 @@ mod tests {
             workspace_name: "w1".to_owned(),
             branch_name: "repo/w1".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/w1"),
+            branch_name_hint_provided: false,
         });
         let workspace_id = workspace_id_by_name(&state, "w1");
         let thread_id = WorkspaceThreadId(1);
@@ -1732,6 +1889,82 @@ mod tests {
     }
 
     #[test]
+    fn first_message_triggers_ai_branch_rename_for_unlabeled_workspaces() {
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+            is_git: true,
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::CreateWorkspace {
+            project_id,
+            branch_name_hint: None,
+        });
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "w1".to_owned(),
+            branch_name: "luban/random-name".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/w1"),
+            branch_name_hint_provided: false,
+        });
+
+        let workspace_id = workspace_id_by_name(&state, "w1");
+        let thread_id = default_thread_id();
+        let effects = state.apply(Action::SendAgentMessage {
+            workspace_id,
+            thread_id,
+            text: "Implement feature X".to_owned(),
+            attachments: Vec::new(),
+        });
+
+        assert_eq!(effects.len(), 2);
+        assert!(matches!(
+            effects[0],
+            Effect::RunAgentTurn { workspace_id: wid, .. } if wid == workspace_id
+        ));
+        assert!(matches!(
+            effects[1],
+            Effect::AiRenameWorkspaceBranch { workspace_id: wid, .. } if wid == workspace_id
+        ));
+    }
+
+    #[test]
+    fn first_message_skips_ai_branch_rename_when_branch_is_already_labeled() {
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+            is_git: true,
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::CreateWorkspace {
+            project_id,
+            branch_name_hint: None,
+        });
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "w1".to_owned(),
+            branch_name: "luban/feature-x".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/w1"),
+            branch_name_hint_provided: true,
+        });
+
+        let workspace_id = workspace_id_by_name(&state, "w1");
+        let thread_id = default_thread_id();
+        let effects = state.apply(Action::SendAgentMessage {
+            workspace_id,
+            thread_id,
+            text: "Implement feature X".to_owned(),
+            attachments: Vec::new(),
+        });
+
+        assert_eq!(effects.len(), 1);
+        assert!(matches!(
+            effects[0],
+            Effect::RunAgentTurn { workspace_id: wid, .. } if wid == workspace_id
+        ));
+    }
+
+    #[test]
     fn open_dashboard_loads_conversations_for_non_main_workspaces() {
         let mut state = AppState::new();
         state.apply(Action::AddProject {
@@ -1748,6 +1981,7 @@ mod tests {
             workspace_name: "w1".to_owned(),
             branch_name: "repo/w1".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/w1"),
+            branch_name_hint_provided: false,
         });
 
         let main_id = main_workspace_id(&state);
@@ -1784,6 +2018,7 @@ mod tests {
             workspace_name: "w1".to_owned(),
             branch_name: "repo/w1".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/w1"),
+            branch_name_hint_provided: true,
         });
         let workspace_id = workspace_id_by_name(&state, "w1");
 
@@ -1807,6 +2042,7 @@ mod tests {
             workspace_name: "w1".to_owned(),
             branch_name: "repo/w1".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/w1"),
+            branch_name_hint_provided: true,
         });
         let workspace_id = workspace_id_by_name(&state, "w1");
         state.apply(Action::OpenWorkspace { workspace_id });
@@ -2092,6 +2328,7 @@ mod tests {
             workspace_name: "w1".to_owned(),
             branch_name: "repo/w1".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/w1"),
+            branch_name_hint_provided: true,
         });
         let workspace_id = workspace_id_by_name(&state, "w1");
         state.apply(Action::OpenWorkspace { workspace_id });
@@ -2214,6 +2451,7 @@ mod tests {
             workspace_name: "abandon-about".to_owned(),
             branch_name: "luban/abandon-about".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+            branch_name_hint_provided: true,
         });
         let workspace_id = workspace_id_by_name(&state, "abandon-about");
         let thread_id = default_thread_id();
@@ -2385,6 +2623,7 @@ mod tests {
             workspace_name: "main".to_owned(),
             branch_name: "main".to_owned(),
             worktree_path: PathBuf::from("/tmp/repo"),
+            branch_name_hint_provided: true,
         });
         let main_id = workspace_id_by_name(&state, "main");
 
@@ -2450,6 +2689,7 @@ mod tests {
             workspace_name: "abandon-about".to_owned(),
             branch_name: "luban/abandon-about".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+            branch_name_hint_provided: true,
         });
         let workspace_id = workspace_id_by_name(&state, "abandon-about");
         state.apply(Action::OpenWorkspace { workspace_id });
@@ -2492,12 +2732,14 @@ mod tests {
             workspace_name: "w1".to_owned(),
             branch_name: "repo/w1".to_owned(),
             worktree_path: PathBuf::from("/tmp/repo/worktrees/w1"),
+            branch_name_hint_provided: true,
         });
         state.apply(Action::WorkspaceCreated {
             project_id,
             workspace_name: "w2".to_owned(),
             branch_name: "repo/w2".to_owned(),
             worktree_path: PathBuf::from("/tmp/repo/worktrees/w2"),
+            branch_name_hint_provided: true,
         });
 
         let w1 = workspace_id_by_name(&state, "w1");
@@ -2543,6 +2785,7 @@ mod tests {
             workspace_name: "w1".to_owned(),
             branch_name: "repo/w1".to_owned(),
             worktree_path: PathBuf::from("/tmp/repo/worktrees/w1"),
+            branch_name_hint_provided: true,
         });
         let w1 = workspace_id_by_name(&state, "w1");
         let thread_id = default_thread_id();
@@ -3069,6 +3312,7 @@ mod tests {
             workspace_name: "abandon-about".to_owned(),
             branch_name: "luban/abandon-about".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+            branch_name_hint_provided: true,
         });
         let workspace_id = workspace_id_by_name(&state, "abandon-about");
 
@@ -3107,6 +3351,7 @@ mod tests {
             workspace_name: "abandon-about".to_owned(),
             branch_name: "luban/abandon-about".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+            branch_name_hint_provided: true,
         });
         let workspace_id = workspace_id_by_name(&state, "abandon-about");
 
@@ -3145,6 +3390,7 @@ mod tests {
             workspace_name: "abandon-about".to_owned(),
             branch_name: "luban/abandon-about".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+            branch_name_hint_provided: true,
         });
         let workspace_id = workspace_id_by_name(&state, "abandon-about");
 

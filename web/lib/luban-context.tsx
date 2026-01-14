@@ -71,6 +71,9 @@ type LubanContextValue = {
   ) => void
   cancelAgentTurn: () => void
 
+  renameWorkspaceBranch: (workspaceId: WorkspaceId, branchName: string) => void
+  aiRenameWorkspaceBranch: (workspaceId: WorkspaceId, threadId: WorkspaceThreadId) => void
+
   setChatModel: (workspaceId: WorkspaceId, threadId: WorkspaceThreadId, modelId: string) => void
   setThinkingEffort: (workspaceId: WorkspaceId, threadId: WorkspaceThreadId, effort: ThinkingEffort) => void
   setAppearanceTheme: (theme: AppearanceTheme) => void
@@ -159,6 +162,8 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     sendAgentMessage: actions.sendAgentMessage,
     sendAgentMessageTo: actions.sendAgentMessageTo,
     cancelAgentTurn: actions.cancelAgentTurn,
+    renameWorkspaceBranch: actions.renameWorkspaceBranch,
+    aiRenameWorkspaceBranch: actions.aiRenameWorkspaceBranch,
     setChatModel: actions.setChatModel,
     setThinkingEffort: actions.setThinkingEffort,
     setAppearanceTheme: actions.setAppearanceTheme,

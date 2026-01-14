@@ -252,6 +252,7 @@ pub(crate) fn to_persisted_app_state(state: &AppState) -> PersistedAppState {
                         last_activity_at_unix_seconds: w
                             .last_activity_at
                             .and_then(|t| t.duration_since(UNIX_EPOCH).ok().map(|d| d.as_secs())),
+                        branch_renamed: w.branch_renamed,
                     })
                     .collect(),
             })
@@ -355,6 +356,8 @@ fn load_projects(projects: Vec<PersistedProject>) -> (Vec<Project>, bool) {
                         .last_activity_at_unix_seconds
                         .map(|secs| UNIX_EPOCH + Duration::from_secs(secs)),
                     archive_status: OperationStatus::Idle,
+                    branch_renamed: w.branch_renamed,
+                    branch_rename_status: OperationStatus::Idle,
                 })
                 .collect(),
         };
@@ -513,6 +516,7 @@ mod tests {
                     worktree_path: path.clone(),
                     status: WorkspaceStatus::Active,
                     last_activity_at_unix_seconds: None,
+                    branch_renamed: true,
                 }],
             },
             PersistedProject {
@@ -529,6 +533,7 @@ mod tests {
                     worktree_path: path.clone(),
                     status: WorkspaceStatus::Active,
                     last_activity_at_unix_seconds: None,
+                    branch_renamed: true,
                 }],
             },
         ];
@@ -559,6 +564,7 @@ mod tests {
                     worktree_path: path.clone(),
                     status: WorkspaceStatus::Active,
                     last_activity_at_unix_seconds: None,
+                    branch_renamed: true,
                 },
                 PersistedWorkspace {
                     id: 11,
@@ -567,6 +573,7 @@ mod tests {
                     worktree_path: path.clone(),
                     status: WorkspaceStatus::Active,
                     last_activity_at_unix_seconds: None,
+                    branch_renamed: true,
                 },
             ],
         }];

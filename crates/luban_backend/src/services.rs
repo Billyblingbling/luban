@@ -394,7 +394,7 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                     let workspace_name = if attempt == 0 {
                         hint.clone()
                     } else {
-                        format!("{hint}-{attempt}")
+                        format!("{hint}-v{}", attempt + 1)
                     };
 
                     let branch_name = format!("luban/{workspace_name}");
@@ -524,6 +524,128 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                 })?;
             Ok(())
         })();
+        result.map_err(|e| format!("{e:#}"))
+    }
+
+    fn rename_workspace_branch(
+        &self,
+        worktree_path: PathBuf,
+        requested_branch_name: String,
+    ) -> Result<String, String> {
+        let result: anyhow::Result<String> = (|| {
+            if !worktree_path.exists() {
+                return Err(anyhow!(
+                    "workspace path does not exist: {}",
+                    worktree_path.display()
+                ));
+            }
+
+            fn normalize_branch_name(raw: &str) -> Option<String> {
+                let mut value = raw.trim();
+                if value.is_empty() {
+                    return None;
+                }
+
+                if let Some(stripped) = value.strip_prefix("refs/heads/") {
+                    value = stripped;
+                }
+                if let Some(stripped) = value.strip_prefix("luban/") {
+                    value = stripped;
+                }
+
+                let mut out = String::new();
+                let mut prev_hyphen = false;
+                for ch in value.chars() {
+                    let next = if ch.is_ascii_alphanumeric() {
+                        ch.to_ascii_lowercase()
+                    } else {
+                        '-'
+                    };
+                    if next == '-' {
+                        if prev_hyphen {
+                            continue;
+                        }
+                        prev_hyphen = true;
+                        out.push('-');
+                        continue;
+                    }
+                    prev_hyphen = false;
+                    out.push(next);
+                }
+
+                let trimmed = out.trim_matches('-');
+                if trimmed.is_empty() {
+                    return None;
+                }
+
+                const MAX_SUFFIX_LEN: usize = 24;
+                let suffix = trimmed.chars().take(MAX_SUFFIX_LEN).collect::<String>();
+                let suffix = suffix.trim_matches('-');
+                if suffix.is_empty() {
+                    return None;
+                }
+
+                Some(format!("luban/{suffix}"))
+            }
+
+            fn branch_exists(worktree_path: &Path, branch_name: &str) -> bool {
+                let branch_ref = format!("refs/heads/{branch_name}");
+                Command::new("git")
+                    .args(["show-ref", "--verify", "--quiet", &branch_ref])
+                    .current_dir(worktree_path)
+                    .status()
+                    .ok()
+                    .map(|s| s.success())
+                    .unwrap_or(false)
+            }
+
+            let current_branch = self
+                .run_git(&worktree_path, ["rev-parse", "--abbrev-ref", "HEAD"])
+                .context("failed to resolve current branch")?;
+            let current_branch = current_branch.trim();
+            if current_branch.is_empty() || current_branch == "HEAD" {
+                return Err(anyhow!(
+                    "workspace is not on a branch (current branch is '{}')",
+                    current_branch
+                ));
+            }
+            if current_branch == "main" {
+                return Err(anyhow!("refusing to rename main branch"));
+            }
+
+            let normalized = normalize_branch_name(&requested_branch_name)
+                .ok_or_else(|| anyhow!("invalid branch name"))?;
+            if normalized == current_branch {
+                return Ok(normalized);
+            }
+
+            for attempt in 1..=64 {
+                let candidate = if attempt == 1 {
+                    normalized.clone()
+                } else {
+                    format!("{normalized}-v{attempt}")
+                };
+
+                if candidate != current_branch && branch_exists(&worktree_path, &candidate) {
+                    continue;
+                }
+
+                self.run_git(&worktree_path, ["branch", "-m", &candidate])
+                    .with_context(|| format!("failed to rename branch to {candidate}"))?;
+
+                let updated = self
+                    .run_git(&worktree_path, ["rev-parse", "--abbrev-ref", "HEAD"])
+                    .context("failed to resolve renamed branch")?;
+                let updated = updated.trim().to_owned();
+                if updated.is_empty() || updated == "HEAD" {
+                    return Err(anyhow!("failed to resolve renamed branch"));
+                }
+                return Ok(updated);
+            }
+
+            Err(anyhow!("failed to find a free branch name after retries"))
+        })();
+
         result.map_err(|e| format!("{e:#}"))
     }
 

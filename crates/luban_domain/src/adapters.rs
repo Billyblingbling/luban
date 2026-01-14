@@ -193,6 +193,12 @@ pub trait ProjectWorkspaceService: Send + Sync {
         worktree_path: PathBuf,
     ) -> Result<(), String>;
 
+    fn rename_workspace_branch(
+        &self,
+        worktree_path: PathBuf,
+        requested_branch_name: String,
+    ) -> Result<String, String>;
+
     fn ensure_conversation(
         &self,
         project_slug: String,

@@ -67,6 +67,15 @@ pub enum Effect {
         thread_id: WorkspaceThreadId,
     },
 
+    RenameWorkspaceBranch {
+        workspace_id: WorkspaceId,
+        requested_branch_name: String,
+    },
+    AiRenameWorkspaceBranch {
+        workspace_id: WorkspaceId,
+        input: String,
+    },
+
     LoadWorkspaceThreads {
         workspace_id: WorkspaceId,
     },

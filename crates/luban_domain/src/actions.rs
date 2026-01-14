@@ -42,6 +42,7 @@ pub enum Action {
         workspace_name: String,
         branch_name: String,
         worktree_path: PathBuf,
+        branch_name_hint_provided: bool,
     },
     WorkspaceCreateFailed {
         project_id: ProjectId,
@@ -76,6 +77,23 @@ pub enum Action {
         workspace_id: WorkspaceId,
     },
     WorkspaceArchiveFailed {
+        workspace_id: WorkspaceId,
+        message: String,
+    },
+
+    WorkspaceBranchRenameRequested {
+        workspace_id: WorkspaceId,
+        requested_branch_name: String,
+    },
+    WorkspaceBranchAiRenameRequested {
+        workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
+    },
+    WorkspaceBranchRenamed {
+        workspace_id: WorkspaceId,
+        branch_name: String,
+    },
+    WorkspaceBranchRenameFailed {
         workspace_id: WorkspaceId,
         message: String,
     },

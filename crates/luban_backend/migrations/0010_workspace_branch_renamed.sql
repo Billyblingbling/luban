@@ -1,0 +1,3 @@
+ALTER TABLE workspaces
+  ADD COLUMN branch_renamed INTEGER NOT NULL DEFAULT 1;
+

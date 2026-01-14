@@ -135,6 +135,7 @@ pub struct WorkspaceSnapshot {
     pub worktree_path: String,
     pub status: WorkspaceStatus,
     pub archive_status: OperationStatus,
+    pub branch_rename_status: OperationStatus,
     pub agent_run_status: OperationStatus,
     pub has_unread_completion: bool,
     pub pull_request: Option<PullRequestSnapshot>,
@@ -522,6 +523,14 @@ pub enum ClientAction {
         thread_id: WorkspaceThreadId,
         text: String,
         attachments: Vec<AttachmentRef>,
+    },
+    WorkspaceRenameBranch {
+        workspace_id: WorkspaceId,
+        branch_name: String,
+    },
+    WorkspaceAiRenameBranch {
+        workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
     },
     CancelAgentTurn {
         workspace_id: WorkspaceId,

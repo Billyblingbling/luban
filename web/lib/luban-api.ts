@@ -70,6 +70,7 @@ export type WorkspaceSnapshot = {
   worktree_path: string
   status: WorkspaceStatus
   archive_status: OperationStatus
+  branch_rename_status: OperationStatus
   agent_run_status: OperationStatus
   has_unread_completion: boolean
   pull_request: PullRequestSnapshot | null
@@ -298,6 +299,8 @@ export type ClientAction =
       text: string
       attachments: AttachmentRef[]
     }
+  | { type: "workspace_rename_branch"; workspace_id: WorkspaceId; branch_name: string }
+  | { type: "workspace_ai_rename_branch"; workspace_id: WorkspaceId; thread_id: WorkspaceThreadId }
   | { type: "cancel_agent_turn"; workspace_id: WorkspaceId; thread_id: WorkspaceThreadId }
   | { type: "create_workspace_thread"; workspace_id: WorkspaceId }
   | { type: "activate_workspace_thread"; workspace_id: WorkspaceId; thread_id: WorkspaceThreadId }
