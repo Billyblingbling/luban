@@ -92,6 +92,7 @@ function ChatComposerCard({
   workspaceId,
   commands,
   messageHistory,
+  onCommand,
   placeholder,
   disabled,
   autoFocus,
@@ -110,6 +111,7 @@ function ChatComposerCard({
   workspaceId?: number | null
   commands?: CodexCustomPromptSnapshot[]
   messageHistory?: string[]
+  onCommand?: (commandId: string) => void
   placeholder: string
   disabled: boolean
   autoFocus?: boolean
@@ -143,6 +145,7 @@ function ChatComposerCard({
   const [showCommandMenu, setShowCommandMenu] = useState(false)
   const [commandQuery, setCommandQuery] = useState("")
   const [commandSelectedIndex, setCommandSelectedIndex] = useState(0)
+  const commandMenuRef = useRef<HTMLDivElement | null>(null)
 
   const [showMentionMenu, setShowMentionMenu] = useState(false)
   const [mentionQuery, setMentionQuery] = useState("")
@@ -150,6 +153,7 @@ function ChatComposerCard({
   const [mentionStartPos, setMentionStartPos] = useState<number | null>(null)
   const [mentionItems, setMentionItems] = useState<MentionItemSnapshot[]>([])
   const mentionRequestIdRef = useRef(0)
+  const mentionMenuRef = useRef<HTMLDivElement | null>(null)
 
   const [historyIndex, setHistoryIndex] = useState(-1)
   const [savedInput, setSavedInput] = useState("")
@@ -161,7 +165,7 @@ function ChatComposerCard({
     const maxHeightPx = 160
     const nextHeight = Math.min(el.scrollHeight, maxHeightPx)
     el.style.height = `${nextHeight}px`
-    el.style.overflowY = el.scrollHeight > maxHeightPx ? "auto" : "hidden"
+    el.style.overflow = "hidden"
   }, [text])
 
   const handleDrop = (e: React.DragEvent) => {
@@ -204,6 +208,34 @@ function ChatComposerCard({
       (item) => item.path.toLowerCase().includes(q) || item.name.toLowerCase().includes(q),
     )
   }, [mentionItems, mentionQuery, showMentionMenu])
+
+  useEffect(() => {
+    if (!showCommandMenu) return
+    const menu = commandMenuRef.current
+    if (!menu) return
+    if (commandSelectedIndex === 0) {
+      menu.scrollTo({ top: 0 })
+      return
+    }
+    const item = menu.querySelector(`[data-index="${commandSelectedIndex}"]`)
+    if (item && "scrollIntoView" in item) {
+      ;(item as HTMLElement).scrollIntoView({ block: "nearest" })
+    }
+  }, [commandSelectedIndex, showCommandMenu])
+
+  useEffect(() => {
+    if (!showMentionMenu) return
+    const menu = mentionMenuRef.current
+    if (!menu) return
+    if (mentionSelectedIndex === 0) {
+      menu.scrollTo({ top: 0 })
+      return
+    }
+    const item = menu.querySelector(`[data-index="${mentionSelectedIndex}"]`)
+    if (item && "scrollIntoView" in item) {
+      ;(item as HTMLElement).scrollIntoView({ block: "nearest" })
+    }
+  }, [mentionSelectedIndex, showMentionMenu])
 
   useEffect(() => {
     if (!showMentionMenu) return
@@ -254,34 +286,13 @@ function ChatComposerCard({
 
   const handleCommandSelect = useCallback(
     (command: CodexCustomPromptSnapshot) => {
-      const raw = text
-      const offset = raw.length - raw.trimStart().length
-      const trimmed = raw.trimStart()
-      if (!trimmed.startsWith("/")) return
-
-      const afterSlash = trimmed.slice(1)
-      const spaceIdx = afterSlash.search(/\s/)
-      const token = spaceIdx === -1 ? afterSlash : afterSlash.slice(0, spaceIdx)
-      const rest = raw.slice(offset + 1 + token.length)
-      const restTrimmed = rest.trimStart()
-
-      const joiner = restTrimmed ? "\n\n" : ""
-      const next = `${command.contents}${joiner}${restTrimmed}`
-
-      onTextChange(next)
       setShowCommandMenu(false)
       setCommandQuery("")
       setCommandSelectedIndex(0)
-
-      window.setTimeout(() => {
-        const el = textareaRef.current
-        if (!el) return
-        el.focus()
-        const pos = el.value.length
-        el.setSelectionRange(pos, pos)
-      }, 0)
+      onTextChange("")
+      onCommand?.(command.id)
     },
-    [onTextChange, text],
+    [onCommand, onTextChange],
   )
 
   const handleMentionSelect = useCallback(
@@ -317,7 +328,7 @@ function ChatComposerCard({
       setHistoryIndex(-1)
 
       if (next.startsWith("/")) {
-        const query = next.slice(1).split(/\s/)[0] ?? ""
+        const query = next.slice(1).split(" ")[0] ?? ""
         setShowCommandMenu(true)
         setCommandQuery(query)
         setCommandSelectedIndex(0)
@@ -344,7 +355,7 @@ function ChatComposerCard({
         const isWordStart = /\s/.test(charBefore)
         if (isWordStart) {
           const textAfterAt = beforeCursor.slice(lastAtIndex + 1)
-          if (!/\s/.test(textAfterAt)) {
+          if (!textAfterAt.includes(" ")) {
             setShowMentionMenu(true)
             setMentionQuery(textAfterAt)
             setMentionSelectedIndex(0)
@@ -448,10 +459,12 @@ function ChatComposerCard({
         }
       }
 
-      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault()
         if (primaryAction.disabled) return
         primaryAction.onClick()
+        setHistoryIndex(-1)
+        setSavedInput("")
       }
       if (e.key === "Escape" && secondaryAction) {
         e.preventDefault()
@@ -494,6 +507,105 @@ function ChatComposerCard({
       }}
       onDrop={handleDrop}
     >
+      {showCommandMenu && (
+        filteredCommands.length === 0 ? (
+          <div className="absolute bottom-full left-0 right-0 mb-2 bg-popover border border-border rounded-lg shadow-xl overflow-hidden z-50">
+            <div className="px-3 py-4 text-center text-sm text-muted-foreground">No commands found</div>
+          </div>
+        ) : (
+          <>
+            <div
+              className="fixed inset-0 z-40"
+              onClick={() => {
+                setShowCommandMenu(false)
+                onTextChange("")
+              }}
+            />
+            <div
+              ref={commandMenuRef}
+              data-testid="chat-command-menu"
+              className="absolute bottom-full left-0 right-0 mb-2 bg-popover border border-border rounded-lg shadow-xl overflow-hidden z-50 max-h-[280px] overflow-y-auto"
+            >
+              <div className="px-2 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border bg-muted/30">
+                Commands
+              </div>
+              <div className="py-1">
+                {filteredCommands.map((cmd, idx) => (
+                  <button
+                    key={cmd.id}
+                    type="button"
+                    data-testid="chat-command-item"
+                    data-index={idx}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => handleCommandSelect(cmd)}
+                    className={cn(
+                      "w-full flex items-center gap-3 px-3 py-2 text-left transition-colors",
+                      idx === commandSelectedIndex ? "bg-primary/10 text-primary" : "hover:bg-muted/50",
+                    )}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <span className="text-sm font-medium">/{cmd.label}</span>
+                      {cmd.description ? (
+                        <span className="text-xs text-muted-foreground ml-2">{cmd.description}</span>
+                      ) : null}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
+        )
+      )}
+
+      {showMentionMenu && (
+        <>
+          <div
+            className="fixed inset-0 z-40"
+            onClick={() => {
+              setShowMentionMenu(false)
+              setMentionStartPos(null)
+            }}
+          />
+          <div
+            ref={mentionMenuRef}
+            data-testid="chat-mention-menu"
+            className="absolute bottom-full left-0 right-0 mb-2 bg-popover border border-border rounded-lg shadow-xl overflow-hidden z-50 max-h-[320px] overflow-y-auto"
+          >
+            {filteredMentions.length === 0 ? (
+              <div className="px-3 py-4 text-center text-sm text-muted-foreground">No files found</div>
+            ) : (
+              <>
+                <div className="px-2 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border bg-muted/30">
+                  Reference files
+                </div>
+                <div className="py-1">
+                  {filteredMentions.map((item, idx) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      data-testid="chat-mention-item"
+                      data-index={idx}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => handleMentionSelect(item)}
+                      className={cn(
+                        "w-full flex items-center gap-2.5 px-3 py-1.5 text-left transition-colors",
+                        idx === mentionSelectedIndex ? "bg-primary/10 text-primary" : "hover:bg-muted/50",
+                      )}
+                    >
+                      {getMentionIcon(item)}
+                      <div className="flex-1 min-w-0">
+                        <span className="text-sm truncate block">{item.name}</span>
+                        <span className="text-[11px] text-muted-foreground truncate block">{item.path}</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        </>
+      )}
+
       {isDragging && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-primary/5 rounded-lg border-2 border-dashed border-primary">
           <div className="flex flex-col items-center gap-2 text-primary">
@@ -561,72 +673,7 @@ function ChatComposerCard({
         </div>
       )}
 
-      <div className="relative px-2.5 pt-2">
-        {showCommandMenu && (
-          <div
-            data-testid="chat-command-menu"
-            className="absolute bottom-full left-0 right-0 mb-2 bg-popover border border-border rounded-lg shadow-xl overflow-hidden z-50"
-          >
-            {filteredCommands.length === 0 ? (
-              <div className="px-3 py-4 text-center text-sm text-muted-foreground">No commands</div>
-            ) : (
-              <div className="max-h-56 overflow-auto">
-                {filteredCommands.slice(0, 20).map((cmd, idx) => (
-                  <button
-                    key={cmd.id}
-                    type="button"
-                    data-testid="chat-command-item"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => handleCommandSelect(cmd)}
-                    className={cn(
-                      "w-full text-left px-3 py-2 flex flex-col gap-0.5 hover:bg-accent transition-colors",
-                      idx === commandSelectedIndex && "bg-accent",
-                    )}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium text-foreground">{cmd.label}</span>
-                    </div>
-                    {cmd.description && (
-                      <span className="text-xs text-muted-foreground line-clamp-1">{cmd.description}</span>
-                    )}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-        {showMentionMenu && (
-          <div
-            data-testid="chat-mention-menu"
-            className="absolute bottom-full left-0 right-0 mb-2 bg-popover border border-border rounded-lg shadow-xl overflow-hidden z-50"
-          >
-            {filteredMentions.length === 0 ? (
-              <div className="px-3 py-4 text-center text-sm text-muted-foreground">No matches</div>
-            ) : (
-              <div className="max-h-56 overflow-auto">
-                {filteredMentions.slice(0, 20).map((item, idx) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    data-testid="chat-mention-item"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => handleMentionSelect(item)}
-                    className={cn(
-                      "w-full text-left px-3 py-2 flex items-center gap-2 hover:bg-accent transition-colors",
-                      idx === mentionSelectedIndex && "bg-accent",
-                    )}
-                  >
-                    <span className="shrink-0">{getMentionIcon(item)}</span>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm font-medium text-foreground truncate">{item.name}</div>
-                      <div className="text-xs text-muted-foreground truncate">{item.path}</div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+      <div className="px-2.5 pt-2">
         <textarea
           ref={textareaRef}
           data-testid={testIds.textInput}
@@ -637,7 +684,7 @@ function ChatComposerCard({
           onPaste={onPaste}
           placeholder={placeholder}
           className="w-full bg-transparent text-sm leading-5 text-foreground placeholder:text-muted-foreground resize-none focus:outline-none min-h-[20px] max-h-[160px] luban-font-chat"
-          rows={1}
+          style={{ overflow: "hidden" }}
           disabled={disabled}
           autoFocus={autoFocus}
           onKeyDown={handleKeyDown}
@@ -657,8 +704,9 @@ function ChatComposerCard({
         <button
           data-testid={testIds.attachButton}
           onClick={() => fileInputRef.current?.click()}
+          onMouseDown={(e) => e.preventDefault()}
           className="inline-flex items-center gap-1 p-1.5 hover:bg-muted rounded text-muted-foreground hover:text-foreground transition-colors"
-          title="Attach files"
+          title="Attach files (images, documents)"
           disabled={disabled}
         >
           <Paperclip className="w-4 h-4" />
@@ -669,6 +717,12 @@ function ChatComposerCard({
         {agentSelector}
 
         <div className="flex-1" />
+
+        {historyIndex >= 0 && history.length > 0 && (
+          <span className="text-[10px] text-muted-foreground mr-2">
+            History {historyIndex + 1}/{history.length}
+          </span>
+        )}
 
         {secondaryAction && (
           <button
@@ -690,6 +744,7 @@ function ChatComposerCard({
               : "bg-muted text-muted-foreground",
             secondaryAction && "ml-2",
           )}
+          onMouseDown={(e) => e.preventDefault()}
           onClick={primaryAction.onClick}
           disabled={primaryAction.disabled}
         >
@@ -818,6 +873,17 @@ export function ChatPanel({
         setCodexCustomPrompts([])
       })
   }, [])
+
+  const handleCommand = useCallback(
+    (commandId: string) => {
+      const match = codexCustomPrompts.find((p) => p.id === commandId) ?? null
+      if (!match) return
+      setDraftText(match.contents)
+      persistDraft(match.contents)
+      focusChatInput()
+    },
+    [codexCustomPrompts, persistDraft],
+  )
 
   const projectInfo = useMemo(() => {
     if (app == null || activeWorkspaceId == null) {
@@ -1738,7 +1804,8 @@ export function ChatPanel({
                     workspaceId={activeWorkspaceId}
                     commands={codexCustomPrompts}
                     messageHistory={messageHistory}
-                    placeholder="Message... (⌘↵ to send)"
+                    onCommand={handleCommand}
+                    placeholder="Message... (@ to mention, / for commands)"
                     disabled={activeWorkspaceId == null || activeThreadId == null}
                     agentSelector={
                       <CodexAgentSelector
@@ -1861,7 +1928,12 @@ function QueuedPromptRow({
           workspaceId={workspaceId}
           commands={commands}
           messageHistory={messageHistory}
-          placeholder="Message... (⌘↵ to send)"
+          onCommand={(commandId) => {
+            const match = commands.find((p) => p.id === commandId) ?? null
+            if (!match) return
+            onEditingTextChange(match.contents)
+          }}
+          placeholder="Edit message..."
           disabled={false}
           autoFocus
           agentSelector={

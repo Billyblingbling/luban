@@ -188,14 +188,11 @@ test("queued messages can be reordered and edited", async ({ page }) => {
 
   await expect(queuedItems.nth(0)).toContainText(secondQueued, { timeout: 20_000 })
 
-  const composerPlaceholder = await page.getByTestId("chat-input").getAttribute("placeholder")
-  expect(composerPlaceholder).toBeTruthy()
-
   await queuedItems.nth(0).hover()
   await queuedItems.nth(0).locator('[data-testid="queued-prompt-edit"]').click({ force: true, timeout: 20_000 })
   const input = page.getByTestId("queued-prompt-input")
   await expect(input).toBeVisible({ timeout: 20_000 })
-  await expect.poll(async () => await input.getAttribute("placeholder")).toBe(composerPlaceholder)
+  await expect.poll(async () => await input.getAttribute("placeholder")).toBe("Edit message...")
   const updated = `e2e-queued-${runId}-edited`
   await input.fill(updated)
   await page.getByTestId("queued-save").click()
