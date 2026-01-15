@@ -541,7 +541,10 @@ function ContextPanel({
         {error && <div className="px-3 py-2 text-xs text-destructive">{error}</div>}
 
         {list.length === 0 && !isLoading && !error ? (
-          <div className="px-3 py-2 text-xs text-muted-foreground">No context yet.</div>
+          <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+            <Paperclip className="w-8 h-8 mb-2 opacity-50" />
+            <span className="text-xs">No contexts</span>
+          </div>
         ) : (
           list.map((file) => (
             <ContextFileRow
