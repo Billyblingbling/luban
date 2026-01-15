@@ -73,6 +73,257 @@ type ComposerAttachment = {
   attachment?: AttachmentRef
 }
 
+function ChatComposerCard({
+  text,
+  onTextChange,
+  attachments,
+  onRemoveAttachment,
+  onFileSelect,
+  onPaste,
+  onAddAttachmentRef,
+  placeholder,
+  disabled,
+  autoFocus,
+  agentSelector,
+  primaryAction,
+  secondaryAction,
+  testIds,
+}: {
+  text: string
+  onTextChange: (text: string) => void
+  attachments: ComposerAttachment[]
+  onRemoveAttachment: (id: string) => void
+  onFileSelect: (files: FileList | null) => void
+  onPaste: (e: React.ClipboardEvent) => void
+  onAddAttachmentRef?: (attachment: AttachmentRef) => void
+  placeholder: string
+  disabled: boolean
+  autoFocus?: boolean
+  agentSelector: React.ReactNode
+  primaryAction: {
+    onClick: () => void
+    disabled: boolean
+    icon: React.ReactNode
+    ariaLabel: string
+    testId?: string
+  }
+  secondaryAction?: {
+    onClick: () => void
+    ariaLabel: string
+    icon: React.ReactNode
+    testId?: string
+  }
+  testIds: {
+    textInput: string
+    attachInput: string
+    attachButton: string
+    attachmentTile: string
+  }
+}) {
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const [isFocused, setIsFocused] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
+
+  useEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = "auto"
+    const maxHeightPx = 160
+    const nextHeight = Math.min(el.scrollHeight, maxHeightPx)
+    el.style.height = `${nextHeight}px`
+    el.style.overflowY = el.scrollHeight > maxHeightPx ? "auto" : "hidden"
+  }, [text])
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    if (disabled) return
+    setIsDragging(false)
+
+    const raw = e.dataTransfer.getData("luban-context-attachment")
+    if (raw && onAddAttachmentRef) {
+      try {
+        const attachment = JSON.parse(raw) as AttachmentRef
+        if (attachment && typeof attachment.id === "string") {
+          onAddAttachmentRef(attachment)
+          return
+        }
+      } catch {
+        // Ignore invalid payloads.
+      }
+    }
+    onFileSelect(e.dataTransfer.files)
+  }
+
+  return (
+    <div
+      className={cn(
+        "relative bg-background border rounded-lg shadow-lg transition-all",
+        isFocused ? "border-primary/50 ring-1 ring-primary/20 shadow-xl" : "border-border",
+        isDragging && "border-primary ring-2 ring-primary/30 bg-primary/5",
+      )}
+      onDragOver={(e) => {
+        e.preventDefault()
+        if (disabled) return
+        setIsDragging(true)
+      }}
+      onDragLeave={(e) => {
+        e.preventDefault()
+        setIsDragging(false)
+      }}
+      onDrop={handleDrop}
+    >
+      {isDragging && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-primary/5 rounded-lg border-2 border-dashed border-primary">
+          <div className="flex flex-col items-center gap-2 text-primary">
+            <ImageIcon className="w-8 h-8" />
+            <span className="text-sm font-medium">Drop files here</span>
+          </div>
+        </div>
+      )}
+
+      {attachments.length > 0 && (
+        <div className="px-3 pt-3 pb-1 flex flex-wrap gap-3">
+          {attachments.map((attachment) => (
+            <div key={attachment.id} data-testid={testIds.attachmentTile} className="group relative">
+              <div className="relative">
+                <div className="w-20 h-20 rounded-lg overflow-hidden border border-border/50 hover:border-border transition-colors bg-muted/40 flex items-center justify-center">
+                  {attachment.type === "image" && (attachment.preview || attachment.previewUrl) ? (
+                    <img
+                      src={attachment.preview ?? attachment.previewUrl}
+                      alt={attachment.name}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex flex-col items-center gap-1.5">
+                      {attachment.name.toLowerCase().endsWith(".json") ? (
+                        <FileCode className="w-6 h-6 text-amber-500" />
+                      ) : attachment.name.toLowerCase().endsWith(".pdf") ? (
+                        <FileText className="w-6 h-6 text-red-500" />
+                      ) : (
+                        <FileText className="w-6 h-6 text-muted-foreground" />
+                      )}
+                      <span className="text-[9px] text-muted-foreground uppercase font-medium tracking-wide">
+                        {attachment.name.split(".").pop()}
+                      </span>
+                    </div>
+                  )}
+                </div>
+                {attachment.status === "uploading" && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-background/60">
+                    <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+                  </div>
+                )}
+                <button
+                  onClick={() => onRemoveAttachment(attachment.id)}
+                  className={cn(
+                    "absolute -top-1.5 -right-1.5 p-1 bg-background border border-border rounded-full shadow-sm transition-opacity hover:bg-destructive hover:border-destructive hover:text-destructive-foreground",
+                    attachment.status === "uploading"
+                      ? "opacity-0 pointer-events-none"
+                      : "opacity-0 group-hover:opacity-100",
+                  )}
+                  aria-label="Remove attachment"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+                <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 px-1.5 py-0.5 bg-popover border border-border rounded text-[9px] text-muted-foreground truncate max-w-[90px] opacity-0 group-hover:opacity-100 transition-opacity shadow-sm pointer-events-none">
+                  {attachment.name}
+                </div>
+                {attachment.status === "failed" && (
+                  <div className="absolute inset-x-0 bottom-0 px-1 py-0.5 text-[9px] text-destructive bg-background/80 text-center">
+                    Upload failed
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="px-2.5 pt-2">
+        <textarea
+          ref={textareaRef}
+          data-testid={testIds.textInput}
+          value={text}
+          onChange={(e) => onTextChange(e.target.value)}
+          onFocus={() => setIsFocused(true)}
+          onBlur={() => setIsFocused(false)}
+          onPaste={onPaste}
+          placeholder={placeholder}
+          className="w-full bg-transparent text-sm leading-5 text-foreground placeholder:text-muted-foreground resize-none focus:outline-none min-h-[20px] max-h-[160px] luban-font-chat"
+          rows={1}
+          disabled={disabled}
+          autoFocus={autoFocus}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault()
+              if (primaryAction.disabled) return
+              primaryAction.onClick()
+            }
+            if (e.key === "Escape" && secondaryAction) {
+              e.preventDefault()
+              secondaryAction.onClick()
+            }
+          }}
+        />
+      </div>
+
+      <div className="flex items-center px-2 pb-2 pt-1">
+        <input
+          ref={fileInputRef}
+          data-testid={testIds.attachInput}
+          type="file"
+          multiple
+          accept="image/*,.pdf,.txt,.md,.json,.csv,.xml,.yaml,.yml"
+          className="hidden"
+          onChange={(e) => onFileSelect(e.target.files)}
+        />
+        <button
+          data-testid={testIds.attachButton}
+          onClick={() => fileInputRef.current?.click()}
+          className="inline-flex items-center gap-1 p-1.5 hover:bg-muted rounded text-muted-foreground hover:text-foreground transition-colors"
+          title="Attach files"
+          disabled={disabled}
+        >
+          <Paperclip className="w-4 h-4" />
+        </button>
+
+        <div className="w-px h-4 bg-border mx-1" />
+
+        {agentSelector}
+
+        <div className="flex-1" />
+
+        {secondaryAction && (
+          <button
+            onClick={secondaryAction.onClick}
+            aria-label={secondaryAction.ariaLabel}
+            data-testid={secondaryAction.testId}
+            className="p-1.5 rounded-md transition-all flex-shrink-0 bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/70"
+          >
+            {secondaryAction.icon}
+          </button>
+        )}
+        <button
+          data-testid={primaryAction.testId}
+          aria-label={primaryAction.ariaLabel}
+          className={cn(
+            "p-1.5 rounded-md transition-all flex-shrink-0 disabled:opacity-50",
+            !primaryAction.disabled
+              ? "bg-primary text-primary-foreground hover:bg-primary/90"
+              : "bg-muted text-muted-foreground",
+            secondaryAction && "ml-2",
+          )}
+          onClick={primaryAction.onClick}
+          disabled={primaryAction.disabled}
+        >
+          {primaryAction.icon}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 interface DiffFileData {
   file: ChangedFile
   oldFile: FileContents
@@ -89,8 +340,6 @@ export function ChatPanel({
   const [showTabDropdown, setShowTabDropdown] = useState(false)
 
   const scrollContainerRef = useRef<HTMLDivElement | null>(null)
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const {
     app,
@@ -115,12 +364,10 @@ export function ChatPanel({
   } = useLuban()
 
   const [draftText, setDraftText] = useState("")
-  const [isComposerFocused, setIsComposerFocused] = useState(false)
   const [followTail, setFollowTail] = useState(true)
   const programmaticScrollRef = useRef(false)
 
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([])
-  const [isDragging, setIsDragging] = useState(false)
   const attachmentScopeRef = useRef<string>("")
   const attachmentScope = `${activeWorkspaceId ?? "none"}:${activeThreadId ?? "none"}`
 
@@ -177,16 +424,6 @@ export function ChatPanel({
       setAttachments((prev) => [...prev, ...items])
     })
   }, [activeWorkspaceId, activeThreadId])
-
-  useEffect(() => {
-    const el = textareaRef.current
-    if (!el) return
-    el.style.height = "auto"
-    const maxHeightPx = 160
-    const nextHeight = Math.min(el.scrollHeight, maxHeightPx)
-    el.style.height = `${nextHeight}px`
-    el.style.overflowY = el.scrollHeight > maxHeightPx ? "auto" : "hidden"
-  }, [draftText])
 
   const messages = useMemo(() => buildMessages(conversation), [conversation])
 
@@ -321,7 +558,6 @@ export function ChatPanel({
     const saved = loadJson<{ text: string }>(draftKey(activeWorkspaceId, activeThreadId))
     setDraftText(saved?.text ?? "")
     setAttachments([])
-    setIsDragging(false)
     attachmentScopeRef.current = attachmentScope
     setIsQueueExpanded(false)
     setEditingQueuedPromptId(null)
@@ -1108,205 +1344,72 @@ export function ChatPanel({
               {editingQueuedPromptId == null && (
               <div className="px-4 pb-4">
                 <div className="max-w-3xl mx-auto">
-                  <div
-                    className={cn(
-                      "relative bg-background border rounded-lg shadow-lg transition-all",
-                      isComposerFocused ? "border-primary/50 ring-1 ring-primary/20 shadow-xl" : "border-border",
-                      isDragging && "border-primary ring-2 ring-primary/30 bg-primary/5",
-                    )}
-                    onDragOver={(e) => {
-                      e.preventDefault()
-                      if (activeWorkspaceId == null || activeThreadId == null) return
-                      setIsDragging(true)
+                  <ChatComposerCard
+                    text={draftText}
+                    onTextChange={(text) => {
+                      setDraftText(text)
+                      persistDraft(text)
                     }}
-                    onDragLeave={(e) => {
-                      e.preventDefault()
-                      setIsDragging(false)
-                    }}
-                    onDrop={(e) => {
-                      e.preventDefault()
-                      setIsDragging(false)
-                      const raw = e.dataTransfer.getData("luban-context-attachment")
-                      if (raw) {
-                        try {
-                          const attachment = JSON.parse(raw) as AttachmentRef
-                          if (attachment && typeof attachment.id === "string") {
-                            const isImage = attachment.kind === "image"
-                            const previewUrl =
-                              isImage && activeWorkspaceId != null
-                                ? `/api/workspaces/${activeWorkspaceId}/attachments/${attachment.id}?ext=${encodeURIComponent(attachment.extension)}`
-                                : undefined
-                            setAttachments((prev) => [
-                              ...prev,
-                              {
-                                id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-                                type: isImage ? "image" : "file",
-                                name: attachment.name,
-                                size: attachment.byte_len,
-                                previewUrl,
-                                status: "ready",
-                                attachment,
-                              },
-                            ])
-                            return
-                          }
-                        } catch {
-                          // Ignore invalid payloads.
-                        }
-                      }
-
-                      handleFileSelect(e.dataTransfer.files)
-                    }}
-                  >
-                {isDragging && (
-                  <div className="absolute inset-0 z-10 flex items-center justify-center bg-primary/5 rounded-lg border-2 border-dashed border-primary">
-                    <div className="flex flex-col items-center gap-2 text-primary">
-                      <ImageIcon className="w-8 h-8" />
-                      <span className="text-sm font-medium">Drop files here</span>
-                    </div>
-                  </div>
-                )}
-
-                {attachments.length > 0 && (
-                  <div className="px-3 pt-3 pb-1 flex flex-wrap gap-3">
-                    {attachments.map((attachment) => (
-                      <div key={attachment.id} data-testid="chat-attachment-tile" className="group relative">
-                        <div className="relative">
-                          <div className="w-20 h-20 rounded-lg overflow-hidden border border-border/50 hover:border-border transition-colors bg-muted/40 flex items-center justify-center">
-                            {attachment.type === "image" && (attachment.preview || attachment.previewUrl) ? (
-                              <img
-                                src={attachment.preview ?? attachment.previewUrl}
-                                alt={attachment.name}
-                                className="w-full h-full object-cover"
-                              />
-                            ) : (
-                              <div className="flex flex-col items-center gap-1.5">
-                                {attachment.name.toLowerCase().endsWith(".json") ? (
-                                  <FileCode className="w-6 h-6 text-amber-500" />
-                                ) : attachment.name.toLowerCase().endsWith(".pdf") ? (
-                                  <FileText className="w-6 h-6 text-red-500" />
-                                ) : (
-                                  <FileText className="w-6 h-6 text-muted-foreground" />
-                                )}
-                                <span className="text-[9px] text-muted-foreground uppercase font-medium tracking-wide">
-                                  {attachment.name.split(".").pop()}
-                                </span>
-                              </div>
-                            )}
-                          </div>
-                          {attachment.status === "uploading" && (
-                            <div className="absolute inset-0 flex items-center justify-center bg-background/60">
-                              <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
-                            </div>
-                          )}
-                          <button
-                            onClick={() => removeAttachment(attachment.id)}
-                            className={cn(
-                              "absolute -top-1.5 -right-1.5 p-1 bg-background border border-border rounded-full shadow-sm transition-opacity hover:bg-destructive hover:border-destructive hover:text-destructive-foreground",
-                              attachment.status === "uploading" ? "opacity-0 pointer-events-none" : "opacity-0 group-hover:opacity-100",
-                            )}
-                            aria-label="Remove attachment"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                          <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 px-1.5 py-0.5 bg-popover border border-border rounded text-[9px] text-muted-foreground truncate max-w-[90px] opacity-0 group-hover:opacity-100 transition-opacity shadow-sm pointer-events-none">
-                            {attachment.name}
-                          </div>
-                          {attachment.status === "failed" && (
-                            <div className="absolute inset-x-0 bottom-0 px-1 py-0.5 text-[9px] text-destructive bg-background/80 text-center">
-                              Upload failed
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <div className="px-2.5 pt-2">
-                  <textarea
-                    ref={textareaRef}
-                    data-testid="chat-input"
-                    value={draftText}
-                    onChange={(e) => {
-                      setDraftText(e.target.value)
-                      persistDraft(e.target.value)
-                    }}
-                    onFocus={() => setIsComposerFocused(true)}
-                    onBlur={() => setIsComposerFocused(false)}
+                    attachments={attachments}
+                    onRemoveAttachment={removeAttachment}
+                    onFileSelect={handleFileSelect}
                     onPaste={handlePaste}
+                    onAddAttachmentRef={(attachment) => {
+                      const isImage = attachment.kind === "image"
+                      const previewUrl =
+                        isImage && activeWorkspaceId != null
+                          ? `/api/workspaces/${activeWorkspaceId}/attachments/${attachment.id}?ext=${encodeURIComponent(attachment.extension)}`
+                          : undefined
+                      setAttachments((prev) => [
+                        ...prev,
+                        {
+                          id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                          type: isImage ? "image" : "file",
+                          name: attachment.name,
+                          size: attachment.byte_len,
+                          previewUrl,
+                          status: "ready",
+                          attachment,
+                        },
+                      ])
+                    }}
                     placeholder="Message... (⌘↵ to send)"
-                    className="w-full bg-transparent text-sm leading-5 text-foreground placeholder:text-muted-foreground resize-none focus:outline-none min-h-[20px] max-h-[160px] luban-font-chat"
-                    rows={1}
                     disabled={activeWorkspaceId == null || activeThreadId == null}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                        e.preventDefault()
-                        handleSend()
-                      }
-                    }}
-                  />
-                </div>
-
-                <div className="flex items-center px-2 pb-2 pt-1">
-                  <input
-                    ref={fileInputRef}
-                    data-testid="chat-attach-input"
-                    type="file"
-                    multiple
-                    accept="image/*,.pdf,.txt,.md,.json,.csv,.xml,.yaml,.yml"
-                    className="hidden"
-                    onChange={(e) => handleFileSelect(e.target.files)}
-                  />
-                  <button
-                    data-testid="chat-attach"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="inline-flex items-center gap-1 p-1.5 hover:bg-muted rounded text-muted-foreground hover:text-foreground transition-colors"
-                    title="Attach files"
-                    disabled={activeWorkspaceId == null || activeThreadId == null}
-                  >
-                    <Paperclip className="w-4 h-4" />
-                  </button>
-
-                  <div className="w-px h-4 bg-border mx-1" />
-
-                  <CodexAgentSelector
-                    dropdownPosition="top"
-                    disabled={activeWorkspaceId == null || activeThreadId == null}
-                    modelId={conversation?.agent_model_id}
-                    thinkingEffort={conversation?.thinking_effort}
-                    defaultModelId={app?.agent.default_model_id ?? null}
-                    defaultThinkingEffort={app?.agent.default_thinking_effort ?? null}
-                    onOpenAgentSettings={(agentId, agentFilePath) =>
-                      openSettingsPanel("agent", { agentId, agentFilePath })
+                    agentSelector={
+                      <CodexAgentSelector
+                        dropdownPosition="top"
+                        disabled={activeWorkspaceId == null || activeThreadId == null}
+                        modelId={conversation?.agent_model_id}
+                        thinkingEffort={conversation?.thinking_effort}
+                        defaultModelId={app?.agent.default_model_id ?? null}
+                        defaultThinkingEffort={app?.agent.default_thinking_effort ?? null}
+                        onOpenAgentSettings={(agentId, agentFilePath) =>
+                          openSettingsPanel("agent", { agentId, agentFilePath })
+                        }
+                        onChangeModelId={(modelId) => {
+                          if (activeWorkspaceId == null || activeThreadId == null) return
+                          setChatModel(activeWorkspaceId, activeThreadId, modelId)
+                        }}
+                        onChangeThinkingEffort={(effort) => {
+                          if (activeWorkspaceId == null || activeThreadId == null) return
+                          setThinkingEffort(activeWorkspaceId, activeThreadId, effort)
+                        }}
+                      />
                     }
-                    onChangeModelId={(modelId) => {
-                      if (activeWorkspaceId == null || activeThreadId == null) return
-                      setChatModel(activeWorkspaceId, activeThreadId, modelId)
+                    primaryAction={{
+                      onClick: handleSend,
+                      disabled: !canSend,
+                      ariaLabel: "Send message",
+                      icon: <Send className="w-3.5 h-3.5" />,
+                      testId: "chat-send",
                     }}
-                    onChangeThinkingEffort={(effort) => {
-                      if (activeWorkspaceId == null || activeThreadId == null) return
-                      setThinkingEffort(activeWorkspaceId, activeThreadId, effort)
+                    testIds={{
+                      textInput: "chat-input",
+                      attachInput: "chat-attach-input",
+                      attachButton: "chat-attach",
+                      attachmentTile: "chat-attachment-tile",
                     }}
                   />
-
-                  <div className="flex-1" />
-                  <button
-                    data-testid="chat-send"
-                    aria-label="Send message"
-                    className={cn(
-                      "p-1.5 rounded-md transition-all flex-shrink-0 disabled:opacity-50",
-                      canSend
-                        ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                        : "bg-muted text-muted-foreground",
-                    )}
-                    onClick={handleSend}
-                    disabled={!canSend}
-                  >
-                    <Send className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-                  </div>
                 </div>
               </div>
               )}
@@ -1369,19 +1472,6 @@ function QueuedPromptRow({
   onQueueDragEnd: () => void
   onQueueDrop: (activeId: number, overId: number) => void
 }) {
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
-
-  useEffect(() => {
-    const el = textareaRef.current
-    if (!el) return
-    el.style.height = "auto"
-    const maxHeightPx = 160
-    const nextHeight = Math.min(el.scrollHeight, maxHeightPx)
-    el.style.height = `${nextHeight}px`
-    el.style.overflowY = el.scrollHeight > maxHeightPx ? "auto" : "hidden"
-  }, [editingText])
-
   if (isEditing) {
     const hasUploading = editingAttachments.some((a) => a.status === "uploading")
     const hasReady = editingAttachments.some((a) => a.status === "ready" && a.attachment != null)
@@ -1389,136 +1479,18 @@ function QueuedPromptRow({
 
     return (
       <div className="transition-all duration-200 ease-out">
-        <div
-          className={cn(
-            "relative bg-background border rounded-lg shadow-lg transition-all",
-            "border-primary/50 ring-1 ring-primary/20",
-          )}
-          onDragOver={(e) => {
-            e.preventDefault()
-          }}
-          onDrop={(e) => {
-            e.preventDefault()
-            const raw = e.dataTransfer.getData("luban-context-attachment")
-            if (raw) {
-              try {
-                const attachment = JSON.parse(raw) as AttachmentRef
-                if (attachment && typeof attachment.id === "string") {
-                  onAddEditingAttachmentRef(attachment)
-                  return
-                }
-              } catch {
-                // Ignore invalid payloads.
-              }
-            }
-            onQueuedFileSelect(e.dataTransfer.files)
-          }}
-        >
-          {editingAttachments.length > 0 && (
-            <div className="px-3 pt-3 pb-1 flex flex-wrap gap-3">
-              {editingAttachments.map((attachment) => (
-                <div key={attachment.id} data-testid="queued-attachment-tile" className="group relative">
-                  <div className="relative">
-                    <div className="w-20 h-20 rounded-lg overflow-hidden border border-border/50 hover:border-border transition-colors bg-muted/40 flex items-center justify-center">
-                      {attachment.type === "image" && (attachment.preview || attachment.previewUrl) ? (
-                        <img
-                          src={attachment.preview ?? attachment.previewUrl}
-                          alt={attachment.name}
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <div className="flex flex-col items-center gap-1.5">
-                          {attachment.name.toLowerCase().endsWith(".json") ? (
-                            <FileCode className="w-6 h-6 text-amber-500" />
-                          ) : attachment.name.toLowerCase().endsWith(".pdf") ? (
-                            <FileText className="w-6 h-6 text-red-500" />
-                          ) : (
-                            <FileText className="w-6 h-6 text-muted-foreground" />
-                          )}
-                          <span className="text-[9px] text-muted-foreground uppercase font-medium tracking-wide">
-                            {attachment.name.split(".").pop()}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                    {attachment.status === "uploading" && (
-                      <div className="absolute inset-0 flex items-center justify-center bg-background/60">
-                        <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
-                      </div>
-                    )}
-                    <button
-                      onClick={() => onRemoveEditingAttachment(attachment.id)}
-                      className={cn(
-                        "absolute -top-1.5 -right-1.5 p-1 bg-background border border-border rounded-full shadow-sm transition-opacity hover:bg-destructive hover:border-destructive hover:text-destructive-foreground",
-                        attachment.status === "uploading"
-                          ? "opacity-0 pointer-events-none"
-                          : "opacity-0 group-hover:opacity-100",
-                      )}
-                      aria-label="Remove attachment"
-                      onPointerDown={(e) => e.stopPropagation()}
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                    <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 px-1.5 py-0.5 bg-popover border border-border rounded text-[9px] text-muted-foreground truncate max-w-[90px] opacity-0 group-hover:opacity-100 transition-opacity shadow-sm pointer-events-none">
-                      {attachment.name}
-                    </div>
-                    {attachment.status === "failed" && (
-                      <div className="absolute inset-x-0 bottom-0 px-1 py-0.5 text-[9px] text-destructive bg-background/80 text-center">
-                        Upload failed
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className="px-2.5 pt-2">
-            <textarea
-              ref={textareaRef}
-              data-testid="queued-prompt-input"
-              value={editingText}
-              onChange={(e) => onEditingTextChange(e.target.value)}
-              onPaste={onQueuedPaste}
-              placeholder="Edit message..."
-              className="w-full bg-transparent text-sm leading-5 text-foreground placeholder:text-muted-foreground resize-none focus:outline-none min-h-[20px] max-h-[160px] luban-font-chat"
-              rows={1}
-              autoFocus
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                  e.preventDefault()
-                  if (!canSave) return
-                  onSaveEdit()
-                }
-                if (e.key === "Escape") {
-                  e.preventDefault()
-                  onCancelEdit()
-                }
-              }}
-            />
-          </div>
-
-          <div className="flex items-center px-2 pb-2 pt-1">
-            <input
-              ref={fileInputRef}
-              data-testid="queued-attach-input"
-              type="file"
-              multiple
-              accept="image/*,.pdf,.txt,.md,.json,.csv,.xml,.yaml,.yml"
-              className="hidden"
-              onChange={(e) => onQueuedFileSelect(e.target.files)}
-            />
-            <button
-              data-testid="queued-attach"
-              onClick={() => fileInputRef.current?.click()}
-              className="inline-flex items-center gap-1 p-1.5 hover:bg-muted rounded text-muted-foreground hover:text-foreground transition-colors"
-              title="Attach files"
-            >
-              <Paperclip className="w-4 h-4" />
-            </button>
-
-            <div className="w-px h-4 bg-border mx-1" />
-
+        <ChatComposerCard
+          text={editingText}
+          onTextChange={onEditingTextChange}
+          attachments={editingAttachments}
+          onRemoveAttachment={onRemoveEditingAttachment}
+          onFileSelect={onQueuedFileSelect}
+          onPaste={onQueuedPaste}
+          onAddAttachmentRef={onAddEditingAttachmentRef}
+          placeholder="Message... (⌘↵ to send)"
+          disabled={false}
+          autoFocus
+          agentSelector={
             <CodexAgentSelector
               testId="queued-codex-agent-selector"
               dropdownPosition="top"
@@ -1530,31 +1502,29 @@ function QueuedPromptRow({
               onChangeModelId={onEditingModelIdChange}
               onChangeThinkingEffort={onEditingThinkingEffortChange}
             />
-
-            <div className="flex-1" />
-            <button
-              onClick={onCancelEdit}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={() => {
-                if (!canSave) return
-                onSaveEdit()
-              }}
-              disabled={!canSave}
-              className={cn(
-                "ml-2 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs transition-colors disabled:opacity-50",
-                canSave ? "bg-primary text-primary-foreground hover:bg-primary/90" : "bg-muted text-muted-foreground",
-              )}
-              data-testid="queued-save"
-            >
-              <Check className="w-3.5 h-3.5" />
-              Save
-            </button>
-          </div>
-        </div>
+          }
+          secondaryAction={{
+            onClick: onCancelEdit,
+            ariaLabel: "Cancel edit",
+            icon: <X className="w-3.5 h-3.5" />,
+          }}
+          primaryAction={{
+            onClick: () => {
+              if (!canSave) return
+              onSaveEdit()
+            },
+            disabled: !canSave,
+            ariaLabel: "Save message",
+            icon: <Check className="w-3.5 h-3.5" />,
+            testId: "queued-save",
+          }}
+          testIds={{
+            textInput: "queued-prompt-input",
+            attachInput: "queued-attach-input",
+            attachButton: "queued-attach",
+            attachmentTile: "queued-attachment-tile",
+          }}
+        />
       </div>
     )
   }
