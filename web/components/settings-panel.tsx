@@ -308,6 +308,7 @@ function TaskPromptEditor({
         const triggerStart = start - triggerMatch[0].length
         const newText = text.slice(0, triggerStart) + insertText + text.slice(end)
         setTypePrompts((prev) => ({ ...prev, [selectedType]: newText }))
+        scheduleSave(selectedType, newText)
         newCursorPos = triggerStart + insertText.length
         setShowAutocomplete(false)
         setAutocompleteFilter("")
@@ -322,6 +323,7 @@ function TaskPromptEditor({
 
     const newText = text.slice(0, start) + insertText + text.slice(end)
     setTypePrompts((prev) => ({ ...prev, [selectedType]: newText }))
+    scheduleSave(selectedType, newText)
 
     requestAnimationFrame(() => {
       editor.focus()
@@ -333,6 +335,7 @@ function TaskPromptEditor({
     const newValue = e.target.value
     const cursorPos = e.target.selectionStart
     setTypePrompts((prev) => ({ ...prev, [selectedType]: newValue }))
+    scheduleSave(selectedType, newValue)
 
     const beforeCursor = newValue.slice(0, cursorPos)
     const triggerMatch = beforeCursor.match(/\{\{([^}\s]*)$/)
@@ -388,7 +391,50 @@ function TaskPromptEditor({
   const currentPrompt = typePrompts[selectedType] ?? ""
   const currentTaskType = allTaskTypes.find((t) => t.id === selectedType)!
   const isCurrentSystemTask = isSystemTask(selectedType)
-  const saveDisabled = currentPrompt.trim().length === 0
+  const saveTimerRef = useRef<number | null>(null)
+  const pendingSaveRef = useRef<{ taskType: TaskType; prompt: string } | null>(null)
+
+  const flushPendingSave = () => {
+    const pending = pendingSaveRef.current
+    if (!pending) return
+    pendingSaveRef.current = null
+
+    if (saveTimerRef.current != null) {
+      window.clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = null
+    }
+
+    const trimmed = pending.prompt.trim()
+    if (!trimmed) return
+
+    if (isSystemTask(pending.taskType)) {
+      setSystemPromptTemplate(pending.taskType as SystemTaskKind, pending.prompt)
+    } else {
+      setTaskPromptTemplate(pending.taskType as TaskIntentKind, pending.prompt)
+    }
+  }
+
+  const scheduleSave = (taskType: TaskType, prompt: string) => {
+    pendingSaveRef.current = { taskType, prompt }
+    if (saveTimerRef.current != null) {
+      window.clearTimeout(saveTimerRef.current)
+    }
+    saveTimerRef.current = window.setTimeout(() => flushPendingSave(), 800)
+  }
+
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current != null) {
+        window.clearTimeout(saveTimerRef.current)
+        saveTimerRef.current = null
+      }
+    }
+  }, [])
+
+  const selectTaskType = (taskType: TaskType) => {
+    flushPendingSave()
+    setSelectedType(taskType)
+  }
 
   return (
     <div data-testid="task-prompt-editor" className="border border-border rounded-lg overflow-hidden bg-sidebar">
@@ -412,7 +458,7 @@ function TaskPromptEditor({
                 <button
                   key={taskType.id}
                   data-testid={`task-prompt-tab-${taskType.id}`}
-                  onClick={() => setSelectedType(taskType.id)}
+                  onClick={() => selectTaskType(taskType.id)}
                   className={cn(
                     "w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors",
                     isSelected
@@ -439,7 +485,7 @@ function TaskPromptEditor({
                 <button
                   key={taskType.id}
                   data-testid={`task-prompt-tab-${taskType.id}`}
-                  onClick={() => setSelectedType(taskType.id)}
+                  onClick={() => selectTaskType(taskType.id)}
                   className={cn(
                     "w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors",
                     isSelected
@@ -473,6 +519,7 @@ function TaskPromptEditor({
                       userTemplatesByKind.get(selectedType as TaskIntentKind) ??
                       ""
                   setTypePrompts((prev) => ({ ...prev, [selectedType]: next }))
+                  scheduleSave(selectedType, next)
                 }}
                 className="flex items-center gap-1.5 px-2 py-1 rounded text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
               >
@@ -486,27 +533,6 @@ function TaskPromptEditor({
               >
                 <Pencil className="w-3.5 h-3.5" />
                 Edit in Luban
-              </button>
-              <button
-                data-testid="task-prompt-save"
-                disabled={saveDisabled}
-                onClick={() => {
-                  if (saveDisabled) return
-                  if (isCurrentSystemTask) {
-                    setSystemPromptTemplate(selectedType as SystemTaskKind, currentPrompt)
-                  } else {
-                    setTaskPromptTemplate(selectedType as TaskIntentKind, currentPrompt)
-                  }
-                }}
-                className={cn(
-                  "flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors",
-                  saveDisabled
-                    ? "bg-muted text-muted-foreground cursor-not-allowed"
-                    : "bg-primary text-primary-foreground hover:bg-primary/90",
-                )}
-              >
-                <Check className="w-3.5 h-3.5" />
-                Save
               </button>
             </div>
           </div>
@@ -538,7 +564,10 @@ function TaskPromptEditor({
               onChange={handleEditorChange}
               onKeyDown={handleEditorKeyDown}
               onScroll={handleEditorScroll}
-              onBlur={() => setTimeout(() => setShowAutocomplete(false), 150)}
+              onBlur={() => {
+                flushPendingSave()
+                setTimeout(() => setShowAutocomplete(false), 150)
+              }}
               className="absolute inset-0 w-full h-full bg-transparent text-transparent caret-foreground text-sm font-mono leading-relaxed resize-none focus:outline-none p-4 selection:bg-primary/20 selection:text-transparent overflow-auto"
               wrap="soft"
               spellCheck={false}

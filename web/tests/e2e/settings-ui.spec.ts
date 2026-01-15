@@ -68,8 +68,7 @@ test("task prompt templates persist across reload", async ({ page }) => {
   const marker = `e2e-marker-${Date.now()}`
   await textarea.fill(`${original}\n${marker}\n`)
 
-  await page.getByTestId("task-prompt-save").click()
-  await page.waitForTimeout(1200)
+  await page.waitForTimeout(1500)
   await page.reload()
 
   await page.getByTestId("sidebar-open-settings").click()
@@ -82,8 +81,7 @@ test("task prompt templates persist across reload", async ({ page }) => {
     .toContain(marker)
 
   await page.getByTestId("task-prompt-template").fill(original)
-  await page.getByTestId("task-prompt-save").click()
-  await page.waitForTimeout(1200)
+  await page.waitForTimeout(1500)
   await page.getByTitle("Close settings").click()
 })
 
@@ -103,8 +101,7 @@ test("system prompt templates persist across reload", async ({ page }) => {
   const marker = `e2e-system-marker-${Date.now()}`
   await textarea.fill(`${original}\n${marker}\n`)
 
-  await page.getByTestId("task-prompt-save").click()
-  await page.waitForTimeout(1200)
+  await page.waitForTimeout(1500)
   await page.reload()
 
   await page.getByTestId("sidebar-open-settings").click()
@@ -117,8 +114,7 @@ test("system prompt templates persist across reload", async ({ page }) => {
     .toContain(marker)
 
   await page.getByTestId("task-prompt-template").fill(original)
-  await page.getByTestId("task-prompt-save").click()
-  await page.waitForTimeout(1200)
+  await page.waitForTimeout(1500)
   await page.getByTitle("Close settings").click()
 })
 
