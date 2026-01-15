@@ -212,7 +212,7 @@ function MarkdownHighlight({
 
   return (
     <div
-      className="shiki-highlight [&_pre]:!bg-transparent [&_code]:!bg-transparent [&_.shiki]:!bg-transparent"
+      className="shiki-highlight [&_pre]:!bg-transparent [&_code]:!bg-transparent [&_.shiki]:!bg-transparent [&_pre]:!whitespace-pre-wrap [&_code]:!whitespace-pre-wrap [&_pre]:!break-words [&_code]:!break-words"
       // eslint-disable-next-line react/no-danger
       dangerouslySetInnerHTML={{ __html: html }}
     />
@@ -525,7 +525,7 @@ function TaskPromptEditor({
           <div className="flex-1 relative overflow-hidden">
             <div
               ref={highlightRef}
-              className="absolute inset-0 p-4 text-sm font-mono leading-relaxed whitespace-pre-wrap break-words overflow-hidden pointer-events-none"
+              className="absolute inset-0 p-4 text-sm font-mono leading-relaxed whitespace-pre-wrap break-words overflow-auto pointer-events-none"
               aria-hidden="true"
             >
               <MarkdownHighlight text={currentPrompt} highlighter={highlighter} />
@@ -539,7 +539,8 @@ function TaskPromptEditor({
               onKeyDown={handleEditorKeyDown}
               onScroll={handleEditorScroll}
               onBlur={() => setTimeout(() => setShowAutocomplete(false), 150)}
-              className="absolute inset-0 w-full h-full bg-transparent text-transparent caret-foreground text-sm font-mono leading-relaxed resize-none focus:outline-none p-4 selection:bg-primary/20 selection:text-transparent"
+              className="absolute inset-0 w-full h-full bg-transparent text-transparent caret-foreground text-sm font-mono leading-relaxed resize-none focus:outline-none p-4 selection:bg-primary/20 selection:text-transparent overflow-auto"
+              wrap="soft"
               spellCheck={false}
               placeholder="Enter prompt template..."
             />
