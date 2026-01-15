@@ -1167,7 +1167,6 @@ impl Engine {
                 let project_path = project.path.clone();
                 let project_slug = project.slug.clone();
                 let services = self.services.clone();
-                let branch_name_hint_provided = branch_name_hint.is_some();
 
                 let created = tokio::task::spawn_blocking(move || {
                     services.create_workspace(project_path, project_slug, branch_name_hint)
@@ -1182,7 +1181,6 @@ impl Engine {
                         workspace_name: created.workspace_name,
                         branch_name: created.branch_name,
                         worktree_path: created.worktree_path,
-                        branch_name_hint_provided,
                     },
                     Err(message) => Action::WorkspaceCreateFailed {
                         project_id,
@@ -2936,7 +2934,6 @@ mod tests {
             workspace_name: "main".to_owned(),
             branch_name: "main".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban-server-test"),
-            branch_name_hint_provided: true,
         });
 
         let workspace_id = state.projects[0].workspaces[0].id;
@@ -2996,7 +2993,6 @@ mod tests {
             workspace_name: "main".to_owned(),
             branch_name: "main".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban-server-test"),
-            branch_name_hint_provided: true,
         });
 
         let workspace_id = state.projects[0].workspaces[0].id;
@@ -3056,7 +3052,6 @@ mod tests {
             workspace_name: "main".to_owned(),
             branch_name: "main".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban-server-test"),
-            branch_name_hint_provided: true,
         });
 
         let workspace_id = state.projects[0].workspaces[0].id;
@@ -3382,7 +3377,6 @@ mod tests {
             workspace_name: "wt".to_owned(),
             branch_name: "feature".to_owned(),
             worktree_path: worktree_path.clone(),
-            branch_name_hint_provided: true,
         });
 
         let workspace_id = state
@@ -3640,7 +3634,6 @@ mod tests {
             workspace_name: "main".to_owned(),
             branch_name: "main".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban-server-open-ide-test"),
-            branch_name_hint_provided: true,
         });
         let workspace_id = state.projects[0].workspaces[0].id;
         let worktree_path = state.projects[0].workspaces[0].worktree_path.clone();
@@ -4073,7 +4066,6 @@ mod tests {
             workspace_name: "w1".to_owned(),
             branch_name: "luban/w1".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban-server-rename-test"),
-            branch_name_hint_provided: true,
         });
         let workspace_id = state.projects[0].workspaces[0].id;
 
@@ -4129,7 +4121,6 @@ mod tests {
             workspace_name: "main".to_owned(),
             branch_name: "main".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban-server-agent-turn-test"),
-            branch_name_hint_provided: true,
         });
 
         let workspace_id = state.projects[0].workspaces[0].id;

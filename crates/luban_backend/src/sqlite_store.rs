@@ -99,6 +99,13 @@ const MIGRATIONS: &[(u32, &str)] = &[
             "/migrations/0010_workspace_branch_renamed.sql"
         )),
     ),
+    (
+        11,
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/migrations/0011_drop_workspace_branch_fields.sql"
+        )),
+    ),
 ];
 
 pub struct SqliteStore {
@@ -680,7 +687,7 @@ impl SqliteDatabase {
         }
 
         let mut stmt = self.conn.prepare(
-            "SELECT id, project_id, workspace_name, branch_name, worktree_path, status, last_activity_at, branch_renamed
+            "SELECT id, project_id, workspace_name, worktree_path, status, last_activity_at
              FROM workspaces ORDER BY id ASC",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -689,24 +696,13 @@ impl SqliteDatabase {
                 row.get::<_, i64>(1)? as u64,
                 row.get::<_, String>(2)?,
                 row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, i64>(5)?,
-                row.get::<_, Option<i64>>(6)?,
-                row.get::<_, i64>(7)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, Option<i64>>(5)?,
             ))
         })?;
 
         for row in rows {
-            let (
-                id,
-                project_id,
-                workspace_name,
-                branch_name,
-                worktree_path,
-                status,
-                last_activity_at,
-                branch_renamed,
-            ) = row?;
+            let (id, project_id, workspace_name, worktree_path, status, last_activity_at) = row?;
             let status = workspace_status_from_i64(status)?;
             let last_activity_at_unix_seconds = last_activity_at.map(|v| v as u64);
 
@@ -714,6 +710,7 @@ impl SqliteDatabase {
                 continue;
             };
 
+            let branch_name = workspace_name.clone();
             project.workspaces.push(luban_domain::PersistedWorkspace {
                 id,
                 workspace_name,
@@ -721,7 +718,6 @@ impl SqliteDatabase {
                 worktree_path: PathBuf::from(worktree_path),
                 status,
                 last_activity_at_unix_seconds,
-                branch_renamed: branch_renamed != 0,
             });
         }
 
@@ -1183,26 +1179,22 @@ impl SqliteDatabase {
                 workspace_ids.push(workspace.id);
                 let worktree_path = workspace.worktree_path.to_string_lossy().into_owned();
                 tx.execute(
-                    "INSERT INTO workspaces (id, project_id, workspace_name, branch_name, worktree_path, status, last_activity_at, branch_renamed, created_at, updated_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, COALESCE((SELECT created_at FROM workspaces WHERE id = ?1), ?9), ?9)
+                    "INSERT INTO workspaces (id, project_id, workspace_name, worktree_path, status, last_activity_at, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, COALESCE((SELECT created_at FROM workspaces WHERE id = ?1), ?7), ?7)
                      ON CONFLICT(id) DO UPDATE SET
                        project_id = excluded.project_id,
                        workspace_name = excluded.workspace_name,
-                       branch_name = excluded.branch_name,
                        worktree_path = excluded.worktree_path,
                        status = excluded.status,
                        last_activity_at = excluded.last_activity_at,
-                       branch_renamed = excluded.branch_renamed,
                        updated_at = excluded.updated_at",
                     params![
                         workspace.id as i64,
                         project.id as i64,
                         workspace.workspace_name,
-                        workspace.branch_name,
                         worktree_path,
                         workspace_status_to_i64(workspace.status),
                         workspace.last_activity_at_unix_seconds.map(|v| v as i64),
-                        if workspace.branch_renamed { 1i64 } else { 0i64 },
                         now,
                     ],
                 )?;
@@ -2113,11 +2105,10 @@ mod tests {
                 workspaces: vec![PersistedWorkspace {
                     id: 10,
                     workspace_name: "alpha".to_owned(),
-                    branch_name: "luban/alpha".to_owned(),
+                    branch_name: "alpha".to_owned(),
                     worktree_path: PathBuf::from("/tmp/my-project/worktrees/alpha"),
                     status: WorkspaceStatus::Active,
                     last_activity_at_unix_seconds: None,
-                    branch_renamed: true,
                 }],
             }],
             sidebar_width: Some(280),
@@ -2172,11 +2163,10 @@ mod tests {
                 workspaces: vec![PersistedWorkspace {
                     id: 2,
                     workspace_name: "w".to_owned(),
-                    branch_name: "luban/w".to_owned(),
+                    branch_name: "w".to_owned(),
                     worktree_path: PathBuf::from("/tmp/p/worktrees/w"),
                     status: WorkspaceStatus::Active,
                     last_activity_at_unix_seconds: None,
-                    branch_renamed: true,
                 }],
             }],
             sidebar_width: None,
@@ -2241,11 +2231,10 @@ mod tests {
                 workspaces: vec![PersistedWorkspace {
                     id: 2,
                     workspace_name: "w".to_owned(),
-                    branch_name: "luban/w".to_owned(),
+                    branch_name: "w".to_owned(),
                     worktree_path: PathBuf::from("/tmp/p/worktrees/w"),
                     status: WorkspaceStatus::Active,
                     last_activity_at_unix_seconds: None,
-                    branch_renamed: true,
                 }],
             }],
             sidebar_width: None,
@@ -2327,11 +2316,10 @@ mod tests {
                     workspaces: vec![PersistedWorkspace {
                         id: 10,
                         workspace_name: "w1".to_owned(),
-                        branch_name: "luban/w1".to_owned(),
+                        branch_name: "w1".to_owned(),
                         worktree_path: PathBuf::from("/tmp/p1/worktrees/w1"),
                         status: WorkspaceStatus::Active,
                         last_activity_at_unix_seconds: None,
-                        branch_renamed: true,
                     }],
                 },
                 PersistedProject {
@@ -2344,11 +2332,10 @@ mod tests {
                     workspaces: vec![PersistedWorkspace {
                         id: 20,
                         workspace_name: "w".to_owned(),
-                        branch_name: "luban/w".to_owned(),
+                        branch_name: "w".to_owned(),
                         worktree_path: PathBuf::from("/tmp/p2/worktrees/w"),
                         status: WorkspaceStatus::Active,
                         last_activity_at_unix_seconds: None,
-                        branch_renamed: true,
                     }],
                 },
             ],
@@ -2395,20 +2382,18 @@ mod tests {
                     PersistedWorkspace {
                         id: 10,
                         workspace_name: "w1".to_owned(),
-                        branch_name: "luban/w1".to_owned(),
+                        branch_name: "w1".to_owned(),
                         worktree_path: PathBuf::from("/tmp/p1/worktrees/w1"),
                         status: WorkspaceStatus::Active,
                         last_activity_at_unix_seconds: None,
-                        branch_renamed: true,
                     },
                     PersistedWorkspace {
                         id: 20,
                         workspace_name: "w".to_owned(),
-                        branch_name: "luban/w".to_owned(),
+                        branch_name: "w".to_owned(),
                         worktree_path: PathBuf::from("/tmp/p2/worktrees/w"),
                         status: WorkspaceStatus::Active,
                         last_activity_at_unix_seconds: None,
-                        branch_renamed: true,
                     },
                 ],
             }],
@@ -2463,11 +2448,10 @@ mod tests {
                 workspaces: vec![PersistedWorkspace {
                     id: 2,
                     workspace_name: "w".to_owned(),
-                    branch_name: "luban/w".to_owned(),
+                    branch_name: "w".to_owned(),
                     worktree_path: PathBuf::from("/tmp/p/worktrees/w"),
                     status: WorkspaceStatus::Active,
                     last_activity_at_unix_seconds: None,
-                    branch_renamed: true,
                 }],
             }],
             sidebar_width: None,

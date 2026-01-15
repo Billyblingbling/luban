@@ -42,7 +42,6 @@ pub enum Action {
         workspace_name: String,
         branch_name: String,
         worktree_path: PathBuf,
-        branch_name_hint_provided: bool,
     },
     WorkspaceCreateFailed {
         project_id: ProjectId,

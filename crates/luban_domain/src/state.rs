@@ -459,7 +459,6 @@ pub struct Workspace {
     pub status: WorkspaceStatus,
     pub last_activity_at: Option<std::time::SystemTime>,
     pub archive_status: OperationStatus,
-    pub branch_renamed: bool,
     pub branch_rename_status: OperationStatus,
 }
 
@@ -559,5 +558,4 @@ pub struct PersistedWorkspace {
     pub worktree_path: PathBuf,
     pub status: WorkspaceStatus,
     pub last_activity_at_unix_seconds: Option<u64>,
-    pub branch_renamed: bool,
 }

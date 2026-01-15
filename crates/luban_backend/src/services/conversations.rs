@@ -156,7 +156,27 @@ impl GitWorkspaceService {
     }
 
     pub(super) fn load_app_state_internal(&self) -> anyhow::Result<PersistedAppState> {
-        self.sqlite.load_app_state()
+        let mut state = self.sqlite.load_app_state()?;
+        for project in &mut state.projects {
+            if !project.is_git {
+                continue;
+            }
+            for workspace in &mut project.workspaces {
+                let resolved = self.run_git(
+                    &workspace.worktree_path,
+                    ["rev-parse", "--abbrev-ref", "HEAD"],
+                );
+                let Ok(resolved) = resolved else {
+                    continue;
+                };
+                let trimmed = resolved.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                workspace.branch_name = trimmed.to_owned();
+            }
+        }
+        Ok(state)
     }
 
     pub(super) fn save_app_state_internal(
