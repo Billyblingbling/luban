@@ -536,6 +536,7 @@ function ChatComposerCard({
                     type="button"
                     data-testid="chat-command-item"
                     data-index={idx}
+                    onMouseEnter={() => setCommandSelectedIndex(idx)}
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => handleCommandSelect(cmd)}
                     className={cn(
@@ -572,7 +573,12 @@ function ChatComposerCard({
             className="absolute bottom-full left-0 right-0 mb-2 bg-popover border border-border rounded-lg shadow-xl overflow-hidden z-50 max-h-[320px] overflow-y-auto"
           >
             {filteredMentions.length === 0 ? (
-              <div className="px-3 py-4 text-center text-sm text-muted-foreground">No files found</div>
+              <>
+                <div className="px-2 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border bg-muted/30">
+                  Reference files
+                </div>
+                <div className="px-3 py-4 text-center text-sm text-muted-foreground">No files found</div>
+              </>
             ) : (
               <>
                 <div className="px-2 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border bg-muted/30">
@@ -585,6 +591,7 @@ function ChatComposerCard({
                       type="button"
                       data-testid="chat-mention-item"
                       data-index={idx}
+                      onMouseEnter={() => setMentionSelectedIndex(idx)}
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={() => handleMentionSelect(item)}
                       className={cn(
