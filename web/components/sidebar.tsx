@@ -29,7 +29,7 @@ import { Button } from "@/components/ui/button"
 import { SettingsPanel } from "@/components/settings-panel"
 import type { AgentStatus } from "@/lib/worktree-ui"
 import type { OpenSettingsDetail, SettingsSectionId } from "@/lib/open-settings"
-import type { WorkspaceId } from "@/lib/luban-api"
+import type { ProjectId, WorkspaceId } from "@/lib/luban-api"
 
 interface SidebarProps {
   viewMode: "workspace" | "kanban"
@@ -58,16 +58,16 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
     deleteProject,
   } = useLuban()
 
-  const pendingCreateRef = useRef<{ projectId: number; existingWorkspaceIds: Set<number> } | null>(null)
+  const pendingCreateRef = useRef<{ projectId: ProjectId; existingWorkspaceIds: Set<number> } | null>(null)
   const pendingAddProjectPathRef = useRef<string | null>(null)
-  const pendingOpenMainProjectIdRef = useRef<number | null>(null)
-  const [optimisticCreatingProjectId, setOptimisticCreatingProjectId] = useState<number | null>(null)
+  const pendingOpenMainProjectIdRef = useRef<ProjectId | null>(null)
+  const [optimisticCreatingProjectId, setOptimisticCreatingProjectId] = useState<ProjectId | null>(null)
   const [newlyCreatedWorkspaceId, setNewlyCreatedWorkspaceId] = useState<number | null>(null)
   const [optimisticArchivingWorkspaceIds, setOptimisticArchivingWorkspaceIds] = useState<Set<number>>(
     () => new Set(),
   )
-  const [deletingProjectId, setDeletingProjectId] = useState<number | null>(null)
-  const [projectToDelete, setProjectToDelete] = useState<{ id: number; name: string } | null>(null)
+  const [deletingProjectId, setDeletingProjectId] = useState<ProjectId | null>(null)
+  const [projectToDelete, setProjectToDelete] = useState<{ id: ProjectId; name: string } | null>(null)
   const [newTaskOpen, setNewTaskOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsInitialSectionId, setSettingsInitialSectionId] = useState<SettingsSectionId | null>(null)
@@ -351,8 +351,8 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
                   ) : (
                     <span className="w-3 h-3 flex-shrink-0" />
                   )}
-                  <span className="text-sm text-muted-foreground truncate flex-1" title={project.name}>
-                    {project.name}
+                  <span className="text-sm text-muted-foreground truncate flex-1" title={project.path}>
+                    {project.displayName}
                   </span>
                   {canExpand && !isExpanded && activeCount > 0 && (
                     <span className="text-xs px-1.5 py-0.5 rounded-full bg-primary/20 text-primary font-medium">
@@ -368,18 +368,18 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
                       onClick={() => {
                         if (isCreating) return
                         if (!project.expanded) {
-                        toggleProjectExpanded(project.id)
-                      }
-                      const fullProject = app?.projects.find((p) => p.id === project.id) ?? null
-                      const existingWorkspaceIds = new Set<number>(
+                          toggleProjectExpanded(project.id)
+                        }
+                        const fullProject = app?.projects.find((p) => p.id === project.id) ?? null
+                        const existingWorkspaceIds = new Set<number>(
                           fullProject?.workspaces.map((w) => w.id) ?? project.worktrees.map((w) => w.workspaceId),
                         )
                         pendingCreateRef.current = { projectId: project.id, existingWorkspaceIds }
                         setOptimisticCreatingProjectId(project.id)
-                      createWorkspace(project.id)
-                    }}
-                    disabled={isCreating}
-                  >
+                        createWorkspace(project.id)
+                      }}
+                      disabled={isCreating}
+                    >
                       {isCreating ? (
                         <Loader2 className="w-4 h-4 animate-spin text-primary" />
                       ) : (
@@ -389,7 +389,7 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
                   )}
                   <button
                     data-testid="project-delete-button"
-                    onClick={() => setProjectToDelete({ id: project.id, name: project.name })}
+                    onClick={() => setProjectToDelete({ id: project.id, name: project.displayName })}
                     disabled={isDeleting}
                     className="p-1 text-muted-foreground hover:text-destructive transition-colors"
                     title="Delete project"

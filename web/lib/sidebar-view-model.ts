@@ -2,6 +2,7 @@
 
 import type { AppSnapshot, OperationStatus } from "./luban-api"
 import { agentStatusFromWorkspace, prStatusFromWorkspace, type AgentStatus, type PRStatus } from "./worktree-ui"
+import { computeProjectDisplayNames } from "./project-display-names"
 
 export type SidebarWorktreeVm = {
   id: string
@@ -17,8 +18,9 @@ export type SidebarWorktreeVm = {
 }
 
 export type SidebarProjectVm = {
-  id: number
-  name: string
+  id: string
+  displayName: string
+  path: string
   isGit: boolean
   expanded: boolean
   createWorkspaceStatus: OperationStatus
@@ -33,9 +35,13 @@ export function buildSidebarProjects(
 ): SidebarProjectVm[] {
   if (!app) return []
   const optimisticArchiving = args?.optimisticArchivingWorkspaceIds ?? null
+
+  const displayNames = computeProjectDisplayNames(app.projects.map((p) => ({ path: p.path, name: p.name })))
+
   return app.projects.map((p) => ({
-    id: p.id,
-    name: p.slug,
+    id: p.path,
+    displayName: displayNames.get(p.path) ?? p.slug,
+    path: p.path,
     isGit: p.is_git,
     expanded: p.expanded,
     createWorkspaceStatus: p.create_workspace_status,

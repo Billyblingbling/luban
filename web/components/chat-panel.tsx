@@ -48,6 +48,7 @@ import { MultiFileDiff, type FileContents } from "@pierre/diffs/react"
 import { CodexAgentSelector } from "@/components/shared/agent-selector"
 import { OpenButton } from "@/components/shared/open-button"
 import { openSettingsPanel } from "@/lib/open-settings"
+import { computeProjectDisplayNames } from "@/lib/project-display-names"
 
 interface ChatTab {
   id: string
@@ -178,11 +179,12 @@ export function ChatPanel({
     if (app == null || activeWorkspaceId == null) {
       return { name: "Luban", branch: "", isGit: false, isMainBranch: false }
     }
+    const displayNames = computeProjectDisplayNames(app.projects.map((p) => ({ path: p.path, name: p.name })))
     for (const p of app.projects) {
       for (const w of p.workspaces) {
         if (w.id !== activeWorkspaceId) continue
         return {
-          name: p.slug,
+          name: displayNames.get(p.path) ?? p.slug,
           branch: w.branch_name,
           isGit: p.is_git,
           isMainBranch: w.workspace_name === "main",

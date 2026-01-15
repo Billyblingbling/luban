@@ -1,6 +1,7 @@
 "use client"
 
 import type { AppSnapshot } from "./luban-api"
+import { computeProjectDisplayNames } from "./project-display-names"
 import {
   kanbanColumns,
   agentStatusFromWorkspace,
@@ -29,6 +30,7 @@ export type KanbanBoardVm = {
 
 export function buildKanbanWorktrees(app: AppSnapshot | null): KanbanWorktreeVm[] {
   if (!app) return []
+  const displayNames = computeProjectDisplayNames(app.projects.map((p) => ({ path: p.path, name: p.name })))
   const out: KanbanWorktreeVm[] = []
   for (const p of app.projects) {
     for (const w of p.workspaces) {
@@ -38,7 +40,7 @@ export function buildKanbanWorktrees(app: AppSnapshot | null): KanbanWorktreeVm[
       out.push({
         id: w.short_id,
         name: w.branch_name,
-        projectName: p.slug,
+        projectName: displayNames.get(p.path) ?? p.slug,
         agentStatus,
         prStatus: pr.status,
         prNumber: pr.prNumber,

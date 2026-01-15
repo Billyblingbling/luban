@@ -7,6 +7,7 @@ import type {
   ClientAction,
   CodexConfigEntrySnapshot,
   OpenTarget,
+  ProjectId,
   SystemTaskKind,
   TaskIntentKind,
   TaskDraft,
@@ -24,16 +25,16 @@ import { waitForNewThread } from "./luban-thread-flow"
 export type LubanActions = {
   pickProjectPath: () => Promise<string | null>
   addProject: (path: string) => void
-  addProjectAndOpen: (path: string) => Promise<{ projectId: number; workspaceId: WorkspaceId }>
-  deleteProject: (projectId: number) => void
-  createWorkspace: (projectId: number) => void
-  ensureMainWorkspace: (projectId: number) => void
+  addProjectAndOpen: (path: string) => Promise<{ projectId: ProjectId; workspaceId: WorkspaceId }>
+  deleteProject: (projectId: ProjectId) => void
+  createWorkspace: (projectId: ProjectId) => void
+  ensureMainWorkspace: (projectId: ProjectId) => void
   openWorkspaceInIde: (workspaceId: WorkspaceId) => void
   openWorkspaceWith: (workspaceId: WorkspaceId, target: OpenTarget) => void
   openWorkspacePullRequest: (workspaceId: WorkspaceId) => void
   openWorkspacePullRequestFailedAction: (workspaceId: WorkspaceId) => void
   archiveWorkspace: (workspaceId: number) => void
-  toggleProjectExpanded: (projectId: number) => void
+  toggleProjectExpanded: (projectId: ProjectId) => void
   setCodexEnabled: (enabled: boolean) => void
   setTaskPromptTemplate: (intentKind: TaskIntentKind, template: string) => void
   setSystemPromptTemplate: (kind: SystemTaskKind, template: string) => void
@@ -81,11 +82,11 @@ export function createLubanActions(args: {
     args.sendAction({ type: "add_project", path })
   }
 
-  function addProjectAndOpen(path: string): Promise<{ projectId: number; workspaceId: WorkspaceId }> {
-    return args.request<{ projectId: number; workspaceId: WorkspaceId }>({ type: "add_project_and_open", path })
+  function addProjectAndOpen(path: string): Promise<{ projectId: ProjectId; workspaceId: WorkspaceId }> {
+    return args.request<{ projectId: ProjectId; workspaceId: WorkspaceId }>({ type: "add_project_and_open", path })
   }
 
-  function deleteProject(projectId: number) {
+  function deleteProject(projectId: ProjectId) {
     args.sendAction({ type: "delete_project", project_id: projectId })
   }
 
@@ -93,11 +94,11 @@ export function createLubanActions(args: {
     return args.request<string | null>({ type: "pick_project_path" })
   }
 
-  function createWorkspace(projectId: number) {
+  function createWorkspace(projectId: ProjectId) {
     args.sendAction({ type: "create_workspace", project_id: projectId })
   }
 
-  function ensureMainWorkspace(projectId: number) {
+  function ensureMainWorkspace(projectId: ProjectId) {
     args.sendAction({ type: "ensure_main_workspace", project_id: projectId })
   }
 
@@ -121,7 +122,7 @@ export function createLubanActions(args: {
     args.sendAction({ type: "archive_workspace", workspace_id: workspaceId })
   }
 
-  function toggleProjectExpanded(projectId: number) {
+  function toggleProjectExpanded(projectId: ProjectId) {
     store.setApp((prev) => {
       if (!prev) return prev
       return {

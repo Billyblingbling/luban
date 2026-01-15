@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test"
+import { expect, test, type Page } from "@playwright/test"
 import { execFileSync } from "node:child_process"
 import fs from "node:fs"
 import os from "node:os"
@@ -8,6 +8,10 @@ import { sendWsAction } from "./helpers"
 
 function runGit(cwd: string, args: string[]) {
   execFileSync("git", args, { cwd, stdio: "ignore" })
+}
+
+function projectToggleByPath(page: Page, projectPath: string) {
+  return page.getByTitle(projectPath, { exact: true }).locator("..")
 }
 
 function ensureEmptyDir(dir: string) {
@@ -40,17 +44,17 @@ test("project can be deleted via sidebar confirmation dialog", async ({ page }) 
     await page.evaluate(async (projectPath) => {
       const res = await fetch("/api/app")
       if (!res.ok) return null
-      const app = (await res.json()) as { projects: { id: number; path: string; slug: string }[] }
+      const app = (await res.json()) as { projects: { id: string; path: string }[] }
       const project = app.projects.find((p) => p.path === projectPath) ?? null
       if (!project) return null
-      return { id: project.id, slug: project.slug }
+      return { id: project.id }
     }, projectPath)
 
   await expect.poll(async () => await resolveProject(), { timeout: 15_000 }).not.toBeNull()
   const project = await resolveProject()
   if (!project) throw new Error("project not found after add_project")
 
-  const projectToggle = page.getByRole("button", { name: project.slug, exact: true })
+  const projectToggle = projectToggleByPath(page, projectPath)
   await projectToggle.waitFor({ state: "visible", timeout: 15_000 })
   const projectContainer = projectToggle.locator("..").locator("..")
 
@@ -61,7 +65,7 @@ test("project can be deleted via sidebar confirmation dialog", async ({ page }) 
   await expect(page.getByText("Your local files will not be affected.", { exact: false })).toBeVisible()
   await page.getByTestId("project-delete-confirm").click()
 
-  await expect(page.getByRole("button", { name: project.slug, exact: true })).toHaveCount(0, { timeout: 20_000 })
+  await expect(page.getByTitle(projectPath, { exact: true })).toHaveCount(0, { timeout: 20_000 })
   await expect
     .poll(async () => await resolveProject(), { timeout: 20_000 })
     .toBeNull()
@@ -94,6 +98,9 @@ test("deleting the active project switches to another project's main workspace",
 
   const projectPathA = makeGitProject("a")
   const projectPathB = makeGitProject("b")
+  const expectedDisplayNames = computeDisplayNames([projectPathA, projectPathB])
+  const displayNameB = expectedDisplayNames.get(projectPathB) ?? projectPathB
+  const displayNameAfterDeletion = computeDisplayNames([projectPathB]).get(projectPathB) ?? displayNameB
 
   await sendWsAction(page, { type: "add_project", path: projectPathA })
   await sendWsAction(page, { type: "add_project", path: projectPathB })
@@ -104,8 +111,7 @@ test("deleting the active project switches to another project's main workspace",
       if (!res.ok) return null
       const app = (await res.json()) as {
         projects: {
-          id: number
-          slug: string
+          id: string
           path: string
           workspaces: { id: number; status: string; workspace_name: string; worktree_path: string }[]
         }[]
@@ -121,7 +127,7 @@ test("deleting the active project switches to another project's main workspace",
         pb.workspaces.find((w) => w.status === "active" && w.workspace_name === "main" && w.worktree_path === pb.path) ??
         pb.workspaces.find((w) => w.status === "active" && w.workspace_name === "main") ??
         null
-      return { projectA: { id: pa.id, slug: pa.slug, mainId: mainA?.id ?? null }, projectB: { id: pb.id, slug: pb.slug, mainId: mainB?.id ?? null } }
+      return { projectA: { id: pa.id, mainId: mainA?.id ?? null }, projectB: { id: pb.id, mainId: mainB?.id ?? null } }
     }, { projectPathA, projectPathB })
 
   await expect.poll(async () => await resolve(), { timeout: 15_000 }).not.toBeNull()
@@ -142,8 +148,8 @@ test("deleting the active project switches to another project's main workspace",
   if (!snap) throw new Error("projects not found")
   if (!snap.projectA.mainId || !snap.projectB.mainId) throw new Error("main workspace ids not found")
 
-  const projectAToggle = page.getByRole("button", { name: snap.projectA.slug, exact: true })
-  const projectBToggle = page.getByRole("button", { name: snap.projectB.slug, exact: true })
+  const projectAToggle = projectToggleByPath(page, projectPathA)
+  const projectBToggle = projectToggleByPath(page, projectPathB)
   await projectAToggle.waitFor({ state: "visible", timeout: 15_000 })
   await projectBToggle.waitFor({ state: "visible", timeout: 15_000 })
 
@@ -159,12 +165,58 @@ test("deleting the active project switches to another project's main workspace",
   await projectAContainer.getByTestId("project-delete-button").click()
   await expect(page.getByTestId("project-delete-dialog")).toBeVisible({ timeout: 10_000 })
   await page.getByTestId("project-delete-confirm").click()
-  await expect(page.getByRole("button", { name: snap.projectA.slug, exact: true })).toHaveCount(0, { timeout: 20_000 })
+  await expect(page.getByTitle(projectPathA, { exact: true })).toHaveCount(0, { timeout: 20_000 })
 
   await expect
     .poll(async () => (await page.evaluate(() => localStorage.getItem("luban:active_workspace_id"))) ?? "", {
       timeout: 30_000,
     })
     .toBe(String(snap.projectB.mainId))
-  await expect(page.getByTestId("active-project-name")).toHaveText(snap.projectB.slug, { timeout: 30_000 })
+  await expect(page.getByTestId("active-project-name")).toHaveText(displayNameAfterDeletion, { timeout: 30_000 })
 })
+
+function splitPathSegments(pathValue: string): string[] {
+  return pathValue
+    .split(/[\\/]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+}
+
+function computeDisplayNames(projectPaths: string[]): Map<string, string> {
+  const byBasename = new Map<string, string[]>()
+  for (const projectPath of projectPaths) {
+    const segs = splitPathSegments(projectPath)
+    const basename = segs[segs.length - 1] || projectPath
+    const group = byBasename.get(basename) ?? []
+    group.push(projectPath)
+    byBasename.set(basename, group)
+  }
+
+  const result = new Map<string, string>()
+
+  for (const [basename, group] of byBasename) {
+    if (group.length === 1) {
+      result.set(group[0]!, basename)
+      continue
+    }
+
+    const pathSegments = group.map((p) => splitPathSegments(p).reverse())
+    const maxDepth = Math.max(...pathSegments.map((s) => s.length))
+    let depth = 1
+    while (depth <= maxDepth) {
+      const suffixes = pathSegments.map((segs) => segs.slice(0, depth).reverse().join("/"))
+      const uniqueSuffixes = new Set(suffixes)
+      if (uniqueSuffixes.size === group.length) {
+        group.forEach((p, i) => result.set(p, suffixes[i]!))
+        break
+      }
+      depth++
+    }
+
+    if (!result.has(group[0]!)) {
+      group.forEach((p) => result.set(p, p))
+    }
+  }
+
+  return result
+}

@@ -460,7 +460,14 @@ impl Engine {
                         rev: self.rev,
                         event: Box::new(luban_api::ServerEvent::AddProjectAndOpenReady {
                             request_id: request_id.clone(),
-                            project_id: luban_api::ProjectId(project_id.as_u64()),
+                            project_id: luban_api::ProjectId(
+                                self.state
+                                    .projects
+                                    .iter()
+                                    .find(|p| p.id == project_id)
+                                    .map(|p| p.path.to_string_lossy().to_string())
+                                    .unwrap_or_else(|| root_path.to_string_lossy().to_string()),
+                            ),
                             workspace_id: luban_api::WorkspaceId(workspace_id.as_u64()),
                         }),
                     });
@@ -724,12 +731,20 @@ impl Engine {
                         .map(|w| w.worktree_path.to_string_lossy().to_string())
                         .unwrap_or_default();
 
+                    let project_path = self
+                        .state
+                        .projects
+                        .iter()
+                        .find(|p| p.id == project_id)
+                        .map(|p| p.path.to_string_lossy().to_string())
+                        .unwrap_or_else(|| local_project_path.to_string_lossy().to_string());
+
                     let _ = self.events.send(WsServerMessage::Event {
                         rev: self.rev,
                         event: Box::new(luban_api::ServerEvent::TaskExecuted {
                             request_id: request_id.clone(),
                             result: luban_api::TaskExecuteResult {
-                                project_id: luban_api::ProjectId(project_id.as_u64()),
+                                project_id: luban_api::ProjectId(project_path),
                                 workspace_id: luban_api::WorkspaceId(workspace_id.as_u64()),
                                 thread_id: luban_api::WorkspaceThreadId(thread_id.as_u64()),
                                 worktree_path,
@@ -911,6 +926,57 @@ impl Engine {
 
                 if let luban_api::ClientAction::OpenWorkspace { workspace_id } = &action {
                     self.maybe_refresh_pull_request(WorkspaceId::from_u64(workspace_id.0));
+                }
+
+                match &action {
+                    luban_api::ClientAction::DeleteProject { project_id } => {
+                        let path = expand_user_path(&project_id.0);
+                        let Some(id) = find_project_id_by_path(&self.state, &path) else {
+                            let _ = reply.send(Err("project not found".to_owned()));
+                            return;
+                        };
+                        self.process_action_queue(Action::DeleteProject { project_id: id })
+                            .await;
+                        let _ = reply.send(Ok(self.rev));
+                        return;
+                    }
+                    luban_api::ClientAction::ToggleProjectExpanded { project_id } => {
+                        let path = expand_user_path(&project_id.0);
+                        let Some(id) = find_project_id_by_path(&self.state, &path) else {
+                            let _ = reply.send(Err("project not found".to_owned()));
+                            return;
+                        };
+                        self.process_action_queue(Action::ToggleProjectExpanded { project_id: id })
+                            .await;
+                        let _ = reply.send(Ok(self.rev));
+                        return;
+                    }
+                    luban_api::ClientAction::CreateWorkspace { project_id } => {
+                        let path = expand_user_path(&project_id.0);
+                        let Some(id) = find_project_id_by_path(&self.state, &path) else {
+                            let _ = reply.send(Err("project not found".to_owned()));
+                            return;
+                        };
+                        self.process_action_queue(Action::CreateWorkspace {
+                            project_id: id,
+                            branch_name_hint: None,
+                        })
+                        .await;
+                        let _ = reply.send(Ok(self.rev));
+                        return;
+                    }
+                    luban_api::ClientAction::EnsureMainWorkspace { project_id } => {
+                        let path = expand_user_path(&project_id.0);
+                        let Some(id) = find_project_id_by_path(&self.state, &path) else {
+                            let _ = reply.send(Err("project not found".to_owned()));
+                            return;
+                        };
+                        self.process_action_queue(Action::EnsureMainWorkspace { project_id: id })
+                            .await;
+                        let _ = reply.send(Ok(self.rev));
+                        return;
+                    }
+                    _ => {}
                 }
 
                 let mapped = map_client_action(action);
@@ -1789,60 +1855,61 @@ impl Engine {
                 .state
                 .projects
                 .iter()
-                .map(|p| luban_api::ProjectSnapshot {
-                    // Keep a stable, human-sized identifier for each workspace, derived from
-                    // `(project.slug, workspace_id)`.
-                    id: luban_api::ProjectId(p.id.as_u64()),
-                    name: p.name.clone(),
-                    slug: p.slug.clone(),
-                    path: p.path.to_string_lossy().to_string(),
-                    is_git: p.is_git,
-                    expanded: p.expanded,
-                    create_workspace_status: match p.create_workspace_status {
-                        OperationStatus::Idle => luban_api::OperationStatus::Idle,
-                        OperationStatus::Running => luban_api::OperationStatus::Running,
-                    },
-                    workspaces: p
-                        .workspaces
-                        .iter()
-                        .map(|w| luban_api::WorkspaceSnapshot {
-                            id: luban_api::WorkspaceId(w.id.as_u64()),
-                            short_id: workspace_short_id(&p.slug, w.id.as_u64()),
-                            workspace_name: w.workspace_name.clone(),
-                            branch_name: w.branch_name.clone(),
-                            worktree_path: w.worktree_path.to_string_lossy().to_string(),
-                            status: match w.status {
-                                luban_domain::WorkspaceStatus::Active => {
-                                    luban_api::WorkspaceStatus::Active
-                                }
-                                luban_domain::WorkspaceStatus::Archived => {
-                                    luban_api::WorkspaceStatus::Archived
-                                }
-                            },
-                            archive_status: match w.archive_status {
-                                OperationStatus::Idle => luban_api::OperationStatus::Idle,
-                                OperationStatus::Running => luban_api::OperationStatus::Running,
-                            },
-                            branch_rename_status: match w.branch_rename_status {
-                                OperationStatus::Idle => luban_api::OperationStatus::Idle,
-                                OperationStatus::Running => luban_api::OperationStatus::Running,
-                            },
-                            agent_run_status: if running_workspaces.contains(&w.id) {
-                                luban_api::OperationStatus::Running
-                            } else {
-                                luban_api::OperationStatus::Idle
-                            },
-                            has_unread_completion: self
-                                .state
-                                .workspace_unread_completions
-                                .contains(&w.id),
-                            pull_request: self
-                                .pull_requests
-                                .get(&w.id)
-                                .and_then(|entry| entry.info)
-                                .map(map_pull_request_info),
-                        })
-                        .collect(),
+                .map(|p| {
+                    let path = p.path.to_string_lossy().to_string();
+                    luban_api::ProjectSnapshot {
+                        id: luban_api::ProjectId(path.clone()),
+                        name: p.name.clone(),
+                        slug: p.slug.clone(),
+                        path,
+                        is_git: p.is_git,
+                        expanded: p.expanded,
+                        create_workspace_status: match p.create_workspace_status {
+                            OperationStatus::Idle => luban_api::OperationStatus::Idle,
+                            OperationStatus::Running => luban_api::OperationStatus::Running,
+                        },
+                        workspaces: p
+                            .workspaces
+                            .iter()
+                            .map(|w| luban_api::WorkspaceSnapshot {
+                                id: luban_api::WorkspaceId(w.id.as_u64()),
+                                short_id: workspace_short_id(&p.slug, w.id.as_u64()),
+                                workspace_name: w.workspace_name.clone(),
+                                branch_name: w.branch_name.clone(),
+                                worktree_path: w.worktree_path.to_string_lossy().to_string(),
+                                status: match w.status {
+                                    luban_domain::WorkspaceStatus::Active => {
+                                        luban_api::WorkspaceStatus::Active
+                                    }
+                                    luban_domain::WorkspaceStatus::Archived => {
+                                        luban_api::WorkspaceStatus::Archived
+                                    }
+                                },
+                                archive_status: match w.archive_status {
+                                    OperationStatus::Idle => luban_api::OperationStatus::Idle,
+                                    OperationStatus::Running => luban_api::OperationStatus::Running,
+                                },
+                                branch_rename_status: match w.branch_rename_status {
+                                    OperationStatus::Idle => luban_api::OperationStatus::Idle,
+                                    OperationStatus::Running => luban_api::OperationStatus::Running,
+                                },
+                                agent_run_status: if running_workspaces.contains(&w.id) {
+                                    luban_api::OperationStatus::Running
+                                } else {
+                                    luban_api::OperationStatus::Idle
+                                },
+                                has_unread_completion: self
+                                    .state
+                                    .workspace_unread_completions
+                                    .contains(&w.id),
+                                pull_request: self
+                                    .pull_requests
+                                    .get(&w.id)
+                                    .and_then(|entry| entry.info)
+                                    .map(map_pull_request_info),
+                            })
+                            .collect(),
+                    }
                 })
                 .collect(),
             appearance: luban_api::AppearanceSnapshot {
@@ -2468,18 +2535,9 @@ fn map_client_action(action: luban_api::ClientAction) -> Option<Action> {
         luban_api::ClientAction::AddProjectAndOpen { .. } => None,
         luban_api::ClientAction::TaskPreview { .. } => None,
         luban_api::ClientAction::TaskExecute { .. } => None,
-        luban_api::ClientAction::DeleteProject { project_id } => Some(Action::DeleteProject {
-            project_id: luban_domain::ProjectId::from_u64(project_id.0),
-        }),
-        luban_api::ClientAction::ToggleProjectExpanded { project_id } => {
-            Some(Action::ToggleProjectExpanded {
-                project_id: luban_domain::ProjectId::from_u64(project_id.0),
-            })
-        }
-        luban_api::ClientAction::CreateWorkspace { project_id } => Some(Action::CreateWorkspace {
-            project_id: luban_domain::ProjectId::from_u64(project_id.0),
-            branch_name_hint: None,
-        }),
+        luban_api::ClientAction::DeleteProject { .. } => None,
+        luban_api::ClientAction::ToggleProjectExpanded { .. } => None,
+        luban_api::ClientAction::CreateWorkspace { .. } => None,
         luban_api::ClientAction::OpenWorkspace { workspace_id } => Some(Action::OpenWorkspace {
             workspace_id: WorkspaceId::from_u64(workspace_id.0),
         }),
@@ -2516,11 +2574,7 @@ fn map_client_action(action: luban_api::ClientAction) -> Option<Action> {
                 workspace_id: WorkspaceId::from_u64(workspace_id.0),
             })
         }
-        luban_api::ClientAction::EnsureMainWorkspace { project_id } => {
-            Some(Action::EnsureMainWorkspace {
-                project_id: luban_domain::ProjectId::from_u64(project_id.0),
-            })
-        }
+        luban_api::ClientAction::EnsureMainWorkspace { .. } => None,
         luban_api::ClientAction::ChatModelChanged {
             workspace_id,
             thread_id,

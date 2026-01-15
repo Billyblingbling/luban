@@ -12,6 +12,7 @@ import type {
   AttachmentRef,
   CodexConfigEntrySnapshot,
   ConversationSnapshot,
+  ProjectId,
   ServerEvent,
   SystemTaskKind,
   ThreadMeta,
@@ -50,16 +51,16 @@ type LubanContextValue = {
 
   pickProjectPath: () => Promise<string | null>
   addProject: (path: string) => void
-  addProjectAndOpen: (path: string) => Promise<{ projectId: number; workspaceId: WorkspaceId }>
-  deleteProject: (projectId: number) => void
-  createWorkspace: (projectId: number) => void
-  ensureMainWorkspace: (projectId: number) => void
+  addProjectAndOpen: (path: string) => Promise<{ projectId: ProjectId; workspaceId: WorkspaceId }>
+  deleteProject: (projectId: ProjectId) => void
+  createWorkspace: (projectId: ProjectId) => void
+  ensureMainWorkspace: (projectId: ProjectId) => void
   openWorkspaceInIde: (workspaceId: WorkspaceId) => void
   openWorkspaceWith: (workspaceId: WorkspaceId, target: OpenTarget) => void
   openWorkspacePullRequest: (workspaceId: WorkspaceId) => void
   openWorkspacePullRequestFailedAction: (workspaceId: WorkspaceId) => void
   archiveWorkspace: (workspaceId: number) => void
-  toggleProjectExpanded: (projectId: number) => void
+  toggleProjectExpanded: (projectId: ProjectId) => void
 
   previewTask: (input: string) => Promise<TaskDraft>
   executeTask: (draft: TaskDraft, mode: TaskExecuteMode) => Promise<TaskExecuteResult>

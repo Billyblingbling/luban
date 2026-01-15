@@ -1,10 +1,14 @@
-import { expect, test } from "@playwright/test"
+import { expect, test, type Page } from "@playwright/test"
 import { execSync } from "node:child_process"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { PNG } from "pngjs"
 import { ensureWorkspace, sendWsAction } from "./helpers"
+
+function projectToggleByPath(page: Page, projectPath: string) {
+  return page.getByTitle(projectPath, { exact: true }).locator("..")
+}
 
 function parseRgb(color: string): { r: number; g: number; b: number } | null {
   const m = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*[\d.]+\s*)?\)$/.exec(color.trim())
@@ -107,19 +111,7 @@ test("non-git projects do not show worktree controls", async ({ page }) => {
 
   await sendWsAction(page, { type: "add_project", path: projectPath })
 
-  const resolveProjectSlug = async () =>
-    await page.evaluate(async (projectDir) => {
-      const res = await fetch("/api/app")
-      if (!res.ok) return null
-      const app = (await res.json()) as { projects: { path: string; slug: string }[] }
-      return app.projects.find((p) => p.path === projectDir)?.slug ?? null
-    }, projectPath)
-
-  await expect.poll(async () => await resolveProjectSlug(), { timeout: 15_000 }).not.toBeNull()
-  const projectSlug = await resolveProjectSlug()
-  if (!projectSlug) throw new Error(`project slug not found for ${projectPath}`)
-
-  const projectToggle = page.getByRole("button", { name: projectSlug, exact: true })
+  const projectToggle = projectToggleByPath(page, projectPath)
   await projectToggle.waitFor({ state: "visible", timeout: 15_000 })
   const projectContainer = projectToggle.locator("..").locator("..")
 
@@ -175,19 +167,7 @@ test("clicking a non-git project opens its main workspace", async ({ page }) => 
 
   await sendWsAction(page, { type: "add_project", path: projectPath })
 
-  const resolveProjectSlug = async () =>
-    await page.evaluate(async (projectDir) => {
-      const res = await fetch("/api/app")
-      if (!res.ok) return null
-      const app = (await res.json()) as { projects: { path: string; slug: string }[] }
-      return app.projects.find((p) => p.path === projectDir)?.slug ?? null
-    }, projectPath)
-
-  await expect.poll(async () => await resolveProjectSlug(), { timeout: 15_000 }).not.toBeNull()
-  const projectSlug = await resolveProjectSlug()
-  if (!projectSlug) throw new Error(`project slug not found for ${projectPath}`)
-
-  const projectToggle = page.getByRole("button", { name: projectSlug, exact: true })
+  const projectToggle = projectToggleByPath(page, projectPath)
   await projectToggle.waitFor({ state: "visible", timeout: 15_000 })
   await projectToggle.click()
 
@@ -235,19 +215,7 @@ test("git projects without worktrees show standalone agent status icon", async (
   const projectPath = fs.realpathSync(projectDir)
   await sendWsAction(page, { type: "add_project", path: projectPath })
 
-  const resolveProjectSlug = async () =>
-    await page.evaluate(async (projectDir) => {
-      const res = await fetch("/api/app")
-      if (!res.ok) return null
-      const app = (await res.json()) as { projects: { path: string; slug: string }[] }
-      return app.projects.find((p) => p.path === projectDir)?.slug ?? null
-    }, projectPath)
-
-  await expect.poll(async () => await resolveProjectSlug(), { timeout: 15_000 }).not.toBeNull()
-  const projectSlug = await resolveProjectSlug()
-  if (!projectSlug) throw new Error(`project slug not found for ${projectPath}`)
-
-  const projectToggle = page.getByRole("button", { name: projectSlug, exact: true })
+  const projectToggle = projectToggleByPath(page, projectPath)
   await projectToggle.waitFor({ state: "visible", timeout: 15_000 })
   const projectContainer = projectToggle.locator("..").locator("..")
 
@@ -285,19 +253,7 @@ test("git projects with only main worktree render as a standalone entry", async 
   const projectPath = fs.realpathSync(projectDir)
   await sendWsAction(page, { type: "add_project", path: projectPath })
 
-  const resolveProjectSlug = async () =>
-    await page.evaluate(async (projectDir) => {
-      const res = await fetch("/api/app")
-      if (!res.ok) return null
-      const app = (await res.json()) as { projects: { path: string; slug: string }[] }
-      return app.projects.find((p) => p.path === projectDir)?.slug ?? null
-    }, projectPath)
-
-  await expect.poll(async () => await resolveProjectSlug(), { timeout: 15_000 }).not.toBeNull()
-  const projectSlug = await resolveProjectSlug()
-  if (!projectSlug) throw new Error(`project slug not found for ${projectPath}`)
-
-  const projectToggle = page.getByRole("button", { name: projectSlug, exact: true })
+  const projectToggle = projectToggleByPath(page, projectPath)
   await projectToggle.waitFor({ state: "visible", timeout: 15_000 })
   const projectContainer = projectToggle.locator("..").locator("..")
 
@@ -312,7 +268,6 @@ test("git projects with only main worktree render as a standalone entry", async 
     if (!res.ok) return null
     const app = (await res.json()) as {
       projects: {
-        id: number
         path: string
         workspaces: { id: number; status: string; workspace_name: string; worktree_path: string }[]
       }[]
@@ -321,7 +276,7 @@ test("git projects with only main worktree render as a standalone entry", async 
     if (!project) return null
     const main = project.workspaces.find((w) => w.status === "active" && w.workspace_name === "main" && w.worktree_path === project.path)
     const nonMain = project.workspaces.filter((w) => w.status === "active" && !(w.workspace_name === "main" && w.worktree_path === project.path))
-    return { projectId: project.id, mainId: main?.id ?? null, nonMainIds: nonMain.map((w) => w.id) }
+    return { mainId: main?.id ?? null, nonMainIds: nonMain.map((w) => w.id) }
   }, projectPath)
   if (!ids || !ids.mainId || ids.nonMainIds.length === 0) throw new Error("expected main and non-main workspaces")
 
@@ -438,33 +393,12 @@ test("archiving a worktree shows an executing animation", async ({ page }) => {
   const projectPath = fs.realpathSync(projectDir)
   await sendWsAction(page, { type: "add_project", path: projectPath })
 
-  const resolveProjectSlug = async () =>
-    await page.evaluate(async (projectDir) => {
-      const res = await fetch("/api/app")
-      if (!res.ok) return null
-      const app = (await res.json()) as { projects: { path: string; slug: string }[] }
-      return app.projects.find((p) => p.path === projectDir)?.slug ?? null
-    }, projectPath)
-
-  await expect.poll(async () => await resolveProjectSlug(), { timeout: 15_000 }).not.toBeNull()
-
-  const projectSlug = await resolveProjectSlug()
-  if (!projectSlug) throw new Error(`project slug not found for ${projectPath}`)
-
-  const projectToggle = page.getByRole("button", { name: projectSlug, exact: true })
+  const projectToggle = projectToggleByPath(page, projectPath)
   await projectToggle.waitFor({ state: "visible", timeout: 15_000 })
 
   const projectContainer = projectToggle.locator("..").locator("..")
 
-  const projectId = await page.evaluate(async (projectDir) => {
-    const res = await fetch("/api/app")
-    if (!res.ok) return null
-    const app = (await res.json()) as { projects: { id: number; path: string }[] }
-    return app.projects.find((p) => p.path === projectDir)?.id ?? null
-  }, projectPath)
-  if (!projectId) throw new Error(`project id not found for ${projectPath}`)
-
-  await sendWsAction(page, { type: "create_workspace", project_id: projectId })
+  await sendWsAction(page, { type: "create_workspace", project_id: projectPath })
 
   const resolveWorkspace = async () =>
     await page.evaluate(async (projectDir) => {

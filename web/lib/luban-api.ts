@@ -1,4 +1,4 @@
-export type ProjectId = number
+export type ProjectId = string
 export type WorkspaceId = number
 export type WorkspaceThreadId = number
 
