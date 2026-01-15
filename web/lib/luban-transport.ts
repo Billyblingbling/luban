@@ -103,6 +103,7 @@ export function useLubanTransport(args: {
 
         if (
           event.type === "project_path_picked" ||
+          event.type === "add_project_and_open_ready" ||
           event.type === "task_preview_ready" ||
           event.type === "task_executed" ||
           event.type === "codex_check_ready" ||
@@ -114,6 +115,8 @@ export function useLubanTransport(args: {
           if (pending) {
             pendingResponsesRef.current.delete(event.request_id)
             if (event.type === "project_path_picked") pending.resolve(event.path)
+            if (event.type === "add_project_and_open_ready")
+              pending.resolve({ projectId: event.project_id, workspaceId: event.workspace_id })
             if (event.type === "task_preview_ready") pending.resolve(event.draft)
             if (event.type === "task_executed") pending.resolve(event.result)
             if (event.type === "codex_check_ready") pending.resolve({ ok: event.ok, message: event.message })

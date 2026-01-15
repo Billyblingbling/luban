@@ -24,6 +24,7 @@ import { waitForNewThread } from "./luban-thread-flow"
 export type LubanActions = {
   pickProjectPath: () => Promise<string | null>
   addProject: (path: string) => void
+  addProjectAndOpen: (path: string) => Promise<{ projectId: number; workspaceId: WorkspaceId }>
   deleteProject: (projectId: number) => void
   createWorkspace: (projectId: number) => void
   ensureMainWorkspace: (projectId: number) => void
@@ -78,6 +79,10 @@ export function createLubanActions(args: {
 
   function addProject(path: string) {
     args.sendAction({ type: "add_project", path })
+  }
+
+  function addProjectAndOpen(path: string): Promise<{ projectId: number; workspaceId: WorkspaceId }> {
+    return args.request<{ projectId: number; workspaceId: WorkspaceId }>({ type: "add_project_and_open", path })
   }
 
   function deleteProject(projectId: number) {
@@ -442,6 +447,7 @@ export function createLubanActions(args: {
   return {
     pickProjectPath,
     addProject,
+    addProjectAndOpen,
     deleteProject,
     createWorkspace,
     ensureMainWorkspace,

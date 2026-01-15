@@ -364,6 +364,111 @@ impl Engine {
                     }
                 }
 
+                if let luban_api::ClientAction::AddProjectAndOpen { path } = &action {
+                    enum AddProjectDecision {
+                        ReuseExisting { root_path: PathBuf, is_git: bool },
+                        Add { root_path: PathBuf, is_git: bool },
+                    }
+
+                    let services = self.services.clone();
+                    let requested_path = expand_user_path(path);
+                    let existing_paths = self
+                        .state
+                        .projects
+                        .iter()
+                        .map(|p| p.path.clone())
+                        .collect::<Vec<_>>();
+
+                    let decision = tokio::task::spawn_blocking(move || {
+                        let requested = services.project_identity(requested_path)?;
+                        if let Some(github_repo) = requested.github_repo.as_deref() {
+                            for existing_path in existing_paths {
+                                let existing =
+                                    match services.project_identity(existing_path.clone()) {
+                                        Ok(v) => v,
+                                        Err(_) => continue,
+                                    };
+                                if existing.github_repo.as_deref() == Some(github_repo) {
+                                    return Ok(AddProjectDecision::ReuseExisting {
+                                        root_path: existing.root_path,
+                                        is_git: existing.is_git,
+                                    });
+                                }
+                            }
+                        }
+
+                        Ok::<AddProjectDecision, String>(AddProjectDecision::Add {
+                            root_path: requested.root_path,
+                            is_git: requested.is_git,
+                        })
+                    })
+                    .await
+                    .ok()
+                    .unwrap_or_else(|| Err("failed to join project identity task".to_owned()));
+
+                    let (root_path, is_git) = match decision {
+                        Ok(AddProjectDecision::ReuseExisting { root_path, is_git }) => {
+                            (root_path, is_git)
+                        }
+                        Ok(AddProjectDecision::Add { root_path, is_git }) => (root_path, is_git),
+                        Err(message) => {
+                            let _ = reply.send(Err(message));
+                            return;
+                        }
+                    };
+
+                    self.process_action_queue(Action::AddProject {
+                        path: root_path.clone(),
+                        is_git,
+                    })
+                    .await;
+
+                    let Some(project_id) = find_project_id_by_path(&self.state, &root_path) else {
+                        let _ =
+                            reply.send(Err("failed to locate project after adding it".to_owned()));
+                        return;
+                    };
+
+                    self.process_action_queue(Action::EnsureMainWorkspace { project_id })
+                        .await;
+
+                    let main_workspace_id = self
+                        .state
+                        .projects
+                        .iter()
+                        .find(|p| p.id == project_id)
+                        .and_then(|p| {
+                            let active = p
+                                .workspaces
+                                .iter()
+                                .filter(|w| w.status == luban_domain::WorkspaceStatus::Active);
+                            active
+                                .clone()
+                                .find(|w| w.workspace_name == "main" && w.worktree_path == p.path)
+                                .map(|w| w.id)
+                                .or_else(|| active.clone().next().map(|w| w.id))
+                        });
+
+                    let Some(workspace_id) = main_workspace_id else {
+                        let _ = reply.send(Err(
+                            "failed to locate main workspace after ensuring it".to_owned(),
+                        ));
+                        return;
+                    };
+
+                    let _ = self.events.send(WsServerMessage::Event {
+                        rev: self.rev,
+                        event: Box::new(luban_api::ServerEvent::AddProjectAndOpenReady {
+                            request_id: request_id.clone(),
+                            project_id: luban_api::ProjectId(project_id.as_u64()),
+                            workspace_id: luban_api::WorkspaceId(workspace_id.as_u64()),
+                        }),
+                    });
+
+                    let _ = reply.send(Ok(self.rev));
+                    return;
+                }
+
                 if let luban_api::ClientAction::TaskPreview { input } = &action {
                     let services = self.services.clone();
                     let events = self.events.clone();
@@ -2360,6 +2465,7 @@ fn map_client_action(action: luban_api::ClientAction) -> Option<Action> {
             path: expand_user_path(&path),
             is_git: true,
         }),
+        luban_api::ClientAction::AddProjectAndOpen { .. } => None,
         luban_api::ClientAction::TaskPreview { .. } => None,
         luban_api::ClientAction::TaskExecute { .. } => None,
         luban_api::ClientAction::DeleteProject { project_id } => Some(Action::DeleteProject {

@@ -276,6 +276,7 @@ export type ConversationEntry =
 export type ClientAction =
   | { type: "pick_project_path" }
   | { type: "add_project"; path: string }
+  | { type: "add_project_and_open"; path: string }
   | { type: "task_preview"; input: string }
   | { type: "task_execute"; draft: TaskDraft; mode: TaskExecuteMode }
   | { type: "delete_project"; project_id: ProjectId }
@@ -331,6 +332,7 @@ export type ServerEvent =
   | { type: "conversation_changed"; snapshot: ConversationSnapshot }
   | { type: "toast"; message: string }
   | { type: "project_path_picked"; request_id: string; path: string | null }
+  | { type: "add_project_and_open_ready"; request_id: string; project_id: ProjectId; workspace_id: WorkspaceId }
   | { type: "task_preview_ready"; request_id: string; draft: TaskDraft }
   | { type: "task_executed"; request_id: string; result: TaskExecuteResult }
   | { type: "codex_check_ready"; request_id: string; ok: boolean; message: string | null }

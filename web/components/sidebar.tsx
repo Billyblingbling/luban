@@ -52,6 +52,7 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
     toggleProjectExpanded,
     openWorkspace,
     addProject,
+    addProjectAndOpen,
     ensureMainWorkspace,
     pickProjectPath,
     deleteProject,
@@ -59,8 +60,7 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
 
   const pendingCreateRef = useRef<{ projectId: number; existingWorkspaceIds: Set<number> } | null>(null)
   const pendingAddProjectPathRef = useRef<string | null>(null)
-  const pendingAddProjectAndOpenPathRef = useRef<string | null>(null)
-  const ensuringMainWorkspaceForProjectIdsRef = useRef<Set<number>>(new Set())
+  const pendingOpenMainProjectIdRef = useRef<number | null>(null)
   const [optimisticCreatingProjectId, setOptimisticCreatingProjectId] = useState<number | null>(null)
   const [newlyCreatedWorkspaceId, setNewlyCreatedWorkspaceId] = useState<number | null>(null)
   const [optimisticArchivingWorkspaceIds, setOptimisticArchivingWorkspaceIds] = useState<Set<number>>(
@@ -91,15 +91,22 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
       const detail = (event as CustomEvent<{ path?: string } | null>).detail
       const path = detail?.path?.trim()
       if (!path) return
-      pendingAddProjectAndOpenPathRef.current = path
-      addProject(path)
       setSettingsOpen(false)
       setSettingsInitialSectionId(null)
       onViewModeChange("workspace")
+      void (async () => {
+        try {
+          const res = await addProjectAndOpen(path)
+          await openWorkspace(res.workspaceId)
+          focusChatInput()
+        } catch (err) {
+          toast.error(err instanceof Error ? err.message : String(err))
+        }
+      })()
     }
     window.addEventListener("luban:add-project-and-open", handler)
     return () => window.removeEventListener("luban:add-project-and-open", handler)
-  }, [addProject, onViewModeChange])
+  }, [addProjectAndOpen, onViewModeChange, openWorkspace])
 
   useEffect(() => {
     if (!app) return
@@ -161,33 +168,19 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
       }
     }
 
-    const pendingOpenPath = pendingAddProjectAndOpenPathRef.current
-    if (pendingOpenPath) {
-      const match = app.projects.find((p) => normalizePathLike(p.path) === normalizePathLike(pendingOpenPath))
+    const pendingOpenMainProjectId = pendingOpenMainProjectIdRef.current
+    if (pendingOpenMainProjectId != null) {
+      const match = app.projects.find((p) => p.id === pendingOpenMainProjectId)
       if (match) {
         const activeWorkspaces = match.workspaces.filter((w) => w.status === "active")
-        if (activeWorkspaces.length === 0) {
-          if (!ensuringMainWorkspaceForProjectIdsRef.current.has(match.id)) {
-            ensuringMainWorkspaceForProjectIdsRef.current.add(match.id)
-            ensureMainWorkspace(match.id)
-          }
-          return
-        }
-
-        ensuringMainWorkspaceForProjectIdsRef.current.delete(match.id)
-        pendingAddProjectAndOpenPathRef.current = null
-
-        if (!match.expanded) {
-          toggleProjectExpanded(match.id)
-        }
-
         const main =
           activeWorkspaces.find((w) => w.workspace_name === "main" && w.worktree_path === match.path) ??
           activeWorkspaces[0] ??
           null
-        if (!main) return
-
-        void openWorkspace(main.id as WorkspaceId).then(() => focusChatInput())
+        if (main) {
+          pendingOpenMainProjectIdRef.current = null
+          void openWorkspace(main.id as WorkspaceId).then(() => focusChatInput())
+        }
       }
     }
 
@@ -296,9 +289,7 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
             project.createWorkspaceStatus === "running" || optimisticCreatingProjectId === project.id
           const isDeleting = deletingProjectId === project.id
           const standaloneMainWorktree =
-            project.isGit && project.worktrees.length === 1 && project.worktrees[0]?.isHome
-              ? project.worktrees[0]
-              : null
+            project.worktrees.length === 1 && project.worktrees[0]?.isHome ? project.worktrees[0] : null
           const canExpand = project.isGit && project.worktrees.length > 1
           const isExpanded = canExpand && project.expanded
           const standaloneStatus = canExpand
@@ -327,6 +318,11 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
                     }
                     if (standaloneMainWorktree) {
                       void openWorkspace(standaloneMainWorktree.workspaceId)
+                      return
+                    }
+                    if (!project.isGit) {
+                      pendingOpenMainProjectIdRef.current = project.id
+                      ensureMainWorkspace(project.id)
                     }
                   }}
                   className={cn(

@@ -127,6 +127,98 @@ test("non-git projects do not show worktree controls", async ({ page }) => {
   await expect(projectContainer.getByTitle("Add worktree")).toHaveCount(0)
 })
 
+test("add-project-and-open opens the project's main workspace", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "luban-e2e-add-and-open-"))
+  fs.writeFileSync(path.join(projectDir, "notes.txt"), "hello\n", "utf8")
+  const projectPath = fs.realpathSync(projectDir)
+
+  await page.evaluate((path) => {
+    window.dispatchEvent(new CustomEvent("luban:add-project-and-open", { detail: { path } }))
+  }, projectPath)
+
+  const resolveMainWorkspaceId = async () => {
+      const res = await page.request.get("/api/app")
+      if (!res.ok()) return null
+      const app = (await res.json()) as {
+        projects: {
+          path: string
+          workspaces: { id: number; status: string; workspace_name: string; worktree_path: string }[]
+        }[]
+      }
+      const project = app.projects.find((p) => p.path === projectPath) ?? null
+      if (!project) return null
+      const active = project.workspaces.filter((w) => w.status === "active")
+      const main = active.find((w) => w.workspace_name === "main" && w.worktree_path === projectPath) ?? active[0] ?? null
+      return main?.id ?? null
+  }
+
+  await expect.poll(resolveMainWorkspaceId, { timeout: 15_000 }).not.toBeNull()
+  const mainWorkspaceId = await resolveMainWorkspaceId()
+  if (mainWorkspaceId == null) throw new Error(`main workspace not found for ${projectPath}`)
+
+  const expected = String(mainWorkspaceId)
+  await expect
+    .poll(async () => (await page.evaluate(() => localStorage.getItem("luban:active_workspace_id"))) ?? "", {
+      timeout: 15_000,
+    })
+    .toBe(expected)
+})
+
+test("clicking a non-git project opens its main workspace", async ({ page }) => {
+  await page.goto("/")
+
+  const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "luban-e2e-non-git-open-"))
+  fs.writeFileSync(path.join(projectDir, "notes.txt"), "hello\n", "utf8")
+  const projectPath = fs.realpathSync(projectDir)
+
+  await sendWsAction(page, { type: "add_project", path: projectPath })
+
+  const resolveProjectSlug = async () =>
+    await page.evaluate(async (projectDir) => {
+      const res = await fetch("/api/app")
+      if (!res.ok) return null
+      const app = (await res.json()) as { projects: { path: string; slug: string }[] }
+      return app.projects.find((p) => p.path === projectDir)?.slug ?? null
+    }, projectPath)
+
+  await expect.poll(async () => await resolveProjectSlug(), { timeout: 15_000 }).not.toBeNull()
+  const projectSlug = await resolveProjectSlug()
+  if (!projectSlug) throw new Error(`project slug not found for ${projectPath}`)
+
+  const projectToggle = page.getByRole("button", { name: projectSlug, exact: true })
+  await projectToggle.waitFor({ state: "visible", timeout: 15_000 })
+  await projectToggle.click()
+
+  const resolveMainWorkspaceId = async () => {
+      const res = await page.request.get("/api/app")
+      if (!res.ok()) return null
+      const app = (await res.json()) as {
+        projects: {
+          path: string
+          workspaces: { id: number; status: string; workspace_name: string; worktree_path: string }[]
+        }[]
+      }
+      const project = app.projects.find((p) => p.path === projectPath) ?? null
+      if (!project) return null
+      const active = project.workspaces.filter((w) => w.status === "active")
+      const main = active.find((w) => w.workspace_name === "main" && w.worktree_path === projectPath) ?? active[0] ?? null
+      return main?.id ?? null
+  }
+
+  await expect.poll(resolveMainWorkspaceId, { timeout: 15_000 }).not.toBeNull()
+  const mainWorkspaceId = await resolveMainWorkspaceId()
+  if (mainWorkspaceId == null) throw new Error(`main workspace not found for ${projectPath}`)
+
+  const expected = String(mainWorkspaceId)
+  await expect
+    .poll(async () => (await page.evaluate(() => localStorage.getItem("luban:active_workspace_id"))) ?? "", {
+      timeout: 15_000,
+    })
+    .toBe(expected)
+})
+
 test("git projects without worktrees show standalone agent status icon", async ({ page }) => {
   await page.goto("/")
 

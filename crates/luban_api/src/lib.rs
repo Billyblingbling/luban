@@ -484,6 +484,9 @@ pub enum ClientAction {
     AddProject {
         path: String,
     },
+    AddProjectAndOpen {
+        path: String,
+    },
     TaskPreview {
         input: String,
     },
@@ -620,6 +623,11 @@ pub enum ServerEvent {
     ProjectPathPicked {
         request_id: String,
         path: Option<String>,
+    },
+    AddProjectAndOpenReady {
+        request_id: String,
+        project_id: ProjectId,
+        workspace_id: WorkspaceId,
     },
     TaskPreviewReady {
         request_id: String,
