@@ -118,6 +118,7 @@ export function PtyTerminal() {
   const { activeWorkspaceId } = useLuban()
   const { fonts } = useAppearance()
   const { resolvedTheme } = useTheme()
+  const outerRef = useRef<HTMLDivElement | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -154,8 +155,9 @@ export function PtyTerminal() {
   }, [resolvedTheme])
 
   useEffect(() => {
+    const outer = outerRef.current
     const container = containerRef.current
-    if (!container) return
+    if (!outer || !container) return
 
     if (activeWorkspaceId == null) {
       container.textContent = "Select a workspace to start a terminal."
@@ -303,10 +305,10 @@ export function PtyTerminal() {
       sendInput(text)
     }
 
-    container.addEventListener("mousedown", focusCapture, true)
-    container.addEventListener("touchstart", focusCapture, true)
-    container.addEventListener("keydown", keydownCapture, true)
-    container.addEventListener("paste", pasteCapture, true)
+    outer.addEventListener("mousedown", focusCapture, true)
+    outer.addEventListener("touchstart", focusCapture, true)
+    outer.addEventListener("keydown", keydownCapture, true)
+    outer.addEventListener("paste", pasteCapture, true)
 
     resizeDisposable = term.onResize(({ cols, rows }) => {
       sendResizeIfReady(cols, rows)
@@ -346,10 +348,10 @@ export function PtyTerminal() {
       termRef.current = null
       fitAddonRef.current = null
       webglAddonRef.current = null
-      if (focusCapture) container.removeEventListener("mousedown", focusCapture, true)
-      if (focusCapture) container.removeEventListener("touchstart", focusCapture, true)
-      if (keydownCapture) container.removeEventListener("keydown", keydownCapture, true)
-      if (pasteCapture) container.removeEventListener("paste", pasteCapture, true)
+      if (focusCapture) outer.removeEventListener("mousedown", focusCapture, true)
+      if (focusCapture) outer.removeEventListener("touchstart", focusCapture, true)
+      if (keydownCapture) outer.removeEventListener("keydown", keydownCapture, true)
+      if (pasteCapture) outer.removeEventListener("paste", pasteCapture, true)
       resizeObserver?.disconnect()
       dataDisposable?.dispose()
       resizeDisposable?.dispose()
@@ -361,10 +363,12 @@ export function PtyTerminal() {
 
   return (
     <div
-      ref={containerRef}
       data-testid="pty-terminal"
+      ref={outerRef}
       tabIndex={0}
-      className="h-full w-full p-3 font-mono text-xs overflow-hidden bg-card text-card-foreground focus:outline-none"
-    />
+      className="h-full w-full p-3 font-mono text-xs overflow-hidden bg-card text-card-foreground focus:outline-none flex"
+    >
+      <div ref={containerRef} className="flex-1 min-h-0 min-w-0 overflow-hidden" />
+    </div>
   )
 }

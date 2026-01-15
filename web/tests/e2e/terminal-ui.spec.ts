@@ -125,3 +125,43 @@ test("terminal theme follows app theme changes", async ({ page }) => {
     })
     .toBe(true)
 })
+
+test("terminal canvas stays within container bounds", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  const terminal = page.getByTestId("pty-terminal")
+  await expect
+    .poll(async () => await terminal.locator("canvas").count(), { timeout: 20_000 })
+    .toBeGreaterThan(0)
+
+  await expect
+    .poll(async () => {
+      return await terminal.evaluate((outer) => {
+        const canvas = outer.querySelector("canvas")
+        if (!canvas) return null
+        const outerRect = (outer as HTMLElement).getBoundingClientRect()
+        const canvasRect = canvas.getBoundingClientRect()
+        return {
+          outer: { top: outerRect.top, bottom: outerRect.bottom, left: outerRect.left, right: outerRect.right },
+          canvas: { top: canvasRect.top, bottom: canvasRect.bottom, left: canvasRect.left, right: canvasRect.right },
+        }
+      })
+    })
+    .not.toBeNull()
+
+  const rects = await terminal.evaluate((outer) => {
+    const canvas = outer.querySelector("canvas")!
+    const outerRect = (outer as HTMLElement).getBoundingClientRect()
+    const canvasRect = canvas.getBoundingClientRect()
+    return {
+      outerRect: { top: outerRect.top, bottom: outerRect.bottom, left: outerRect.left, right: outerRect.right },
+      canvasRect: { top: canvasRect.top, bottom: canvasRect.bottom, left: canvasRect.left, right: canvasRect.right },
+    }
+  })
+
+  const tol = 1
+  expect(rects.canvasRect.top).toBeGreaterThanOrEqual(rects.outerRect.top - tol)
+  expect(rects.canvasRect.left).toBeGreaterThanOrEqual(rects.outerRect.left - tol)
+  expect(rects.canvasRect.right).toBeLessThanOrEqual(rects.outerRect.right + tol)
+  expect(rects.canvasRect.bottom).toBeLessThanOrEqual(rects.outerRect.bottom + tol)
+})
