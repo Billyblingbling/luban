@@ -158,13 +158,20 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
           toggleProjectExpanded(match.id)
         }
 
-        const main =
-          match.workspaces.find((w) => w.workspace_name === "main" && w.worktree_path === match.path) ??
-          match.workspaces[0] ??
-          null
-        if (main) {
-          void openWorkspace(main.id).then(() => focusChatInput())
+        const activeWorkspaces = match.workspaces.filter((w) => w.status === "active")
+        if (activeWorkspaces.length === 0) {
+          pendingOpenMainProjectIdRef.current = match.id
+          ensureMainWorkspace(match.id)
+          return
         }
+
+        const main =
+          activeWorkspaces.find((w) => w.workspace_name === "main" && w.worktree_path === match.path) ??
+          activeWorkspaces[0] ??
+          null
+        if (!main) return
+
+        void openWorkspace(main.id as WorkspaceId).then(() => focusChatInput())
       }
     }
 
@@ -320,9 +327,10 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
                       void openWorkspace(standaloneMainWorktree.workspaceId)
                       return
                     }
-                    if (!project.isGit) {
+                    if (project.worktrees.length === 0) {
                       pendingOpenMainProjectIdRef.current = project.id
                       ensureMainWorkspace(project.id)
+                      return
                     }
                   }}
                   className={cn(

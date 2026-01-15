@@ -254,6 +254,9 @@ test("git projects without worktrees show standalone agent status icon", async (
   await expect(projectToggle.getByTestId("project-agent-status-icon")).toBeVisible({ timeout: 10_000 })
   await expect(projectContainer.getByTestId("worktree-branch-name")).toHaveCount(0)
 
+  await projectToggle.click()
+  await expect(page.getByTestId("chat-input")).toBeFocused({ timeout: 20_000 })
+
   await projectContainer.hover()
   await expect(projectContainer.getByTitle("Add worktree")).toHaveCount(1)
 })
