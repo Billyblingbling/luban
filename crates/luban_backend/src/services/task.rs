@@ -786,11 +786,39 @@ fn context_json_for_task_draft(draft: &TaskDraft) -> serde_json::Value {
     }
 }
 
+fn branch_rename_context_for_task_draft(draft: &TaskDraft) -> String {
+    let mut sections = Vec::new();
+
+    let summary = draft.summary.trim();
+    if !summary.is_empty() {
+        sections.push(format!("Task summary:\n{summary}"));
+    }
+
+    let known_context = render_known_context(
+        &draft.project,
+        &draft.repo,
+        &draft.issue,
+        &draft.pull_request,
+    );
+    let known_context = known_context.trim();
+    if !known_context.is_empty() {
+        sections.push(known_context.to_owned());
+    }
+
+    sections.join("\n\n")
+}
+
 pub(super) fn task_suggest_branch_name(
     service: &GitWorkspaceService,
     draft: TaskDraft,
 ) -> anyhow::Result<String> {
-    let prompt = system_prompt_for_task(service, SystemTaskKind::RenameBranch, &draft.input, "");
+    let context = branch_rename_context_for_task_draft(&draft);
+    let prompt = system_prompt_for_task(
+        service,
+        SystemTaskKind::RenameBranch,
+        &draft.input,
+        &context,
+    );
 
     let cancel = Arc::new(AtomicBool::new(false));
     let mut agent_messages: Vec<String> = Vec::new();
@@ -1067,5 +1095,14 @@ mod tests {
             compose_agent_prompt(input, TaskIntentKind::Other, &project, &None, &None, &None);
         assert!(other.contains("move it forward"), "{other}");
         assert_global_constraints(&other);
+    }
+
+    #[test]
+    fn rename_branch_system_prompt_includes_context_placeholder() {
+        let template = luban_domain::default_system_prompt_template(SystemTaskKind::RenameBranch);
+        assert!(
+            template.contains("{{context_json}}"),
+            "rename branch system prompt must include context placeholder"
+        );
     }
 }

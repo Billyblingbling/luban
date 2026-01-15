@@ -83,6 +83,9 @@ Branch name requirements:
 
 Input:
 {{task_input}}
+
+Retrieved context:
+{{context_json}}
 "#
         .to_owned(),
     }
