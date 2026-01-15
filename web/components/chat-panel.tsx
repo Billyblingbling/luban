@@ -56,6 +56,7 @@ import type { ChangedFile } from "./right-sidebar"
 import { MultiFileDiff, type FileContents } from "@pierre/diffs/react"
 import { CodexAgentSelector } from "@/components/shared/agent-selector"
 import { OpenButton } from "@/components/shared/open-button"
+import { MessageEditor, type ComposerAttachment as EditorComposerAttachment } from "@/components/shared/message-editor"
 import { openSettingsPanel } from "@/lib/open-settings"
 import { computeProjectDisplayNames } from "@/lib/project-display-names"
 
@@ -70,16 +71,7 @@ interface ArchivedTab {
   title: string
 }
 
-type ComposerAttachment = {
-  id: string
-  type: "image" | "file"
-  name: string
-  size: number
-  preview?: string
-  previewUrl?: string
-  status: "uploading" | "ready" | "failed"
-  attachment?: AttachmentRef
-}
+type ComposerAttachment = EditorComposerAttachment
 
 function ChatComposerCard({
   text,
@@ -1777,11 +1769,11 @@ export function ChatPanel({
               {editingQueuedPromptId == null && (
               <div className="px-4 pb-4">
                 <div className="max-w-3xl mx-auto">
-                  <ChatComposerCard
-                    text={draftText}
-                    onTextChange={(text) => {
-                      setDraftText(text)
-                      persistDraft(text)
+                  <MessageEditor
+                    value={draftText}
+                    onChange={(value) => {
+                      setDraftText(value)
+                      persistDraft(value)
                     }}
                     attachments={attachments}
                     onRemoveAttachment={removeAttachment}
@@ -1922,9 +1914,9 @@ function QueuedPromptRow({
 
     return (
       <div className="transition-all duration-200 ease-out">
-        <ChatComposerCard
-          text={editingText}
-          onTextChange={onEditingTextChange}
+        <MessageEditor
+          value={editingText}
+          onChange={onEditingTextChange}
           attachments={editingAttachments}
           onRemoveAttachment={onRemoveEditingAttachment}
           onFileSelect={onQueuedFileSelect}
