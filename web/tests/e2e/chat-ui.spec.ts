@@ -265,15 +265,16 @@ test("@mention autocompletes workspace files", async ({ page }) => {
   await ensureWorkspace(page)
 
   const input = page.getByTestId("chat-input")
-  await input.fill("@README")
+  await input.fill("@rdm")
 
   const menu = page.getByTestId("chat-mention-menu")
   await expect(menu).toBeVisible({ timeout: 20_000 })
 
-  const item = page.getByTestId("chat-mention-item").filter({ hasText: "README.md" }).first()
-  await expect(item).toBeVisible({ timeout: 20_000 })
-  await item.click()
+  const docsItem = page.getByTestId("chat-mention-item").filter({ hasText: "docs/README.md" }).first()
+  await expect(docsItem).toBeVisible({ timeout: 20_000 })
+  await docsItem.hover()
+  await input.press("Enter")
 
-  await expect.poll(async () => await input.inputValue(), { timeout: 10_000 }).toBe("@README.md ")
+  await expect.poll(async () => await input.inputValue(), { timeout: 10_000 }).toBe("@docs/README.md ")
   await expect(menu).toHaveCount(0)
 })

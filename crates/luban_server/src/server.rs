@@ -231,6 +231,32 @@ fn escape_glob_fragment(fragment: &str) -> String {
         .collect()
 }
 
+fn fuzzy_glob_pattern(query: &str) -> String {
+    let mut out = String::from("**/*");
+    for ch in query.chars() {
+        out.push_str(&escape_glob_fragment(&ch.to_string()));
+        out.push('*');
+    }
+    out
+}
+
+fn fuzzy_match_ascii(needle_lower: &[u8], haystack: &[u8]) -> bool {
+    if needle_lower.is_empty() {
+        return true;
+    }
+    let mut hi = 0usize;
+    for &b in needle_lower {
+        while hi < haystack.len() && haystack[hi].to_ascii_lowercase() != b {
+            hi += 1;
+        }
+        if hi == haystack.len() {
+            return false;
+        }
+        hi += 1;
+    }
+    true
+}
+
 fn search_workspace_mentions(
     worktree_path: &std::path::Path,
     query: &str,
@@ -240,9 +266,9 @@ fn search_workspace_mentions(
         return Ok(Vec::new());
     }
 
-    let glob = format!("*{}*", escape_glob_fragment(trimmed));
+    let glob = fuzzy_glob_pattern(trimmed);
     let output = std::process::Command::new("rg")
-        .args(["--files", "--hidden", "--sort", "path", "--glob", &glob])
+        .args(["--files", "--hidden", "--sort", "path", "--iglob", &glob])
         .current_dir(worktree_path)
         .output()
         .context("failed to execute rg")?;
@@ -255,19 +281,41 @@ fn search_workspace_mentions(
         );
     }
 
-    let mut file_paths = Vec::new();
+    let max_rg_lines = 2000usize;
+    let max_files = 200usize;
+    let mut candidate_paths = Vec::new();
     for line in String::from_utf8_lossy(&output.stdout).lines() {
         let line = line.trim();
         if line.is_empty() {
             continue;
         }
-        file_paths.push(line.replace('\\', "/"));
-        if file_paths.len() >= 200 {
+        candidate_paths.push(line.replace('\\', "/"));
+        if candidate_paths.len() >= max_rg_lines {
             break;
         }
     }
 
-    let query_lower = trimmed.to_ascii_lowercase();
+    let needle_lower = trimmed.to_ascii_lowercase();
+    let needle_bytes = needle_lower.as_bytes();
+
+    let mut file_paths = Vec::new();
+    for file in candidate_paths.into_iter() {
+        let name = file.rsplit('/').next().unwrap_or(&file);
+        if !fuzzy_match_ascii(needle_bytes, name.as_bytes()) {
+            continue;
+        }
+        file_paths.push(file);
+        if file_paths.len() >= max_files {
+            break;
+        }
+    }
+
+    file_paths.sort_by(|a, b| {
+        let an = a.rsplit('/').next().unwrap_or(a).to_ascii_lowercase();
+        let bn = b.rsplit('/').next().unwrap_or(b).to_ascii_lowercase();
+        an.cmp(&bn).then_with(|| a.cmp(b))
+    });
+
     let mut folder_paths = std::collections::BTreeSet::new();
     for file in &file_paths {
         let path = std::path::Path::new(file);
@@ -277,7 +325,8 @@ fn search_workspace_mentions(
             if s.is_empty() || s == "." {
                 break;
             }
-            if s.to_ascii_lowercase().contains(&query_lower) {
+            let name = s.rsplit('/').next().unwrap_or(&s);
+            if fuzzy_match_ascii(needle_bytes, name.as_bytes()) {
                 folder_paths.insert(format!("{}/", s.trim_end_matches('/')));
             }
             parent = dir.parent();

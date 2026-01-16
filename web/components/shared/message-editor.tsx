@@ -105,6 +105,7 @@ export function MessageEditor({
   const [mentionItems, setMentionItems] = useState<MentionItemSnapshot[]>([])
   const mentionRequestIdRef = useRef(0)
   const mentionMenuRef = useRef<HTMLDivElement | null>(null)
+  const mentionSelectedIndexRef = useRef(0)
 
   const [historyIndex, setHistoryIndex] = useState(-1)
   const [savedInput, setSavedInput] = useState("")
@@ -153,14 +154,8 @@ export function MessageEditor({
 
   const filteredMentions = useMemo(() => {
     if (!showMentionMenu) return []
-    const q = mentionQuery.trim().toLowerCase()
-    if (!q) return []
-    const items = mentionItems.filter(
-      (item) => item.path.toLowerCase().includes(q) || item.name.toLowerCase().includes(q),
-    )
-    const folders = items.filter((i) => i.kind === "folder")
-    const files = items.filter((i) => i.kind === "file")
-    return [...folders, ...files].slice(0, 10)
+    if (!mentionQuery.trim()) return []
+    return mentionItems.slice(0, 10)
   }, [mentionItems, mentionQuery, showMentionMenu])
 
   useEffect(() => {
@@ -264,6 +259,7 @@ export function MessageEditor({
       setMentionQuery("")
       setMentionStartPos(null)
       setMentionSelectedIndex(0)
+      mentionSelectedIndexRef.current = 0
 
       window.setTimeout(() => {
         const el = textareaRef.current
@@ -313,6 +309,7 @@ export function MessageEditor({
             setShowMentionMenu(true)
             setMentionQuery(textAfterAt)
             setMentionSelectedIndex(0)
+            mentionSelectedIndexRef.current = 0
             setMentionStartPos(lastAtIndex)
             return
           }
@@ -356,17 +353,25 @@ export function MessageEditor({
       if (showMentionMenu) {
         if (e.key === "ArrowDown") {
           e.preventDefault()
-          setMentionSelectedIndex((i) => Math.min(i + 1, Math.max(filteredMentions.length - 1, 0)))
+          setMentionSelectedIndex((i) => {
+            const next = Math.min(i + 1, Math.max(filteredMentions.length - 1, 0))
+            mentionSelectedIndexRef.current = next
+            return next
+          })
           return
         }
         if (e.key === "ArrowUp") {
           e.preventDefault()
-          setMentionSelectedIndex((i) => Math.max(i - 1, 0))
+          setMentionSelectedIndex((i) => {
+            const next = Math.max(i - 1, 0)
+            mentionSelectedIndexRef.current = next
+            return next
+          })
           return
         }
         if (e.key === "Enter" || e.key === "Tab") {
           e.preventDefault()
-          const target = filteredMentions[mentionSelectedIndex]
+          const target = filteredMentions[mentionSelectedIndexRef.current]
           if (target) handleMentionSelect(target)
           return
         }
@@ -551,7 +556,10 @@ export function MessageEditor({
                     type="button"
                     data-testid="chat-mention-item"
                     data-index={idx}
-                    onMouseEnter={() => setMentionSelectedIndex(idx)}
+                    onMouseEnter={() => {
+                      mentionSelectedIndexRef.current = idx
+                      setMentionSelectedIndex(idx)
+                    }}
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => handleMentionSelect(item)}
                     className={cn(

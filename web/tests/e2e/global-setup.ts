@@ -39,6 +39,7 @@ export default async function globalSetup() {
   runGit(projectDir, ["checkout", "-b", "main"])
 
   writeFile(path.join(projectDir, "README.md"), "luban e2e project\n")
+  writeFile(path.join(projectDir, "docs", "README.md"), "luban e2e docs\n")
   runGit(projectDir, ["add", "."])
   runGit(projectDir, ["commit", "-m", "init"])
 
