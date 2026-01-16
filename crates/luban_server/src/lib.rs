@@ -4,6 +4,7 @@ use std::net::SocketAddr;
 
 pub mod engine;
 mod git_changes;
+mod mentions;
 pub mod pty;
 pub mod server;
 
