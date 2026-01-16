@@ -123,7 +123,7 @@ export function useLubanTransport(args: {
             if (event.type === "codex_check_ready") pending.resolve({ ok: event.ok, message: event.message })
             if (event.type === "codex_config_tree_ready") pending.resolve(event.tree)
             if (event.type === "codex_config_list_dir_ready")
-              pending.resolve({ path: event.path, offset: event.offset, entries: event.entries, hasMore: event.has_more })
+              pending.resolve({ path: event.path, entries: event.entries })
             if (event.type === "codex_config_file_ready") pending.resolve(event.contents)
             if (event.type === "codex_config_file_saved") pending.resolve(null)
           }

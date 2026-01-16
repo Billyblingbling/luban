@@ -41,10 +41,7 @@ export type LubanActions = {
   setSystemPromptTemplate: (kind: SystemTaskKind, template: string) => void
   checkCodex: () => Promise<{ ok: boolean; message: string | null }>
   getCodexConfigTree: () => Promise<CodexConfigEntrySnapshot[]>
-  listCodexConfigDir: (
-    path: string,
-    offset: number,
-  ) => Promise<{ path: string; offset: number; entries: CodexConfigEntrySnapshot[]; hasMore: boolean }>
+  listCodexConfigDir: (path: string) => Promise<{ path: string; entries: CodexConfigEntrySnapshot[] }>
   readCodexConfigFile: (path: string) => Promise<string>
   writeCodexConfigFile: (path: string, contents: string) => Promise<void>
 
@@ -225,14 +222,10 @@ export function createLubanActions(args: {
     return args.request<CodexConfigEntrySnapshot[]>({ type: "codex_config_tree" })
   }
 
-  function listCodexConfigDir(
-    path: string,
-    offset: number,
-  ): Promise<{ path: string; offset: number; entries: CodexConfigEntrySnapshot[]; hasMore: boolean }> {
-    return args.request<{ path: string; offset: number; entries: CodexConfigEntrySnapshot[]; hasMore: boolean }>({
+  function listCodexConfigDir(path: string): Promise<{ path: string; entries: CodexConfigEntrySnapshot[] }> {
+    return args.request<{ path: string; entries: CodexConfigEntrySnapshot[] }>({
       type: "codex_config_list_dir",
       path,
-      offset,
     })
   }
 

@@ -108,10 +108,7 @@ type LubanContextValue = {
   setSystemPromptTemplate: (kind: SystemTaskKind, template: string) => void
   checkCodex: () => Promise<{ ok: boolean; message: string | null }>
   getCodexConfigTree: () => Promise<CodexConfigEntrySnapshot[]>
-  listCodexConfigDir: (
-    path: string,
-    offset: number,
-  ) => Promise<{ path: string; offset: number; entries: CodexConfigEntrySnapshot[]; hasMore: boolean }>
+  listCodexConfigDir: (path: string) => Promise<{ path: string; entries: CodexConfigEntrySnapshot[] }>
   readCodexConfigFile: (path: string) => Promise<string>
   writeCodexConfigFile: (path: string, contents: string) => Promise<void>
 }

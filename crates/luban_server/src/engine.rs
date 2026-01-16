@@ -844,7 +844,7 @@ impl Engine {
                     return;
                 }
 
-                if let luban_api::ClientAction::CodexConfigListDir { path, offset } = &action {
+                if let luban_api::ClientAction::CodexConfigListDir { path } = &action {
                     fn map_entry(
                         entry: luban_domain::CodexConfigEntry,
                     ) -> luban_api::CodexConfigEntrySnapshot {
@@ -868,11 +868,10 @@ impl Engine {
                     let request_id = request_id.clone();
                     let rev = self.rev;
                     let path = path.clone();
-                    let offset = *offset;
                     tokio::spawn(async move {
                         let path_for_task = path.clone();
                         let result = tokio::task::spawn_blocking(move || {
-                            services.codex_config_list_dir(path_for_task, offset)
+                            services.codex_config_list_dir(path_for_task)
                         })
                         .await
                         .ok()
@@ -881,7 +880,7 @@ impl Engine {
                         });
 
                         match result {
-                            Ok((entries, has_more)) => {
+                            Ok(entries) => {
                                 let entries = entries.into_iter().map(map_entry).collect();
                                 let _ = events.send(WsServerMessage::Event {
                                     rev,
@@ -889,9 +888,7 @@ impl Engine {
                                         luban_api::ServerEvent::CodexConfigListDirReady {
                                             request_id,
                                             path,
-                                            offset,
                                             entries,
-                                            has_more,
                                         },
                                     ),
                                 });

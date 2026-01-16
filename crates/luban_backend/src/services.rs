@@ -1675,18 +1675,12 @@ impl ProjectWorkspaceService for GitWorkspaceService {
         result.map_err(|e| format!("{e:#}"))
     }
 
-    fn codex_config_list_dir(
-        &self,
-        path: String,
-        offset: usize,
-    ) -> Result<(Vec<CodexConfigEntry>, bool), String> {
-        const PAGE_SIZE: usize = 256;
-
-        let result: anyhow::Result<(Vec<CodexConfigEntry>, bool)> = (|| {
+    fn codex_config_list_dir(&self, path: String) -> Result<Vec<CodexConfigEntry>, String> {
+        let result: anyhow::Result<Vec<CodexConfigEntry>> = (|| {
             let root = resolve_codex_root()?;
 
             if !root.exists() {
-                return Ok((Vec::new(), false));
+                return Ok(Vec::new());
             }
 
             let rel = path.trim();
@@ -1720,8 +1714,6 @@ impl ProjectWorkspaceService for GitWorkspaceService {
             }
 
             let mut out = Vec::new();
-            let mut has_more = false;
-            let mut seen = 0usize;
             let entries = std::fs::read_dir(&abs)
                 .with_context(|| format!("failed to read directory {}", abs.display()))?;
             for entry in entries {
@@ -1745,16 +1737,6 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                     continue;
                 }
 
-                if seen < offset {
-                    seen += 1;
-                    continue;
-                }
-
-                if out.len() >= PAGE_SIZE {
-                    has_more = true;
-                    break;
-                }
-
                 let rel_child = rel_path.join(&name);
                 let child_path = rel_to_string(&rel_child);
 
@@ -1765,7 +1747,6 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                         kind: CodexConfigEntryKind::Folder,
                         children: Vec::new(),
                     });
-                    seen += 1;
                 } else if file_type.is_file() {
                     out.push(CodexConfigEntry {
                         path: child_path,
@@ -1773,11 +1754,20 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                         kind: CodexConfigEntryKind::File,
                         children: Vec::new(),
                     });
-                    seen += 1;
                 }
             }
 
-            Ok((out, has_more))
+            out.sort_by(|a, b| match (a.kind, b.kind) {
+                (CodexConfigEntryKind::Folder, CodexConfigEntryKind::File) => {
+                    std::cmp::Ordering::Less
+                }
+                (CodexConfigEntryKind::File, CodexConfigEntryKind::Folder) => {
+                    std::cmp::Ordering::Greater
+                }
+                _ => a.name.cmp(&b.name),
+            });
+
+            Ok(out)
         })();
 
         result.map_err(|e| format!("{e:#}"))
@@ -2079,14 +2069,12 @@ mod tests {
         let tree = ProjectWorkspaceService::codex_config_tree(&service)
             .expect("codex_config_tree should succeed");
 
-        let (page, has_more) =
-            ProjectWorkspaceService::codex_config_list_dir(&service, "cache".to_owned(), 0)
-                .expect("codex_config_list_dir should succeed");
-        assert!(has_more, "cache dir should have more pages");
+        let entries = ProjectWorkspaceService::codex_config_list_dir(&service, "cache".to_owned())
+            .expect("codex_config_list_dir should succeed");
         assert!(
-            page.len() <= 256,
-            "expected list_dir to cap page size (got {})",
-            page.len()
+            entries.len() >= 3000,
+            "expected list_dir to include all files (got {})",
+            entries.len()
         );
 
         if let Some(value) = prev {
