@@ -210,4 +210,9 @@
   body {
     @apply bg-background text-foreground;
   }
+
+  .xterm .xterm-viewport {
+    overflow-y: auto !important;
+    background-color: transparent !important;
+  }
 }

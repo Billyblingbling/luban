@@ -189,3 +189,20 @@ test("terminal does not add extra padding above the viewport", async ({ page }) 
   expect(padding.bottom).toBe("0px")
   expect(padding.left).toBe("0px")
 })
+
+test("terminal viewport uses auto scrollbar behavior", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  const terminal = page.getByTestId("pty-terminal")
+  await expect
+    .poll(async () => await terminal.locator("canvas").count(), { timeout: 20_000 })
+    .toBeGreaterThan(0)
+
+  const overflowY = await terminal.evaluate((outer) => {
+    const viewport = outer.querySelector(".xterm-viewport") as HTMLElement | null
+    if (!viewport) return null
+    return getComputedStyle(viewport).overflowY
+  })
+
+  expect(overflowY).toBe("auto")
+})
