@@ -410,7 +410,16 @@ export function MessageEditor({
         }
       }
 
-      if (e.key === "Enter" && !e.shiftKey) {
+      const isEnter =
+        e.key === "Enter" ||
+        e.code === "Enter" ||
+        e.code === "NumpadEnter" ||
+        // Some embedded WebViews report an unhelpful `key` but still populate legacy fields.
+        (e as unknown as { keyCode?: number; which?: number }).keyCode === 13 ||
+        (e as unknown as { keyCode?: number; which?: number }).which === 13
+
+      if (isEnter && !e.shiftKey) {
+        if (e.nativeEvent.isComposing) return
         e.preventDefault()
         if (primaryAction.disabled) return
         primaryAction.onClick()

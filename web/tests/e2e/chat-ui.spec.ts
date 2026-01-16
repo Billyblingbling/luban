@@ -44,6 +44,20 @@ test("long tokens wrap without horizontal overflow", async ({ page }) => {
   expect(overflow).toBeLessThanOrEqual(1)
 })
 
+test("pressing enter submits a user message", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  const runId = Math.random().toString(16).slice(2)
+  const marker = `e2e-enter-${runId}`
+
+  await page.getByTestId("chat-input").fill(marker)
+  await page.getByTestId("chat-input").press("Enter")
+
+  const bubble = page.getByTestId("user-message-bubble").filter({ hasText: marker }).first()
+  await expect(bubble).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByTestId("chat-input")).toHaveValue("")
+})
+
 test("scroll-to-bottom button appears only when away from bottom", async ({ page }) => {
   await ensureWorkspace(page)
 
