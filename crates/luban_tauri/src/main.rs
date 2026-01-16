@@ -29,6 +29,19 @@ fn resolve_web_dist(app: &tauri::AppHandle) -> PathBuf {
     PathBuf::from("web/out")
 }
 
+fn resolve_server_addr() -> anyhow::Result<SocketAddr> {
+    // Use a random available port by default.
+    //
+    // This avoids launch failures when another Luban instance is already running
+    // (common during development and when testing release bundles).
+    let default_addr = "127.0.0.1:0";
+    let addr: SocketAddr = std::env::var("LUBAN_SERVER_ADDR")
+        .unwrap_or_else(|_| default_addr.to_owned())
+        .parse()
+        .context("invalid LUBAN_SERVER_ADDR")?;
+    Ok(addr)
+}
+
 fn main() -> anyhow::Result<()> {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![open_external])
@@ -40,10 +53,7 @@ fn main() -> anyhow::Result<()> {
             }
 
             let server = tauri::async_runtime::block_on(async {
-                let addr: SocketAddr = std::env::var("LUBAN_SERVER_ADDR")
-                    .unwrap_or_else(|_| "127.0.0.1:8421".to_owned())
-                    .parse()
-                    .context("invalid LUBAN_SERVER_ADDR")?;
+                let addr = resolve_server_addr()?;
                 luban_server::start_server(addr).await
             })
             .context("failed to start luban_server")?;
@@ -66,4 +76,25 @@ fn main() -> anyhow::Result<()> {
         .context("tauri runtime failed")?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn server_addr_defaults_to_random_port() {
+        let prev = std::env::var_os("LUBAN_SERVER_ADDR");
+        unsafe {
+            std::env::remove_var("LUBAN_SERVER_ADDR");
+        }
+        let addr = resolve_server_addr().expect("default addr must parse");
+        assert_eq!(addr.ip().to_string(), "127.0.0.1");
+        assert_eq!(addr.port(), 0);
+        if let Some(value) = prev {
+            unsafe {
+                std::env::set_var("LUBAN_SERVER_ADDR", value);
+            }
+        }
+    }
 }

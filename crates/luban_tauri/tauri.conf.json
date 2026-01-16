@@ -12,7 +12,10 @@
     "frontendDist": "web_stub"
   },
   "bundle": {
-    "active": false,
+    "active": true,
+    "resources": {
+      "../../web/out/": "out/"
+    },
     "icon": [
       "icons/icon.icns",
       "icons/icon.png"
