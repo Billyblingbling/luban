@@ -98,12 +98,15 @@ function WorktreePreviewPanel({
   const messages: Message[] = useMemo(() => buildMessages(conversation), [conversation])
   const messageHistory = useMemo(() => {
     const entries = conversation?.entries ?? []
+    const isUserMessage = (
+      entry: (typeof entries)[number],
+    ): entry is Extract<(typeof entries)[number], { type: "user_message" }> => entry.type === "user_message"
     const items = entries
-      .filter((entry) => entry.type === "user_message")
+      .filter(isUserMessage)
       .map((entry) => entry.text)
       .filter((text) => text.trim().length > 0)
     return items.slice(-50)
-  }, [conversation?.rev])
+  }, [conversation?.entries])
 
   useEffect(() => {
     void fetchCodexCustomPrompts()

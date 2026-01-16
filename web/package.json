@@ -78,6 +78,8 @@
     "@types/pngjs": "^6.0.5",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "eslint": "^9.39.2",
+    "eslint-config-next": "16.0.10",
     "pngjs": "^7.0.0",
     "postcss": "^8.5",
     "tailwindcss": "^4.1.9",

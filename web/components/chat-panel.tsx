@@ -52,6 +52,7 @@ import { MessageEditor, type ComposerAttachment as EditorComposerAttachment } fr
 import { AgentRunningCard, type AgentRunningStatus } from "@/components/shared/agent-running-card"
 import { openSettingsPanel } from "@/lib/open-settings"
 import { computeProjectDisplayNames } from "@/lib/project-display-names"
+import { focusChatInput } from "@/lib/focus-chat-input"
 
 interface ChatTab {
   id: string
@@ -201,12 +202,15 @@ export function ChatPanel({
   }, [messages])
   const messageHistory = useMemo(() => {
     const entries = conversation?.entries ?? []
+    const isUserMessage = (
+      entry: (typeof entries)[number],
+    ): entry is Extract<(typeof entries)[number], { type: "user_message" }> => entry.type === "user_message"
     const items = entries
-      .filter((entry) => entry.type === "user_message")
+      .filter(isUserMessage)
       .map((entry) => entry.text)
       .filter((text) => text.trim().length > 0)
     return items.slice(-50)
-  }, [conversation?.rev])
+  }, [conversation?.entries])
 
   useEffect(() => {
     void fetchCodexCustomPrompts()

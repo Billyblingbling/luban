@@ -2,7 +2,7 @@
 
 import type { ElementType, MouseEvent } from "react"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTheme } from "next-themes"
 import {
   Check,
@@ -933,7 +933,7 @@ function WorkspacePreviewWithFonts({
                     <span className="text-muted-foreground">{"{"}</span>
                     {"\n"}
                     {"    "}
-                    <span className="text-[#0a3069] dark:text-[#a5d6ff]">"The quick brown fox"</span>
+                    <span className="text-[#0a3069] dark:text-[#a5d6ff]">&quot;The quick brown fox&quot;</span>
                     <span className="text-muted-foreground">.to_string()</span>
                     {"\n"}
                     <span className="text-muted-foreground">{"}"}</span>
@@ -1096,6 +1096,20 @@ function CodexSettings({
       .catch((err) => toast.error(err instanceof Error ? err.message : String(err)))
   }, [enabled, getCodexConfigTree])
 
+  const handleSelectFile = useCallback(
+    async (file: CodexSelectedFile) => {
+      setSelectedFile(file)
+      if (fileContents[file.path] != null) return
+      try {
+        const contents = await readCodexConfigFile(file.path)
+        setFileContents((prev) => ({ ...prev, [file.path]: contents }))
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : String(err))
+      }
+    },
+    [fileContents, readCodexConfigFile],
+  )
+
   useEffect(() => {
     if (!enabled) return
     const target = initialSelectedFilePath?.trim()
@@ -1136,7 +1150,7 @@ function CodexSettings({
 
     initialSelectionRef.current = target
     void handleSelectFile({ path: entry.path, name: entry.name })
-  }, [enabled, initialSelectedFilePath, selectedFile?.path, tree])
+  }, [enabled, handleSelectFile, initialSelectedFilePath, selectedFile?.path, tree])
 
   useEffect(() => {
     if (!autoFocusEditor) return
@@ -1198,17 +1212,6 @@ function CodexSettings({
       else next.add(path)
       return next
     })
-  }
-
-  const handleSelectFile = async (file: CodexSelectedFile) => {
-    setSelectedFile(file)
-    if (fileContents[file.path] != null) return
-    try {
-      const contents = await readCodexConfigFile(file.path)
-      setFileContents((prev) => ({ ...prev, [file.path]: contents }))
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
-    }
   }
 
   const handleContentChange = (content: string) => {

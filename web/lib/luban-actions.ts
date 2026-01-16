@@ -76,6 +76,9 @@ export type LubanActions = {
   ) => void
   cancelAgentTurn: () => void
 
+  renameWorkspaceBranch: (workspaceId: WorkspaceId, branchName: string) => void
+  aiRenameWorkspaceBranch: (workspaceId: WorkspaceId, threadId: WorkspaceThreadId) => void
+
   setChatModel: (workspaceId: WorkspaceId, threadId: WorkspaceThreadId, modelId: string) => void
   setThinkingEffort: (workspaceId: WorkspaceId, threadId: WorkspaceThreadId, effort: ThinkingEffort) => void
   setAppearanceTheme: (theme: AppearanceTheme) => void
