@@ -165,3 +165,27 @@ test("terminal canvas stays within container bounds", async ({ page }) => {
   expect(rects.canvasRect.right).toBeLessThanOrEqual(rects.outerRect.right + tol)
   expect(rects.canvasRect.bottom).toBeLessThanOrEqual(rects.outerRect.bottom + tol)
 })
+
+test("terminal does not add extra padding above the viewport", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  const terminal = page.getByTestId("pty-terminal")
+  await expect
+    .poll(async () => await terminal.locator("canvas").count(), { timeout: 20_000 })
+    .toBeGreaterThan(0)
+
+  const padding = await terminal.evaluate((el) => {
+    const style = getComputedStyle(el as HTMLElement)
+    return {
+      top: style.paddingTop,
+      right: style.paddingRight,
+      bottom: style.paddingBottom,
+      left: style.paddingLeft,
+    }
+  })
+
+  expect(padding.top).toBe("0px")
+  expect(padding.right).toBe("0px")
+  expect(padding.bottom).toBe("0px")
+  expect(padding.left).toBe("0px")
+})
