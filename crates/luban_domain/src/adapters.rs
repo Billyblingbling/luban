@@ -356,6 +356,14 @@ pub trait ProjectWorkspaceService: Send + Sync {
         Err("unimplemented".to_owned())
     }
 
+    fn codex_config_list_dir(
+        &self,
+        _path: String,
+        _offset: usize,
+    ) -> Result<(Vec<CodexConfigEntry>, bool), String> {
+        Err("unimplemented".to_owned())
+    }
+
     fn codex_config_read_file(&self, _path: String) -> Result<String, String> {
         Err("unimplemented".to_owned())
     }

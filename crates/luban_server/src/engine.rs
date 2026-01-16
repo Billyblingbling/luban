@@ -844,6 +844,71 @@ impl Engine {
                     return;
                 }
 
+                if let luban_api::ClientAction::CodexConfigListDir { path, offset } = &action {
+                    fn map_entry(
+                        entry: luban_domain::CodexConfigEntry,
+                    ) -> luban_api::CodexConfigEntrySnapshot {
+                        luban_api::CodexConfigEntrySnapshot {
+                            path: entry.path,
+                            name: entry.name,
+                            kind: match entry.kind {
+                                luban_domain::CodexConfigEntryKind::File => {
+                                    luban_api::CodexConfigEntryKind::File
+                                }
+                                luban_domain::CodexConfigEntryKind::Folder => {
+                                    luban_api::CodexConfigEntryKind::Folder
+                                }
+                            },
+                            children: entry.children.into_iter().map(map_entry).collect(),
+                        }
+                    }
+
+                    let services = self.services.clone();
+                    let events = self.events.clone();
+                    let request_id = request_id.clone();
+                    let rev = self.rev;
+                    let path = path.clone();
+                    let offset = *offset;
+                    tokio::spawn(async move {
+                        let path_for_task = path.clone();
+                        let result = tokio::task::spawn_blocking(move || {
+                            services.codex_config_list_dir(path_for_task, offset)
+                        })
+                        .await
+                        .ok()
+                        .unwrap_or_else(|| {
+                            Err("failed to join codex config list dir task".to_owned())
+                        });
+
+                        match result {
+                            Ok((entries, has_more)) => {
+                                let entries = entries.into_iter().map(map_entry).collect();
+                                let _ = events.send(WsServerMessage::Event {
+                                    rev,
+                                    event: Box::new(
+                                        luban_api::ServerEvent::CodexConfigListDirReady {
+                                            request_id,
+                                            path,
+                                            offset,
+                                            entries,
+                                            has_more,
+                                        },
+                                    ),
+                                });
+                            }
+                            Err(message) => {
+                                let _ = events.send(WsServerMessage::Error {
+                                    request_id: Some(request_id),
+                                    message,
+                                });
+                            }
+                        }
+                    });
+
+                    let _ = reply.send(Ok(self.rev));
+                    return;
+                }
+
                 if let luban_api::ClientAction::CodexConfigReadFile { path } = &action {
                     let services = self.services.clone();
                     let events = self.events.clone();
@@ -3089,6 +3154,7 @@ fn map_client_action(action: luban_api::ClientAction) -> Option<Action> {
         }
         luban_api::ClientAction::CodexCheck
         | luban_api::ClientAction::CodexConfigTree
+        | luban_api::ClientAction::CodexConfigListDir { .. }
         | luban_api::ClientAction::CodexConfigReadFile { .. }
         | luban_api::ClientAction::CodexConfigWriteFile { .. } => None,
     }

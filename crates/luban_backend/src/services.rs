@@ -1620,99 +1620,164 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                     .replace(std::path::MAIN_SEPARATOR, "/")
             }
 
-            fn walk_dir(
-                dir: &std::path::Path,
-                rel: &std::path::Path,
-                remaining: &mut usize,
-                depth: usize,
-            ) -> anyhow::Result<Vec<CodexConfigEntry>> {
-                if depth > 16 {
-                    return Ok(Vec::new());
+            let mut entries = std::fs::read_dir(&root)
+                .with_context(|| format!("failed to read directory {}", root.display()))?
+                .filter_map(|entry| entry.ok())
+                .collect::<Vec<_>>();
+
+            entries.sort_by_key(|entry| entry.file_name());
+
+            let mut out = Vec::new();
+            for entry in entries {
+                let file_type = entry.file_type().context("failed to stat entry")?;
+                if file_type.is_symlink() {
+                    continue;
                 }
 
-                let mut entries = std::fs::read_dir(dir)
-                    .with_context(|| format!("failed to read directory {}", dir.display()))?
-                    .filter_map(|entry| entry.ok())
-                    .collect::<Vec<_>>();
-
-                entries.sort_by_key(|entry| entry.file_name());
-
-                let mut out = Vec::new();
-                for entry in entries {
-                    if *remaining == 0 {
-                        break;
-                    }
-                    *remaining -= 1;
-
-                    let file_type = entry.file_type().context("failed to stat entry")?;
-                    if file_type.is_symlink() {
-                        continue;
-                    }
-
-                    let name = entry.file_name().to_string_lossy().to_string();
-                    if name.is_empty() {
-                        continue;
-                    }
-
-                    // Only expose Codex config + user-defined prompts in the UI.
-                    //
-                    // Some Codex installations may accumulate large caches or runtime files under
-                    // ~/.codex; scanning everything makes Settings unusable and can spam errors.
-                    //
-                    // Keep the tree intentionally small and stable:
-                    // - root: *.toml
-                    // - prompts/: *.md|*.txt (recursively)
-                    let is_root = rel.as_os_str().is_empty();
-                    if is_root {
-                        let is_prompts_dir = file_type.is_dir() && name == "prompts";
-                        let is_toml_file = file_type.is_file() && name.ends_with(".toml");
-                        if !is_prompts_dir && !is_toml_file {
-                            continue;
-                        }
-                    } else if file_type.is_file() {
-                        let name_lower = name.to_ascii_lowercase();
-                        if !(name_lower.ends_with(".md") || name_lower.ends_with(".txt")) {
-                            continue;
-                        }
-                    }
-
-                    let rel_child = rel.join(&name);
-                    let path = rel_to_string(&rel_child);
-                    let abs = entry.path();
-
-                    if file_type.is_dir() {
-                        let children = walk_dir(&abs, &rel_child, remaining, depth + 1)?;
-                        out.push(CodexConfigEntry {
-                            path,
-                            name,
-                            kind: CodexConfigEntryKind::Folder,
-                            children,
-                        });
-                    } else if file_type.is_file() {
-                        out.push(CodexConfigEntry {
-                            path,
-                            name,
-                            kind: CodexConfigEntryKind::File,
-                            children: Vec::new(),
-                        });
-                    }
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.is_empty() {
+                    continue;
                 }
 
-                out.sort_by(|a, b| match (a.kind, b.kind) {
-                    (CodexConfigEntryKind::Folder, CodexConfigEntryKind::File) => {
-                        std::cmp::Ordering::Less
-                    }
-                    (CodexConfigEntryKind::File, CodexConfigEntryKind::Folder) => {
-                        std::cmp::Ordering::Greater
-                    }
-                    _ => a.name.cmp(&b.name),
-                });
+                let rel_child = std::path::Path::new("").join(&name);
+                let path = rel_to_string(&rel_child);
 
-                Ok(out)
+                if file_type.is_dir() {
+                    out.push(CodexConfigEntry {
+                        path,
+                        name,
+                        kind: CodexConfigEntryKind::Folder,
+                        children: Vec::new(),
+                    });
+                } else if file_type.is_file() {
+                    out.push(CodexConfigEntry {
+                        path,
+                        name,
+                        kind: CodexConfigEntryKind::File,
+                        children: Vec::new(),
+                    });
+                }
             }
 
-            let mut remaining = 2048usize;
-            walk_dir(&root, std::path::Path::new(""), &mut remaining, 0)
+            out.sort_by(|a, b| match (a.kind, b.kind) {
+                (CodexConfigEntryKind::Folder, CodexConfigEntryKind::File) => {
+                    std::cmp::Ordering::Less
+                }
+                (CodexConfigEntryKind::File, CodexConfigEntryKind::Folder) => {
+                    std::cmp::Ordering::Greater
+                }
+                _ => a.name.cmp(&b.name),
+            });
+
+            Ok(out)
+        })();
+
+        result.map_err(|e| format!("{e:#}"))
+    }
+
+    fn codex_config_list_dir(
+        &self,
+        path: String,
+        offset: usize,
+    ) -> Result<(Vec<CodexConfigEntry>, bool), String> {
+        const PAGE_SIZE: usize = 256;
+
+        let result: anyhow::Result<(Vec<CodexConfigEntry>, bool)> = (|| {
+            let root = resolve_codex_root()?;
+
+            if !root.exists() {
+                return Ok((Vec::new(), false));
+            }
+
+            let rel = path.trim();
+            if rel.starts_with('/') {
+                return Err(anyhow!("path must be relative"));
+            }
+            if rel.contains('\\') {
+                return Err(anyhow!("invalid path separator"));
+            }
+
+            let mut rel_path = PathBuf::new();
+            if !rel.is_empty() {
+                for segment in rel.split('/') {
+                    if segment.is_empty() || segment == "." || segment == ".." {
+                        return Err(anyhow!("invalid path segment"));
+                    }
+                    rel_path.push(segment);
+                }
+            }
+
+            let abs = root.join(&rel_path);
+            let meta = std::fs::metadata(&abs)
+                .with_context(|| format!("failed to stat {}", abs.display()))?;
+            if !meta.is_dir() {
+                return Err(anyhow!("not a directory: {}", abs.display()));
+            }
+
+            fn rel_to_string(rel: &std::path::Path) -> String {
+                rel.to_string_lossy()
+                    .replace(std::path::MAIN_SEPARATOR, "/")
+            }
+
+            let mut out = Vec::new();
+            let mut has_more = false;
+            let mut seen = 0usize;
+            let entries = std::fs::read_dir(&abs)
+                .with_context(|| format!("failed to read directory {}", abs.display()))?;
+            for entry in entries {
+                let entry = match entry {
+                    Ok(entry) => entry,
+                    Err(_) => continue,
+                };
+
+                let file_type = entry.file_type().context("failed to stat entry")?;
+                if file_type.is_symlink() {
+                    continue;
+                }
+
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.is_empty() {
+                    continue;
+                }
+
+                let is_visible = file_type.is_dir() || file_type.is_file();
+                if !is_visible {
+                    continue;
+                }
+
+                if seen < offset {
+                    seen += 1;
+                    continue;
+                }
+
+                if out.len() >= PAGE_SIZE {
+                    has_more = true;
+                    break;
+                }
+
+                let rel_child = rel_path.join(&name);
+                let child_path = rel_to_string(&rel_child);
+
+                if file_type.is_dir() {
+                    out.push(CodexConfigEntry {
+                        path: child_path,
+                        name,
+                        kind: CodexConfigEntryKind::Folder,
+                        children: Vec::new(),
+                    });
+                    seen += 1;
+                } else if file_type.is_file() {
+                    out.push(CodexConfigEntry {
+                        path: child_path,
+                        name,
+                        kind: CodexConfigEntryKind::File,
+                        children: Vec::new(),
+                    });
+                    seen += 1;
+                }
+            }
+
+            Ok((out, has_more))
         })();
 
         result.map_err(|e| format!("{e:#}"))
@@ -1967,7 +2032,7 @@ mod tests {
     }
 
     #[test]
-    fn codex_config_tree_ignores_large_unrelated_dirs() {
+    fn codex_config_tree_is_shallow_and_codex_config_list_dir_pages() {
         let _guard = lock_env();
 
         let unique = SystemTime::now()
@@ -2014,6 +2079,16 @@ mod tests {
         let tree = ProjectWorkspaceService::codex_config_tree(&service)
             .expect("codex_config_tree should succeed");
 
+        let (page, has_more) =
+            ProjectWorkspaceService::codex_config_list_dir(&service, "cache".to_owned(), 0)
+                .expect("codex_config_list_dir should succeed");
+        assert!(has_more, "cache dir should have more pages");
+        assert!(
+            page.len() <= 256,
+            "expected list_dir to cap page size (got {})",
+            page.len()
+        );
+
         if let Some(value) = prev {
             unsafe {
                 std::env::set_var(paths::LUBAN_CODEX_ROOT_ENV, value);
@@ -2042,12 +2117,8 @@ mod tests {
             "tree should include prompts dir"
         );
         assert!(
-            paths.iter().any(|p| p == "prompts/hello.md"),
-            "tree should include prompt file"
-        );
-        assert!(
-            paths.iter().all(|p| !p.starts_with("cache/")),
-            "tree should ignore unrelated cache directory"
+            paths.iter().any(|p| p == "cache"),
+            "tree should include cache directory (shallow listing)"
         );
 
         drop(service);

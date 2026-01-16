@@ -108,6 +108,10 @@ type LubanContextValue = {
   setSystemPromptTemplate: (kind: SystemTaskKind, template: string) => void
   checkCodex: () => Promise<{ ok: boolean; message: string | null }>
   getCodexConfigTree: () => Promise<CodexConfigEntrySnapshot[]>
+  listCodexConfigDir: (
+    path: string,
+    offset: number,
+  ) => Promise<{ path: string; offset: number; entries: CodexConfigEntrySnapshot[]; hasMore: boolean }>
   readCodexConfigFile: (path: string) => Promise<string>
   writeCodexConfigFile: (path: string, contents: string) => Promise<void>
 }
@@ -270,6 +274,7 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     setSystemPromptTemplate: actions.setSystemPromptTemplate,
     checkCodex: actions.checkCodex,
     getCodexConfigTree: actions.getCodexConfigTree,
+    listCodexConfigDir: actions.listCodexConfigDir,
     readCodexConfigFile: actions.readCodexConfigFile,
     writeCodexConfigFile: actions.writeCodexConfigFile,
   }

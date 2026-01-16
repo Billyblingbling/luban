@@ -356,6 +356,7 @@ export type ClientAction =
   | { type: "system_prompt_template_changed"; kind: SystemTaskKind; template: string }
   | { type: "codex_check" }
   | { type: "codex_config_tree" }
+  | { type: "codex_config_list_dir"; path: string; offset: number }
   | { type: "codex_config_read_file"; path: string }
   | { type: "codex_config_write_file"; path: string; contents: string }
 
@@ -370,6 +371,14 @@ export type ServerEvent =
   | { type: "task_executed"; request_id: string; result: TaskExecuteResult }
   | { type: "codex_check_ready"; request_id: string; ok: boolean; message: string | null }
   | { type: "codex_config_tree_ready"; request_id: string; tree: CodexConfigEntrySnapshot[] }
+  | {
+      type: "codex_config_list_dir_ready"
+      request_id: string
+      path: string
+      offset: number
+      entries: CodexConfigEntrySnapshot[]
+      has_more: boolean
+    }
   | { type: "codex_config_file_ready"; request_id: string; path: string; contents: string }
   | { type: "codex_config_file_saved"; request_id: string; path: string }
 

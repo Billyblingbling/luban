@@ -996,21 +996,32 @@ function CodexConfigTree({
   level = 0,
   selectedPath,
   expandedFolders,
+  loadingDirs,
+  childrenForPath,
+  hasMoreForPath,
   onSelectFile,
   onToggleFolder,
+  onLoadMore,
 }: {
   entries: CodexConfigEntrySnapshot[]
   level?: number
   selectedPath: string | null
   expandedFolders: Set<string>
+  loadingDirs: Set<string>
+  childrenForPath: (path: string) => CodexConfigEntrySnapshot[]
+  hasMoreForPath: (path: string) => boolean
   onSelectFile: (file: CodexSelectedFile) => void
   onToggleFolder: (path: string) => void
+  onLoadMore: (path: string) => void
 }) {
   return (
     <div className="space-y-0.5">
       {entries.map((entry) => {
         const isFolder = entry.kind === "folder"
         const isExpanded = isFolder && expandedFolders.has(entry.path)
+        const isLoading = isFolder && loadingDirs.has(entry.path)
+        const children = isFolder ? childrenForPath(entry.path) : []
+        const hasMore = isFolder ? hasMoreForPath(entry.path) : false
         const isSelected = selectedPath === entry.path
         const { icon: Icon, className } = codexEntryIcon(entry)
 
@@ -1044,15 +1055,42 @@ function CodexConfigTree({
               <span className="truncate">{entry.name}</span>
             </button>
 
-            {isFolder && isExpanded && entry.children.length > 0 && (
+            {isFolder && isExpanded && (
               <CodexConfigTree
-                entries={entry.children}
+                entries={children}
                 level={level + 1}
                 selectedPath={selectedPath}
                 expandedFolders={expandedFolders}
+                loadingDirs={loadingDirs}
+                childrenForPath={childrenForPath}
+                hasMoreForPath={hasMoreForPath}
                 onSelectFile={onSelectFile}
                 onToggleFolder={onToggleFolder}
+                onLoadMore={onLoadMore}
               />
+            )}
+
+            {isFolder && isExpanded && isLoading && children.length === 0 && (
+              <div
+                className="w-full flex items-center gap-1.5 px-2 py-1 rounded text-left text-xs text-muted-foreground"
+                style={{ paddingLeft: `${8 + (level + 1) * 12}px` }}
+              >
+                <Loader2 className="w-3 h-3 animate-spin" />
+                <span>Loading…</span>
+              </div>
+            )}
+
+            {isFolder && isExpanded && hasMore && (
+              <button
+                onClick={() => onLoadMore(entry.path)}
+                className={cn(
+                  "w-full flex items-center gap-1.5 px-2 py-1 rounded text-left transition-colors text-xs",
+                  "text-muted-foreground hover:text-foreground hover:bg-accent",
+                )}
+                style={{ paddingLeft: `${8 + (level + 1) * 12}px` }}
+              >
+                <span>Load more</span>
+              </button>
             )}
           </div>
         )
@@ -1068,14 +1106,15 @@ function CodexSettings({
   initialSelectedFilePath?: string | null
   autoFocusEditor?: boolean
 }) {
-  const { app, setCodexEnabled, checkCodex, getCodexConfigTree, readCodexConfigFile, writeCodexConfigFile } =
-    useLuban()
+  const { app, setCodexEnabled, checkCodex, listCodexConfigDir, readCodexConfigFile, writeCodexConfigFile } = useLuban()
   const [enabled, setEnabled] = useState(true)
   const [checkStatus, setCheckStatus] = useState<CheckStatus>("idle")
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle")
-  const [tree, setTree] = useState<CodexConfigEntrySnapshot[]>([])
   const [selectedFile, setSelectedFile] = useState<CodexSelectedFile | null>(null)
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set(["skills"]))
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set())
+  const [dirEntries, setDirEntries] = useState<Record<string, CodexConfigEntrySnapshot[]>>({})
+  const [dirHasMore, setDirHasMore] = useState<Record<string, boolean>>({})
+  const [loadingDirs, setLoadingDirs] = useState<Set<string>>(() => new Set())
   const [fileContents, setFileContents] = useState<Record<string, string>>({})
   const saveTimeoutRef = useRef<number | null>(null)
   const saveIdleTimeoutRef = useRef<number | null>(null)
@@ -1089,12 +1128,41 @@ function CodexSettings({
     setEnabled(next)
   }, [app?.rev])
 
+  const loadDir = useCallback(
+    async (path: string, offset: number, append: boolean): Promise<{ entries: CodexConfigEntrySnapshot[]; hasMore: boolean }> => {
+      setLoadingDirs((prev) => {
+        const next = new Set(prev)
+        next.add(path)
+        return next
+      })
+      try {
+        const res = await listCodexConfigDir(path, offset)
+        setDirEntries((prev) => {
+          const existing = prev[path] ?? []
+          const nextEntries = append ? [...existing, ...res.entries] : res.entries
+          return { ...prev, [path]: nextEntries }
+        })
+        setDirHasMore((prev) => ({ ...prev, [path]: res.hasMore }))
+        return { entries: res.entries, hasMore: res.hasMore }
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : String(err))
+        setDirHasMore((prev) => ({ ...prev, [path]: false }))
+        return { entries: [], hasMore: false }
+      } finally {
+        setLoadingDirs((prev) => {
+          const next = new Set(prev)
+          next.delete(path)
+          return next
+        })
+      }
+    },
+    [listCodexConfigDir],
+  )
+
   useEffect(() => {
     if (!enabled) return
-    void getCodexConfigTree()
-      .then((entries) => setTree(entries))
-      .catch((err) => toast.error(err instanceof Error ? err.message : String(err)))
-  }, [enabled, getCodexConfigTree])
+    void loadDir("", 0, false)
+  }, [enabled, loadDir])
 
   const handleSelectFile = useCallback(
     async (file: CodexSelectedFile) => {
@@ -1114,43 +1182,47 @@ function CodexSettings({
     if (!enabled) return
     const target = initialSelectedFilePath?.trim()
     if (!target) return
-    if (tree.length === 0) return
     if (selectedFile?.path === target) return
     if (initialSelectionRef.current === target) return
-
-    const findEntry = (
-      entries: CodexConfigEntrySnapshot[],
-      path: string,
-    ): CodexConfigEntrySnapshot | null => {
-      for (const entry of entries) {
-        if (entry.path === path) return entry
-        if (entry.kind === "folder" && entry.children.length > 0) {
-          const found = findEntry(entry.children, path)
-          if (found) return found
-        }
-      }
-      return null
-    }
-
-    const entry = findEntry(tree, target)
-    if (!entry || entry.kind !== "file") return
-
-    const segments = target.split("/").filter(Boolean)
-    if (segments.length > 1) {
-      setExpandedFolders((prev) => {
-        const next = new Set(prev)
-        let prefix = ""
-        for (const segment of segments.slice(0, -1)) {
-          prefix = prefix ? `${prefix}/${segment}` : segment
-          next.add(prefix)
-        }
-        return next
-      })
-    }
+    if (!dirEntries[""]) return
 
     initialSelectionRef.current = target
-    void handleSelectFile({ path: entry.path, name: entry.name })
-  }, [enabled, handleSelectFile, initialSelectedFilePath, selectedFile?.path, tree])
+    void (async () => {
+      const segments = target.split("/").filter(Boolean)
+      let parent = ""
+
+      for (const segment of segments.slice(0, -1)) {
+        parent = parent ? `${parent}/${segment}` : segment
+        setExpandedFolders((prev) => {
+          const next = new Set(prev)
+          next.add(parent)
+          return next
+        })
+        if (!dirEntries[parent] && !loadingDirs.has(parent)) {
+          await loadDir(parent, 0, false)
+        }
+      }
+
+      const container = parent || ""
+      let offset = (dirEntries[container] ?? []).length
+      let hasMore = dirHasMore[container] ?? false
+      let entries = dirEntries[container] ?? []
+      let entry = entries.find((e) => e.kind === "file" && e.path === target)
+
+      // If the file is not on the first page, keep paging until it shows up or we run out.
+      while (!entry && hasMore && offset < 10_000) {
+        const next = await loadDir(container, offset, true)
+        offset += next.entries.length
+        hasMore = next.hasMore
+        entries = [...entries, ...next.entries]
+        entry = entries.find((e) => e.kind === "file" && e.path === target)
+      }
+
+      if (entry) {
+        await handleSelectFile({ path: entry.path, name: entry.name })
+      }
+    })()
+  }, [dirEntries, dirHasMore, enabled, handleSelectFile, initialSelectedFilePath, loadDir, loadingDirs, selectedFile?.path])
 
   useEffect(() => {
     if (!autoFocusEditor) return
@@ -1206,12 +1278,17 @@ function CodexSettings({
   }
 
   const handleToggleFolder = (path: string) => {
+    const willExpand = !expandedFolders.has(path)
     setExpandedFolders((prev) => {
       const next = new Set(prev)
       if (next.has(path)) next.delete(path)
       else next.add(path)
       return next
     })
+
+    if (willExpand && !dirEntries[path] && !loadingDirs.has(path)) {
+      void loadDir(path, 0, false)
+    }
   }
 
   const handleContentChange = (content: string) => {
@@ -1279,15 +1356,22 @@ function CodexSettings({
 
           {enabled && (
             <div className="flex-1 overflow-y-auto py-1.5">
-              {tree.length === 0 ? (
+              {(dirEntries[""] ?? []).length === 0 ? (
                 <div className="px-2 py-1.5 text-xs text-muted-foreground">No config found.</div>
               ) : (
                 <CodexConfigTree
-                  entries={tree}
+                  entries={dirEntries[""] ?? []}
                   selectedPath={selectedFile?.path ?? null}
                   expandedFolders={expandedFolders}
+                  loadingDirs={loadingDirs}
+                  childrenForPath={(path) => dirEntries[path] ?? []}
+                  hasMoreForPath={(path) => dirHasMore[path] ?? false}
                   onSelectFile={handleSelectFile}
                   onToggleFolder={handleToggleFolder}
+                  onLoadMore={(path) => {
+                    const offset = (dirEntries[path] ?? []).length
+                    void loadDir(path, offset, true)
+                  }}
                 />
               )}
             </div>

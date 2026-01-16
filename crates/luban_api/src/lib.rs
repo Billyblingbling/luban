@@ -659,6 +659,10 @@ pub enum ClientAction {
     },
     CodexCheck,
     CodexConfigTree,
+    CodexConfigListDir {
+        path: String,
+        offset: usize,
+    },
     CodexConfigReadFile {
         path: String,
     },
@@ -712,6 +716,13 @@ pub enum ServerEvent {
     CodexConfigTreeReady {
         request_id: String,
         tree: Vec<CodexConfigEntrySnapshot>,
+    },
+    CodexConfigListDirReady {
+        request_id: String,
+        path: String,
+        offset: usize,
+        entries: Vec<CodexConfigEntrySnapshot>,
+        has_more: bool,
     },
     CodexConfigFileReady {
         request_id: String,

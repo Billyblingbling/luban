@@ -108,6 +108,7 @@ export function useLubanTransport(args: {
           event.type === "task_executed" ||
           event.type === "codex_check_ready" ||
           event.type === "codex_config_tree_ready" ||
+          event.type === "codex_config_list_dir_ready" ||
           event.type === "codex_config_file_ready" ||
           event.type === "codex_config_file_saved"
         ) {
@@ -121,6 +122,8 @@ export function useLubanTransport(args: {
             if (event.type === "task_executed") pending.resolve(event.result)
             if (event.type === "codex_check_ready") pending.resolve({ ok: event.ok, message: event.message })
             if (event.type === "codex_config_tree_ready") pending.resolve(event.tree)
+            if (event.type === "codex_config_list_dir_ready")
+              pending.resolve({ path: event.path, offset: event.offset, entries: event.entries, hasMore: event.has_more })
             if (event.type === "codex_config_file_ready") pending.resolve(event.contents)
             if (event.type === "codex_config_file_saved") pending.resolve(null)
           }
