@@ -889,6 +889,7 @@ impl ProjectWorkspaceService for GitWorkspaceService {
         let turn_scope_id = generate_turn_scope_id();
         let duration_appended = Arc::new(AtomicBool::new(false));
         let mut appended_item_ids = HashSet::<String>::new();
+        let mut saw_agent_message = false;
 
         let result: anyhow::Result<()> = (|| {
             self.ensure_conversation_internal(
@@ -970,6 +971,14 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                     for event in events_to_process {
                         let event = qualify_event(&turn_scope_id, event);
                         on_event(event.clone());
+
+                        if let CodexThreadEvent::ItemStarted { item }
+                        | CodexThreadEvent::ItemUpdated { item }
+                        | CodexThreadEvent::ItemCompleted { item } = &event
+                            && matches!(item, CodexThreadItem::AgentMessage { .. })
+                        {
+                            saw_agent_message = true;
+                        }
 
                         match &event {
                             CodexThreadEvent::ThreadStarted { thread_id } => {
@@ -1112,6 +1121,10 @@ impl ProjectWorkspaceService for GitWorkspaceService {
 
             if let Some(message) = turn_error {
                 return Err(anyhow!("{message}"));
+            }
+
+            if !saw_agent_message {
+                return Err(anyhow!("agent finished without a final message"));
             }
 
             Ok(())
@@ -2026,6 +2039,102 @@ mod tests {
         }
 
         assert!(err.to_string().contains("missing codex executable"));
+
+        drop(service);
+        let _ = std::fs::remove_dir_all(&base_dir);
+    }
+
+    #[test]
+    fn codex_turn_errors_when_no_final_message_is_produced() {
+        let _guard = lock_env();
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be valid")
+            .as_nanos();
+        let base_dir = std::env::temp_dir().join(format!(
+            "luban-no-final-message-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&base_dir).expect("temp dir should be created");
+
+        let fake_codex = base_dir.join("fake-codex");
+        std::fs::write(
+            &fake_codex,
+            [
+                "#!/bin/sh",
+                "echo '{\"type\":\"turn.started\"}'",
+                "echo '{\"type\":\"item.completed\",\"item\":{\"type\":\"command_execution\",\"id\":\"item_0\",\"command\":\"echo hi\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}'",
+                "echo '{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":0,\"cached_input_tokens\":0,\"output_tokens\":0}}'",
+                "exit 0",
+                "",
+            ]
+            .join("\n"),
+        )
+        .expect("fake codex should be written");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&fake_codex)
+                .expect("fake codex should exist")
+                .permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&fake_codex, perms).expect("fake codex should be executable");
+        }
+
+        unsafe {
+            std::env::set_var(paths::LUBAN_CODEX_BIN_ENV, fake_codex.as_os_str());
+        }
+
+        let sqlite =
+            SqliteStore::new(paths::sqlite_path(&base_dir)).expect("sqlite init should work");
+        let service = GitWorkspaceService {
+            worktrees_root: paths::worktrees_root(&base_dir),
+            conversations_root: paths::conversations_root(&base_dir),
+            task_prompts_root: paths::task_prompts_root(&base_dir),
+            sqlite,
+        };
+
+        let err = service
+            .run_agent_turn_streamed(
+                RunAgentTurnRequest {
+                    project_slug: "p".to_owned(),
+                    workspace_name: "w".to_owned(),
+                    worktree_path: base_dir.clone(),
+                    thread_local_id: 1,
+                    thread_id: None,
+                    prompt: "Hello".to_owned(),
+                    attachments: Vec::new(),
+                    model: None,
+                    model_reasoning_effort: None,
+                },
+                Arc::new(AtomicBool::new(false)),
+                Arc::new(|_event| {}),
+            )
+            .expect_err("missing final message should be treated as an error");
+
+        unsafe {
+            std::env::remove_var(paths::LUBAN_CODEX_BIN_ENV);
+        }
+
+        assert!(
+            err.contains("without a final message"),
+            "unexpected error: {err}"
+        );
+
+        let snapshot = service
+            .sqlite
+            .load_conversation("p".to_owned(), "w".to_owned(), 1)
+            .expect("conversation should be persisted");
+        assert!(
+            snapshot
+                .entries
+                .iter()
+                .any(|e| matches!(e, ConversationEntry::TurnError { .. })),
+            "expected TurnError entry to be persisted"
+        );
 
         drop(service);
         let _ = std::fs::remove_dir_all(&base_dir);
