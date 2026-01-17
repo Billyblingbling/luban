@@ -1733,6 +1733,7 @@ impl Engine {
                         let prompt = request.prompt.clone();
 
                         let emit_many_steps = prompt.contains("e2e-many-steps");
+                        let emit_markdown_reasoning = prompt.contains("e2e-thinking-markdown");
 
                         if emit_many_steps {
                             // Generate a large amount of completed items to stress the UI render/timing
@@ -1888,6 +1889,38 @@ impl Engine {
                         }
 
                         if !cancel.load(Ordering::SeqCst) {
+                            if emit_markdown_reasoning {
+                                let _ = tx.blocking_send(EngineCommand::DispatchAction {
+                                    action: Box::new(Action::AgentEventReceived {
+                                        workspace_id,
+                                        thread_id,
+                                        event: luban_domain::CodexThreadEvent::ItemStarted {
+                                            item: luban_domain::CodexThreadItem::Reasoning {
+                                                id: "e2e_reasoning_1".to_owned(),
+                                                text:
+                                                    "**Plan**: verify markdown summary stripping."
+                                                        .to_owned(),
+                                            },
+                                        },
+                                    }),
+                                });
+
+                                let _ = tx.blocking_send(EngineCommand::DispatchAction {
+                                    action: Box::new(Action::AgentEventReceived {
+                                        workspace_id,
+                                        thread_id,
+                                        event: luban_domain::CodexThreadEvent::ItemCompleted {
+                                            item: luban_domain::CodexThreadItem::Reasoning {
+                                                id: "e2e_reasoning_1".to_owned(),
+                                                text:
+                                                    "**Plan**: verify markdown summary stripping."
+                                                        .to_owned(),
+                                            },
+                                        },
+                                    }),
+                                });
+                            }
+
                             let _ = tx.blocking_send(EngineCommand::DispatchAction {
                                 action: Box::new(Action::AgentEventReceived {
                                     workspace_id,

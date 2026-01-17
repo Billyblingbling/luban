@@ -83,10 +83,22 @@ export function activityFromAgentItemLike(args: {
     const trimmed = text.trim()
     if (!trimmed) return ""
 
+    const stripSummaryMarkdown = (value: string): string => {
+      // Strip simple markdown emphasis markers from short summaries so the UI
+      // displays plain text (e.g. "**Plan**" -> "Plan").
+      let out = value
+      out = out.replaceAll(/\*\*([^*]+?)\*\*/g, "$1")
+      out = out.replaceAll(/__([^_]+?)__/g, "$1")
+      out = out.replaceAll(/\*\*/g, "")
+      out = out.replaceAll(/__/g, "")
+      return out.trim()
+    }
+
     const firstLine = trimmed.split(/\r?\n/)[0] ?? trimmed
     const match = firstLine.match(/^(.+?[.!?])(\s|$)/)
-    const sentence = (match?.[1] ?? firstLine).trim()
-    return sentence.length > 0 ? sentence : firstLine.trim()
+    const sentence = stripSummaryMarkdown((match?.[1] ?? firstLine).trim())
+    const fallback = stripSummaryMarkdown(firstLine.trim())
+    return sentence.length > 0 ? sentence : fallback
   }
 
   const normalizeShellCommand = (
