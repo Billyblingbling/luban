@@ -53,7 +53,7 @@ function ActivityEventItem({
       <button
         onClick={onToggle}
         className={cn(
-          "relative w-full flex items-center gap-2 py-1 px-2 -mx-2 rounded text-xs transition-colors overflow-hidden",
+          "relative w-full flex items-center gap-2 py-1 px-2 pr-[84px] -mx-2 rounded text-xs transition-colors overflow-hidden",
           "hover:bg-muted/50",
           event.status === "running" ? "text-status-running" : "text-muted-foreground",
         )}

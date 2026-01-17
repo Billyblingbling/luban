@@ -258,7 +258,7 @@ export function AgentRunningCard({
                 <button
                   onClick={(e) => hasDetail && toggleEvent(event.id, e)}
                   className={cn(
-                    "relative w-full flex items-center gap-2 text-xs py-1 px-1 -mx-1 rounded transition-colors text-muted-foreground overflow-hidden",
+                    "relative w-full flex items-center gap-2 text-xs py-1 px-1 pr-[84px] -mx-1 rounded transition-colors text-muted-foreground overflow-hidden",
                     hasDetail && "hover:bg-muted/50 cursor-pointer",
                     !hasDetail && "cursor-default",
                   )}
