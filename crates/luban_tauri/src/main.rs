@@ -42,6 +42,14 @@ fn resolve_server_addr() -> anyhow::Result<SocketAddr> {
     Ok(addr)
 }
 
+fn webview_devtools_enabled() -> bool {
+    // Disable the built-in WebView devtools context menu in Luban's desktop app.
+    //
+    // This removes the "Reload" item from the right-click menu, avoiding accidental
+    // reloads that can disrupt long-running tasks.
+    false
+}
+
 fn main() -> anyhow::Result<()> {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![open_external])
@@ -67,6 +75,7 @@ fn main() -> anyhow::Result<()> {
             WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
                 .title("Luban")
                 .inner_size(1280.0, 800.0)
+                .devtools(webview_devtools_enabled())
                 .build()
                 .context("failed to build window")?;
 
@@ -109,5 +118,10 @@ mod tests {
             contents.contains("http://localhost:*/*"),
             "capability must allow localhost on any port"
         );
+    }
+
+    #[test]
+    fn desktop_webview_devtools_are_disabled() {
+        assert!(!webview_devtools_enabled());
     }
 }
