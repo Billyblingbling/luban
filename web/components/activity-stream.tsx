@@ -53,19 +53,39 @@ function ActivityEventItem({
       <button
         onClick={onToggle}
         className={cn(
-          "w-full flex items-center gap-2 py-1 px-2 -mx-2 rounded text-xs transition-colors",
+          "relative w-full flex items-center gap-2 py-1 px-2 -mx-2 rounded text-xs transition-colors overflow-hidden",
           "hover:bg-muted/50",
           event.status === "running" ? "text-status-running" : "text-muted-foreground",
         )}
       >
         {event.status === "running" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : icon}
         <span className="flex-1 text-left truncate">{event.title}</span>
-        {duration && <span className="text-[10px] text-muted-foreground/70 font-mono">{duration}</span>}
-        {event.detail && (
-          <ChevronRight
-            className={cn("w-3 h-3 text-muted-foreground/50 transition-transform", isExpanded && "rotate-90")}
+        <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 pl-3">
+          <div
+            className={cn(
+              "pointer-events-none absolute inset-y-0 -left-10 w-10",
+              "bg-gradient-to-l from-background/95 via-background/95 to-transparent opacity-100 transition-opacity duration-200",
+            )}
           />
-        )}
+          <div
+            className={cn(
+              "pointer-events-none absolute inset-y-0 -left-10 w-10",
+              "bg-gradient-to-l from-muted/60 via-muted/60 to-transparent opacity-0 transition-opacity duration-200",
+              "group-hover:opacity-100",
+            )}
+          />
+          <span className="relative z-10 text-[10px] text-muted-foreground/70 font-mono tabular-nums text-right min-w-[52px]">
+            {duration ?? ""}
+          </span>
+          {event.detail && (
+            <ChevronRight
+              className={cn(
+                "relative z-10 w-3 h-3 text-muted-foreground/50 transition-transform flex-shrink-0",
+                isExpanded && "rotate-90",
+              )}
+            />
+          )}
+        </div>
       </button>
       {isExpanded && event.detail && (
         <div className="ml-5 pl-2 border-l border-border text-[11px] text-muted-foreground py-1 mb-1">

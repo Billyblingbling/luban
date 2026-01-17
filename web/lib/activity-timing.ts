@@ -14,12 +14,18 @@ const globalTiming = new Map<string, TimingMeta>()
 const MAX_TIMING_ENTRIES = 50_000
 const PRUNE_BATCH_SIZE = 5_000
 
-function formatStepClock(ms: number): string {
+function formatStepDuration(ms: number): string {
+  if (ms < 1000) return "< 1s"
+
   const totalSeconds = Math.max(0, Math.floor(ms / 1000))
-  const minutes = Math.floor(totalSeconds / 60)
+  const minutesTotal = Math.floor(totalSeconds / 60)
   const seconds = totalSeconds % 60
-  const mm = Math.min(minutes, 99)
-  return `${String(mm).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+  const hours = Math.floor(minutesTotal / 60)
+  const minutes = minutesTotal % 60
+
+  if (hours > 0) return `${hours}h, ${minutes}m`
+  if (minutesTotal > 0) return `${minutesTotal}m, ${seconds}s`
+  return `${totalSeconds}s`
 }
 
 export function useActivityTiming(
@@ -110,7 +116,7 @@ export function useActivityTiming(
     const meta = globalTiming.get(event.id) ?? null
     if (!meta) return null
     const end = meta.doneAtMs ?? Date.now()
-    return formatStepClock(end - meta.startedAtMs)
+    return formatStepDuration(end - meta.startedAtMs)
   }
 
   return { durationLabel }

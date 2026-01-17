@@ -270,9 +270,10 @@ export function AgentRunningCard({
                   </span>
                   <span className="flex-1 text-left truncate">{event.title}</span>
                   <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 pl-3">
-                    <div className="pointer-events-none absolute inset-y-0 -left-6 w-6 bg-gradient-to-l from-card via-card to-transparent group-hover:from-muted/50 group-hover:via-muted/50" />
-                    <span className="relative z-10 text-[10px] text-muted-foreground/60 font-mono w-10 text-right flex-shrink-0 bg-card group-hover:bg-muted/50">
-                      {durationLabel ?? "00:00"}
+                    <div className="pointer-events-none absolute inset-y-0 -left-10 w-10 bg-gradient-to-l from-card via-card to-transparent opacity-100 transition-opacity duration-200" />
+                    <div className="pointer-events-none absolute inset-y-0 -left-10 w-10 bg-gradient-to-l from-muted/50 via-muted/50 to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
+                    <span className="relative z-10 text-[10px] text-muted-foreground/60 font-mono tabular-nums text-right min-w-[52px] flex-shrink-0">
+                      {durationLabel ?? ""}
                     </span>
                     {hasDetail && (
                       <ChevronRight
