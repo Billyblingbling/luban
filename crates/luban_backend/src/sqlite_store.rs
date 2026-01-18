@@ -201,6 +201,14 @@ enum DbCommand {
         thread_local_id: u64,
         reply: mpsc::Sender<anyhow::Result<ConversationSnapshot>>,
     },
+    LoadConversationPage {
+        project_slug: String,
+        workspace_name: String,
+        thread_local_id: u64,
+        before: Option<u64>,
+        limit: u64,
+        reply: mpsc::Sender<anyhow::Result<ConversationSnapshot>>,
+    },
     SaveConversationQueueState {
         project_slug: String,
         workspace_name: String,
@@ -360,6 +368,25 @@ impl SqliteStore {
                                 &project_slug,
                                 &workspace_name,
                                 thread_local_id,
+                            ));
+                        }
+                        (
+                            Ok(db),
+                            DbCommand::LoadConversationPage {
+                                project_slug,
+                                workspace_name,
+                                thread_local_id,
+                                before,
+                                limit,
+                                reply,
+                            },
+                        ) => {
+                            let _ = reply.send(db.load_conversation_page(
+                                &project_slug,
+                                &workspace_name,
+                                thread_local_id,
+                                before,
+                                limit,
                             ));
                         }
                         (
@@ -611,6 +638,28 @@ impl SqliteStore {
         reply_rx.recv().context("sqlite worker terminated")?
     }
 
+    pub fn load_conversation_page(
+        &self,
+        project_slug: String,
+        workspace_name: String,
+        thread_local_id: u64,
+        before: Option<u64>,
+        limit: u64,
+    ) -> anyhow::Result<ConversationSnapshot> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(DbCommand::LoadConversationPage {
+                project_slug,
+                workspace_name,
+                thread_local_id,
+                before,
+                limit,
+                reply: reply_tx,
+            })
+            .context("sqlite worker is not running")?;
+        reply_rx.recv().context("sqlite worker terminated")?
+    }
+
     pub fn save_conversation_queue_state(
         &self,
         project_slug: String,
@@ -722,6 +771,9 @@ fn respond_db_open_error(err: &anyhow::Error, cmd: DbCommand) {
             let _ = reply.send(Err(anyhow!(message)));
         }
         DbCommand::LoadConversation { reply, .. } => {
+            let _ = reply.send(Err(anyhow!(message)));
+        }
+        DbCommand::LoadConversationPage { reply, .. } => {
             let _ = reply.send(Err(anyhow!(message)));
         }
         DbCommand::SaveConversationQueueState { reply, .. } => {
@@ -2014,11 +2066,111 @@ impl SqliteDatabase {
             pending_prompts.push(prompt);
         }
 
+        let entries_total = entries.len() as u64;
         Ok(ConversationSnapshot {
             thread_id,
             entries,
-            entries_total: 0,
+            entries_total,
             entries_start: 0,
+            pending_prompts,
+            queue_paused,
+        })
+    }
+
+    fn load_conversation_page(
+        &mut self,
+        project_slug: &str,
+        workspace_name: &str,
+        thread_local_id: u64,
+        before: Option<u64>,
+        limit: u64,
+    ) -> anyhow::Result<ConversationSnapshot> {
+        self.ensure_conversation(project_slug, workspace_name, thread_local_id)?;
+
+        let (thread_id, queue_paused) = self
+            .conn
+            .query_row(
+                "SELECT thread_id, queue_paused FROM conversations
+                 WHERE project_slug = ?1 AND workspace_name = ?2 AND thread_local_id = ?3",
+                params![project_slug, workspace_name, thread_local_id as i64],
+                |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .optional()
+            .context("failed to load conversation meta")?
+            .map(|(thread_id, queue_paused)| (thread_id, queue_paused != 0))
+            .unwrap_or((None, false));
+
+        let total_entries: u64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM conversation_entries
+             WHERE project_slug = ?1 AND workspace_name = ?2 AND thread_local_id = ?3",
+            params![project_slug, workspace_name, thread_local_id as i64],
+            |row| row.get::<_, i64>(0),
+        )? as u64;
+
+        let total_entries_usize = usize::try_from(total_entries).unwrap_or(0);
+        let before_usize = before
+            .and_then(|v| usize::try_from(v).ok())
+            .unwrap_or(total_entries_usize)
+            .min(total_entries_usize);
+
+        let limit_usize = usize::try_from(limit).unwrap_or(0);
+        let end = before_usize;
+        let start = end.saturating_sub(limit_usize);
+
+        let mut entries = Vec::new();
+        if end > start {
+            let start_exclusive = i64::try_from(start).unwrap_or(i64::MAX);
+            let end_inclusive = i64::try_from(end).unwrap_or(i64::MAX);
+            let mut stmt = self.conn.prepare(
+                "SELECT payload_json
+                 FROM conversation_entries
+                 WHERE project_slug = ?1 AND workspace_name = ?2 AND thread_local_id = ?3
+                   AND seq > ?4 AND seq <= ?5
+                 ORDER BY seq ASC",
+            )?;
+            let rows = stmt.query_map(
+                params![
+                    project_slug,
+                    workspace_name,
+                    thread_local_id as i64,
+                    start_exclusive,
+                    end_inclusive
+                ],
+                |row| row.get::<_, String>(0),
+            )?;
+
+            for row in rows {
+                let json = row?;
+                let entry: ConversationEntry =
+                    serde_json::from_str(&json).context("failed to parse entry")?;
+                entries.push(entry);
+            }
+        }
+
+        let mut stmt = self.conn.prepare(
+            "SELECT payload_json
+             FROM conversation_queued_prompts
+             WHERE project_slug = ?1 AND workspace_name = ?2 AND thread_local_id = ?3
+             ORDER BY seq ASC, prompt_id ASC",
+        )?;
+        let rows = stmt.query_map(
+            params![project_slug, workspace_name, thread_local_id as i64],
+            |row| row.get::<_, String>(0),
+        )?;
+
+        let mut pending_prompts = Vec::new();
+        for row in rows {
+            let json = row?;
+            let prompt: QueuedPrompt =
+                serde_json::from_str(&json).context("failed to parse queued prompt")?;
+            pending_prompts.push(prompt);
+        }
+
+        Ok(ConversationSnapshot {
+            thread_id,
+            entries,
+            entries_total: total_entries,
+            entries_start: start as u64,
             pending_prompts,
             queue_paused,
         })
@@ -2592,6 +2744,33 @@ mod tests {
         assert_eq!(snapshot.pending_prompts[0].text, "queued-a");
         assert_eq!(snapshot.pending_prompts[1].id, 7);
         assert_eq!(snapshot.pending_prompts[1].text, "queued-b");
+    }
+
+    #[test]
+    fn conversation_load_page_returns_slice_and_totals() {
+        let path = temp_db_path("conversation_load_page_returns_slice_and_totals");
+        let mut db = open_db(&path);
+
+        db.ensure_conversation("p", "w", 1).unwrap();
+
+        for idx in 0..10_u64 {
+            let entry = ConversationEntry::TurnDuration { duration_ms: idx };
+            db.append_conversation_entries("p", "w", 1, std::slice::from_ref(&entry))
+                .unwrap();
+        }
+
+        let snapshot = db.load_conversation_page("p", "w", 1, Some(7), 3).unwrap();
+        assert_eq!(snapshot.entries_total, 10);
+        assert_eq!(snapshot.entries_start, 4);
+        assert_eq!(snapshot.entries.len(), 3);
+        assert!(matches!(
+            &snapshot.entries[..],
+            [
+                ConversationEntry::TurnDuration { duration_ms: 4 },
+                ConversationEntry::TurnDuration { duration_ms: 5 },
+                ConversationEntry::TurnDuration { duration_ms: 6 }
+            ]
+        ));
     }
 
     #[test]

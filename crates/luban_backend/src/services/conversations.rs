@@ -153,10 +153,11 @@ impl GitWorkspaceService {
             }
         }
 
+        let entries_total = entries.len() as u64;
         Ok(Some(ConversationSnapshot {
             thread_id: meta.thread_id,
             entries,
-            entries_total: 0,
+            entries_total,
             entries_start: 0,
             pending_prompts: Vec::new(),
             queue_paused: false,

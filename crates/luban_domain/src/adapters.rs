@@ -236,6 +236,15 @@ pub trait ProjectWorkspaceService: Send + Sync {
         thread_id: u64,
     ) -> Result<ConversationSnapshot, String>;
 
+    fn load_conversation_page(
+        &self,
+        project_slug: String,
+        workspace_name: String,
+        thread_id: u64,
+        before: Option<u64>,
+        limit: u64,
+    ) -> Result<ConversationSnapshot, String>;
+
     fn save_conversation_queue_state(
         &self,
         _project_slug: String,

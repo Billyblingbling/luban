@@ -907,6 +907,52 @@ impl ProjectWorkspaceService for GitWorkspaceService {
             .map_err(|e| format!("{e:#}"))
     }
 
+    fn load_conversation_page(
+        &self,
+        project_slug: String,
+        workspace_name: String,
+        thread_id: u64,
+        before: Option<u64>,
+        limit: u64,
+    ) -> Result<ConversationSnapshot, String> {
+        let snapshot = self
+            .sqlite
+            .load_conversation_page(
+                project_slug.clone(),
+                workspace_name.clone(),
+                thread_id,
+                before,
+                limit,
+            )
+            .map_err(|e| format!("{e:#}"))?;
+
+        if thread_id == 1 && snapshot.entries_total == 0 && snapshot.thread_id.is_none() {
+            return self
+                .load_conversation_internal(project_slug, workspace_name, thread_id)
+                .map(|mut repaired| {
+                    let total = repaired.entries.len();
+                    let before = before
+                        .and_then(|v| usize::try_from(v).ok())
+                        .unwrap_or(total)
+                        .min(total);
+                    let limit = usize::try_from(limit).unwrap_or(0);
+                    let end = before;
+                    let start = end.saturating_sub(limit);
+                    repaired.entries = repaired
+                        .entries
+                        .get(start..end)
+                        .unwrap_or_default()
+                        .to_vec();
+                    repaired.entries_total = total as u64;
+                    repaired.entries_start = start as u64;
+                    repaired
+                })
+                .map_err(|e| format!("{e:#}"));
+        }
+
+        Ok(snapshot)
+    }
+
     fn save_conversation_queue_state(
         &self,
         project_slug: String,

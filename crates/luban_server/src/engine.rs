@@ -3424,6 +3424,17 @@ mod tests {
             Err("unimplemented".to_owned())
         }
 
+        fn load_conversation_page(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+            _thread_id: u64,
+            _before: Option<u64>,
+            _limit: u64,
+        ) -> Result<DomainConversationSnapshot, String> {
+            Err("unimplemented".to_owned())
+        }
+
         fn store_context_image(
             &self,
             _project_slug: String,
@@ -3605,6 +3616,17 @@ mod tests {
             _project_slug: String,
             _workspace_name: String,
             _thread_id: u64,
+        ) -> Result<DomainConversationSnapshot, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn load_conversation_page(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+            _thread_id: u64,
+            _before: Option<u64>,
+            _limit: u64,
         ) -> Result<DomainConversationSnapshot, String> {
             Err("unimplemented".to_owned())
         }
@@ -4121,6 +4143,17 @@ mod tests {
             Err("unimplemented".to_owned())
         }
 
+        fn load_conversation_page(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+            _thread_id: u64,
+            _before: Option<u64>,
+            _limit: u64,
+        ) -> Result<DomainConversationSnapshot, String> {
+            Err("unimplemented".to_owned())
+        }
+
         fn store_context_image(
             &self,
             _project_slug: String,
@@ -4390,6 +4423,17 @@ mod tests {
             _project_slug: String,
             _workspace_name: String,
             _thread_id: u64,
+        ) -> Result<DomainConversationSnapshot, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn load_conversation_page(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+            _thread_id: u64,
+            _before: Option<u64>,
+            _limit: u64,
         ) -> Result<DomainConversationSnapshot, String> {
             Err("unimplemented".to_owned())
         }
@@ -4684,6 +4728,17 @@ mod tests {
             Err("unimplemented".to_owned())
         }
 
+        fn load_conversation_page(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+            _thread_id: u64,
+            _before: Option<u64>,
+            _limit: u64,
+        ) -> Result<DomainConversationSnapshot, String> {
+            Err("unimplemented".to_owned())
+        }
+
         fn store_context_image(
             &self,
             _project_slug: String,
@@ -4876,6 +4931,17 @@ mod tests {
             _project_slug: String,
             _workspace_name: String,
             _thread_id: u64,
+        ) -> Result<DomainConversationSnapshot, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn load_conversation_page(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+            _thread_id: u64,
+            _before: Option<u64>,
+            _limit: u64,
         ) -> Result<DomainConversationSnapshot, String> {
             Err("unimplemented".to_owned())
         }
