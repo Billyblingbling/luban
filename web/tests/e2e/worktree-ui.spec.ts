@@ -80,6 +80,26 @@ test("new tab is appended to the end", async ({ page }) => {
   expect(afterLast).not.toBe(beforeLast)
 })
 
+test("archived tabs list does not hide older threads", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  const workspaceIdRaw =
+    (await page.evaluate(() => localStorage.getItem("luban:active_workspace_id"))) ?? ""
+  const workspaceId = Number(workspaceIdRaw)
+  expect(Number.isFinite(workspaceId) && workspaceId > 0).toBeTruthy()
+
+  for (let i = 0; i < 21; i++) {
+    const threadId = i + 2
+    await sendWsAction(page, { type: "create_workspace_thread", workspace_id: workspaceId })
+    await sendWsAction(page, { type: "close_workspace_thread_tab", workspace_id: workspaceId, thread_id: threadId })
+  }
+
+  await page.getByTitle("All tabs").click()
+
+  const closedSection = page.getByText("Recently Closed", { exact: true }).locator("..").locator("..")
+  await expect(closedSection.getByRole("button", { name: /^Thread 2$/ })).toHaveCount(1)
+})
+
 test("creating a worktree auto-opens its conversation", async ({ page }) => {
   await ensureWorkspace(page)
 

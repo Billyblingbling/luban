@@ -86,6 +86,7 @@ export type LubanActions = {
   setThinkingEffort: (workspaceId: WorkspaceId, threadId: WorkspaceThreadId, effort: ThinkingEffort) => void
   setAppearanceTheme: (theme: AppearanceTheme) => void
   setAppearanceFonts: (fonts: AppearanceFontsSnapshot) => void
+  setGlobalZoom: (zoom: number) => void
 }
 
 export type LubanActionsInternal = LubanActions & {

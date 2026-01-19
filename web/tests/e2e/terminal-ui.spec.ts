@@ -243,11 +243,89 @@ test("terminal viewport uses auto scrollbar behavior", async ({ page }) => {
     .poll(async () => await terminal.locator("canvas").count(), { timeout: 20_000 })
     .toBeGreaterThan(0)
 
-  const overflowY = await terminal.evaluate((outer) => {
+  const snapshot = await terminal.evaluate((outer) => {
     const viewport = outer.querySelector(".xterm-viewport") as HTMLElement | null
     if (!viewport) return null
-    return getComputedStyle(viewport).overflowY
+    const viewOverflowY = getComputedStyle(viewport).overflowY
+
+    const parentOverflows: Array<{ tag: string; overflowY: string }> = []
+    let node: HTMLElement | null = viewport.parentElement
+    for (let i = 0; i < 10 && node; i += 1) {
+      if (node === (outer as HTMLElement)) break
+      const overflowY = getComputedStyle(node).overflowY
+      parentOverflows.push({ tag: node.tagName.toLowerCase(), overflowY })
+      node = node.parentElement
+    }
+
+    return { viewOverflowY, parentOverflows }
   })
 
-  expect(overflowY).toBe("auto")
+  expect(snapshot).not.toBeNull()
+  expect(snapshot?.viewOverflowY).toBe("auto")
+  for (const entry of snapshot?.parentOverflows ?? []) {
+    expect(entry.overflowY, `unexpected ancestor overflow-y: ${entry.tag} ${entry.overflowY}`).not.toBe("auto")
+    expect(entry.overflowY, `unexpected ancestor overflow-y: ${entry.tag} ${entry.overflowY}`).not.toBe("scroll")
+  }
+})
+
+test("terminal scrollbar is styled via app CSS", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  const terminal = page.getByTestId("pty-terminal")
+  await expect
+    .poll(async () => await terminal.locator("canvas").count(), { timeout: 20_000 })
+    .toBeGreaterThan(0)
+
+  const hasStyle = await terminal.evaluate((outer) => {
+    if (!(outer instanceof HTMLElement)) return false
+    if (!outer.classList.contains("luban-terminal")) return false
+
+    for (const sheet of Array.from(document.styleSheets)) {
+      let rules: CSSRuleList | null = null
+      try {
+        rules = sheet.cssRules
+      } catch {
+        continue
+      }
+      for (const rule of Array.from(rules)) {
+        if (rule instanceof CSSStyleRule) {
+          const css = rule.cssText
+          if (
+            css.includes(".luban-terminal") &&
+            css.includes(".xterm-viewport") &&
+            css.includes("::-webkit-scrollbar")
+          ) {
+            return true
+          }
+        }
+        if ("cssText" in rule) {
+          const css = String((rule as any).cssText ?? "")
+          if (
+            css.includes(".luban-terminal") &&
+            css.includes(".xterm-viewport") &&
+            css.includes("::-webkit-scrollbar")
+          ) {
+            return true
+          }
+        }
+      }
+      // Some browsers may not expose nested rules for `@layer`; fall back to scanning the sheet text.
+      try {
+        const owner = (sheet as any).ownerNode as HTMLStyleElement | HTMLLinkElement | null
+        const text = owner && "textContent" in owner ? String(owner.textContent ?? "") : ""
+        if (
+          text.includes(".luban-terminal") &&
+          text.includes(".xterm-viewport") &&
+          text.includes("::-webkit-scrollbar")
+        ) {
+          return true
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return false
+  })
+
+  expect(hasStyle).toBe(true)
 })

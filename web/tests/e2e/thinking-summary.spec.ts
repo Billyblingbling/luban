@@ -5,6 +5,14 @@ import { ensureWorkspace } from "./helpers"
 test("thinking summaries strip bold markdown markers", async ({ page }) => {
   await ensureWorkspace(page)
 
+  const tabTitles = page.getByTestId("thread-tab-title")
+  const beforeTabs = await tabTitles.count()
+  await page.getByTitle("New tab").click()
+  await expect(tabTitles).toHaveCount(beforeTabs + 1, { timeout: 20_000 })
+  const newTab = tabTitles.last().locator("..")
+  await newTab.scrollIntoViewIfNeeded()
+  await newTab.click()
+
   const runId = Math.random().toString(16).slice(2)
   const marker = `e2e-running-card-${runId}-e2e-thinking-markdown`
 

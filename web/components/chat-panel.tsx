@@ -373,13 +373,30 @@ export function ChatPanel({
     return out
   }, [threads])
 
-  const openThreadIds = useMemo(() => {
-    if (threads.length === 0) return []
-    const ordered = workspaceTabs?.open_tabs ?? []
-    const fromTabs = ordered.filter((id) => threadsById.has(id))
-    if (fromTabs.length > 0) return fromTabs
-    return threads.map((t) => t.thread_id)
-  }, [threads, threadsById, workspaceTabs?.open_tabs])
+  const { openThreadIds, closedThreadIds } = useMemo(() => {
+    const all = threads.map((t) => t.thread_id)
+    if (all.length === 0) return { openThreadIds: [] as number[], closedThreadIds: [] as number[] }
+
+    const openFromTabs = (workspaceTabs?.open_tabs ?? []).filter((id) => threadsById.has(id))
+    const archivedFromTabs = (workspaceTabs?.archived_tabs ?? []).filter((id) => threadsById.has(id))
+
+    const open = [...openFromTabs]
+    if (
+      activeThreadId != null &&
+      threadsById.has(activeThreadId) &&
+      !open.includes(activeThreadId)
+    ) {
+      open.push(activeThreadId)
+    }
+
+    const known = new Set<number>([...open, ...archivedFromTabs])
+    const recovered = all.filter((id) => !known.has(id))
+
+    return {
+      openThreadIds: open.length > 0 ? open : [all[0]!],
+      closedThreadIds: [...recovered, ...archivedFromTabs],
+    }
+  }, [threads, threadsById, workspaceTabs?.open_tabs, workspaceTabs?.archived_tabs, activeThreadId])
 
   const openThreads = useMemo(() => {
     const out: (typeof threads)[number][] = []
@@ -391,19 +408,17 @@ export function ChatPanel({
   }, [openThreadIds, threadsById])
 
   const archivedTabs: ArchivedTab[] = useMemo(() => {
-    const archived = workspaceTabs?.archived_tabs ?? []
     const out: ArchivedTab[] = []
-    for (const id of [...archived].reverse()) {
+    for (const id of [...closedThreadIds].reverse()) {
       const t = threadsById.get(id)
       if (t) {
         out.push({ id: String(id), title: t.title })
       } else {
         out.push({ id: String(id), title: `Thread ${id}` })
       }
-      if (out.length >= 20) break
     }
     return out
-  }, [threadsById, workspaceTabs?.archived_tabs])
+  }, [threadsById, closedThreadIds])
 
   const tabs: ChatTab[] = useMemo(
     () =>

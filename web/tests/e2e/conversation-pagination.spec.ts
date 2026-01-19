@@ -4,6 +4,14 @@ import { ensureWorkspace } from "./helpers"
 test("loads older conversation entries when scrolling to top", async ({ page }) => {
   await ensureWorkspace(page)
 
+  const tabTitles = page.getByTestId("thread-tab-title")
+  const beforeTabs = await tabTitles.count()
+  await page.getByTitle("New tab").click()
+  await expect(tabTitles).toHaveCount(beforeTabs + 1, { timeout: 20_000 })
+  const newTab = tabTitles.last().locator("..")
+  await newTab.scrollIntoViewIfNeeded()
+  await newTab.click()
+
   const ids = await page.evaluate(async () => {
     const raw = localStorage.getItem("luban:active_workspace_id")
     const workspaceId = raw ? Number(raw) : null
@@ -37,7 +45,9 @@ test("loads older conversation entries when scrolling to top", async ({ page }) 
 
   // Force the UI to refresh the conversation via HTTP so the client-side state has
   // `entries_start` populated before we attempt to load older pages.
-  await page.getByText("Thread 1", { exact: true }).click()
+  const refreshTab = page.getByTestId("thread-tab-title").last().locator("..")
+  await refreshTab.scrollIntoViewIfNeeded()
+  await refreshTab.click()
 
   const container = page.getByTestId("chat-scroll-container")
   await page.waitForTimeout(750)

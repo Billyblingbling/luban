@@ -1111,11 +1111,16 @@ impl AppState {
                     known_tabs.extend(tabs.archived_tabs.iter().copied());
                     loaded_thread_ids.sort_by_key(|id| id.0);
                     loaded_thread_ids.dedup();
+                    let mut recovered_tabs = Vec::new();
                     for thread_id in loaded_thread_ids {
                         if known_tabs.insert(thread_id) {
-                            tabs.open_tabs.push(thread_id);
+                            recovered_tabs.push(thread_id);
                             did_update_tabs = true;
                         }
+                    }
+                    if !recovered_tabs.is_empty() {
+                        recovered_tabs.sort_by_key(|id| id.0);
+                        tabs.archived_tabs.splice(0..0, recovered_tabs);
                     }
                 }
 
@@ -1921,13 +1926,10 @@ mod tests {
         let tabs = state
             .workspace_tabs(workspace_id)
             .expect("missing workspace tabs");
+        assert_eq!(tabs.open_tabs, vec![WorkspaceThreadId(1)]);
         assert_eq!(
-            tabs.open_tabs,
-            vec![
-                WorkspaceThreadId(1),
-                WorkspaceThreadId(2),
-                WorkspaceThreadId(3)
-            ]
+            tabs.archived_tabs,
+            vec![WorkspaceThreadId(2), WorkspaceThreadId(3)]
         );
         assert_eq!(tabs.next_thread_id, 4);
 

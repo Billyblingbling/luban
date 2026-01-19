@@ -388,7 +388,7 @@ export function PtyTerminal() {
       data-testid="pty-terminal"
       ref={outerRef}
       tabIndex={0}
-      className="h-full w-full p-0 font-mono text-xs overflow-hidden bg-card text-card-foreground focus:outline-none flex"
+      className="luban-terminal h-full w-full p-0 font-mono text-xs overflow-hidden bg-card text-card-foreground focus:outline-none flex"
     >
       <div ref={containerRef} className="flex-1 min-h-0 min-w-0 overflow-hidden" />
     </div>

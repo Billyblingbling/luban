@@ -408,9 +408,8 @@ impl WorkspaceTabs {
     }
 
     pub fn restore_tab(&mut self, thread_id: WorkspaceThreadId, activate: bool) {
-        let was_archived = self.archived_tabs.contains(&thread_id);
         self.archived_tabs.retain(|id| *id != thread_id);
-        if was_archived && !self.open_tabs.contains(&thread_id) {
+        if !self.open_tabs.contains(&thread_id) {
             self.open_tabs.push(thread_id);
         }
         if activate {
@@ -489,6 +488,20 @@ pub(crate) fn apply_draft_text_diff(conversation: &mut WorkspaceConversation, ne
     }
 
     conversation.draft = new_text.to_owned();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn restore_tab_opens_even_when_not_archived() {
+        let mut tabs = WorkspaceTabs::new_with_initial(WorkspaceThreadId(1));
+        tabs.restore_tab(WorkspaceThreadId(2), true);
+        assert_eq!(tabs.active_tab, WorkspaceThreadId(2));
+        assert!(tabs.open_tabs.contains(&WorkspaceThreadId(2)));
+        assert!(!tabs.archived_tabs.contains(&WorkspaceThreadId(2)));
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]

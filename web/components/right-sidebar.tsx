@@ -175,20 +175,24 @@ export function RightSidebar({ isOpen, onToggle, widthPx, onOpenDiffTab }: Right
         </button>
       </div>
 
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 min-h-0 overflow-hidden">
         {activeTab === "terminal" ? (
-          <div className="h-full overflow-auto overscroll-contain">
+          <div className="h-full min-h-0 overflow-hidden">
             <PtyTerminal />
           </div>
         ) : activeTab === "changes" ? (
-          <ChangesPanel workspaceId={activeWorkspaceId} onOpenDiffTab={onOpenDiffTab} />
+          <div className="h-full overflow-auto overscroll-contain">
+            <ChangesPanel workspaceId={activeWorkspaceId} onOpenDiffTab={onOpenDiffTab} />
+          </div>
         ) : (
-          <ContextPanel
-            workspaceId={activeWorkspaceId}
-            isDragOver={isDragOver}
-            droppedFiles={droppedFiles}
-            onConsumeDroppedFiles={() => setDroppedFiles(null)}
-          />
+          <div className="h-full overflow-auto overscroll-contain">
+            <ContextPanel
+              workspaceId={activeWorkspaceId}
+              isDragOver={isDragOver}
+              droppedFiles={droppedFiles}
+              onConsumeDroppedFiles={() => setDroppedFiles(null)}
+            />
+          </div>
         )}
       </div>
     </div>
