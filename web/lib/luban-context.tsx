@@ -94,6 +94,7 @@ type LubanContextValue = {
     args: { text: string; attachments: AttachmentRef[]; runConfig: AgentRunConfigSnapshot },
   ) => void
   cancelAgentTurn: () => void
+  cancelAndSendAgentMessage: (text: string, attachments?: AttachmentRef[]) => void
 
   renameWorkspaceBranch: (workspaceId: WorkspaceId, branchName: string) => void
   aiRenameWorkspaceBranch: (workspaceId: WorkspaceId, threadId: WorkspaceThreadId) => void
@@ -265,6 +266,7 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     reorderQueuedPrompt: actions.reorderQueuedPrompt,
     updateQueuedPrompt: actions.updateQueuedPrompt,
     cancelAgentTurn: actions.cancelAgentTurn,
+    cancelAndSendAgentMessage: actions.cancelAndSendAgentMessage,
     renameWorkspaceBranch: actions.renameWorkspaceBranch,
     aiRenameWorkspaceBranch: actions.aiRenameWorkspaceBranch,
     setChatModel: actions.setChatModel,

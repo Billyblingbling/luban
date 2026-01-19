@@ -331,6 +331,13 @@ export type ClientAction =
       attachments: AttachmentRef[]
     }
   | {
+      type: "cancel_and_send_agent_message"
+      workspace_id: WorkspaceId
+      thread_id: WorkspaceThreadId
+      text: string
+      attachments: AttachmentRef[]
+    }
+  | {
       type: "queue_agent_message"
       workspace_id: WorkspaceId
       thread_id: WorkspaceThreadId

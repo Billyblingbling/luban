@@ -1046,6 +1046,33 @@ impl Engine {
                         let _ = reply.send(Ok(self.rev));
                         return;
                     }
+                    luban_api::ClientAction::CancelAndSendAgentMessage {
+                        workspace_id,
+                        thread_id,
+                        text,
+                        attachments,
+                    } => {
+                        let wid = WorkspaceId::from_u64(workspace_id.0);
+                        let tid = WorkspaceThreadId::from_u64(thread_id.0);
+                        self.process_action_queue(Action::CancelAgentTurn {
+                            workspace_id: wid,
+                            thread_id: tid,
+                        })
+                        .await;
+                        self.process_action_queue(Action::SendAgentMessage {
+                            workspace_id: wid,
+                            thread_id: tid,
+                            text: text.clone(),
+                            attachments: attachments
+                                .iter()
+                                .cloned()
+                                .map(map_api_attachment)
+                                .collect(),
+                        })
+                        .await;
+                        let _ = reply.send(Ok(self.rev));
+                        return;
+                    }
                     _ => {}
                 }
 
@@ -2017,6 +2044,10 @@ impl Engine {
                             });
                         }
 
+                        if cancel.load(Ordering::SeqCst) {
+                            return;
+                        }
+
                         let _ = tx.blocking_send(EngineCommand::DispatchAction {
                             action: Box::new(Action::AgentRunFinishedAt {
                                 workspace_id,
@@ -2061,8 +2092,11 @@ impl Engine {
                         })
                     };
 
-                    let result = services.run_agent_turn_streamed(request, cancel, on_event);
-                    if let Err(message) = result {
+                    let result =
+                        services.run_agent_turn_streamed(request, cancel.clone(), on_event);
+                    if let Err(message) = result
+                        && !cancel.load(Ordering::SeqCst)
+                    {
                         let _ = tx.blocking_send(EngineCommand::DispatchAction {
                             action: Box::new(Action::AgentEventReceived {
                                 workspace_id,
@@ -2070,6 +2104,10 @@ impl Engine {
                                 event: luban_domain::CodexThreadEvent::Error { message },
                             }),
                         });
+                    }
+
+                    if cancel.load(Ordering::SeqCst) {
+                        return;
                     }
 
                     let _ = tx.blocking_send(EngineCommand::DispatchAction {
@@ -2106,7 +2144,17 @@ impl Engine {
                 if let Some(flag) = self.cancel_flags.get(&(workspace_id, thread_id)) {
                     flag.store(true, Ordering::SeqCst);
                 }
-                Ok(VecDeque::new())
+                let finished_at_unix_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis()
+                    .try_into()
+                    .unwrap_or(0u64);
+                Ok(VecDeque::from([Action::AgentRunFinishedAt {
+                    workspace_id,
+                    thread_id,
+                    finished_at_unix_ms,
+                }]))
             }
             Effect::OpenWorkspacePullRequest { workspace_id } => {
                 let Some(workspace) = self.state.workspace(workspace_id) else {
@@ -3267,6 +3315,7 @@ fn map_client_action(action: luban_api::ClientAction) -> Option<Action> {
             text,
             attachments: attachments.into_iter().map(map_api_attachment).collect(),
         }),
+        luban_api::ClientAction::CancelAndSendAgentMessage { .. } => None,
         luban_api::ClientAction::QueueAgentMessage {
             workspace_id,
             thread_id,

@@ -110,6 +110,7 @@ export function ChatPanel({
     sendAgentMessage,
     queueAgentMessage,
     cancelAgentTurn,
+    cancelAndSendAgentMessage,
     renameWorkspaceBranch,
     aiRenameWorkspaceBranch,
     removeQueuedPrompt,
@@ -737,8 +738,7 @@ export function ChatPanel({
     if (text.length === 0 && ready.length === 0) return
 
     if (agentOverrideStatus === "cancelling") {
-      cancelAgentTurn()
-      sendAgentMessage(text, ready)
+      cancelAndSendAgentMessage(text, ready)
     } else if (agentOverrideStatus === "resuming") {
       sendAgentMessage(text, ready)
     }

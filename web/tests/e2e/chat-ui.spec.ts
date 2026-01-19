@@ -318,6 +318,7 @@ test("cancel -> submit turns the previous run into a cancelled activity stream a
   await editor.fill(interrupt)
   await page.getByTestId("agent-running-submit").click()
 
+  await expect(page.getByTestId("agent-running-cancel")).toBeVisible({ timeout: 20_000 })
   await expect(page.getByTestId("user-message-bubble").filter({ hasText: interrupt }).first()).toBeVisible({ timeout: 20_000 })
   await expect(page.getByText("Cancelled after").first()).toBeVisible({ timeout: 20_000 })
   await expect(page.getByText(/^Completed \d+ steps$/).first()).toBeVisible({ timeout: 20_000 })

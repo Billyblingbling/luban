@@ -79,6 +79,7 @@ export type LubanActions = {
     args: { text: string; attachments: AttachmentRef[]; runConfig: AgentRunConfigSnapshot },
   ) => void
   cancelAgentTurn: () => void
+  cancelAndSendAgentMessage: (text: string, attachments?: AttachmentRef[]) => void
 
   renameWorkspaceBranch: (workspaceId: WorkspaceId, branchName: string) => void
   aiRenameWorkspaceBranch: (workspaceId: WorkspaceId, threadId: WorkspaceThreadId) => void
@@ -536,6 +537,18 @@ export function createLubanActions(args: {
     args.sendAction({ type: "cancel_agent_turn", workspace_id: ids.workspaceId, thread_id: ids.threadId })
   }
 
+  function cancelAndSendAgentMessage(text: string, attachments: AttachmentRef[] = []) {
+    const ids = activeWorkspaceThread()
+    if (!ids) return
+    args.sendAction({
+      type: "cancel_and_send_agent_message",
+      workspace_id: ids.workspaceId,
+      thread_id: ids.threadId,
+      text,
+      attachments,
+    })
+  }
+
   function renameWorkspaceBranch(workspaceId: WorkspaceId, branchName: string) {
     args.sendAction({ type: "workspace_rename_branch", workspace_id: workspaceId, branch_name: branchName })
   }
@@ -619,6 +632,7 @@ export function createLubanActions(args: {
     reorderQueuedPrompt,
     updateQueuedPrompt,
     cancelAgentTurn,
+    cancelAndSendAgentMessage,
     renameWorkspaceBranch,
     aiRenameWorkspaceBranch,
     setChatModel,
