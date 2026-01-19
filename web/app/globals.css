@@ -223,7 +223,6 @@
 
   /* Keep terminal scrollbars consistent with the chat scrollbar style. */
   .luban-terminal .xterm-viewport {
-    scrollbar-gutter: stable;
     scrollbar-width: thin;
     scrollbar-color: color-mix(in srgb, var(--muted-foreground) 45%, transparent) transparent;
   }
