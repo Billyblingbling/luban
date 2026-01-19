@@ -155,6 +155,7 @@ export function OpenButton() {
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => void executeAction(selection)}
         disabled={disabled}
+        data-testid="open-button-primary"
         className={cn(
           "inline-flex items-center gap-1.5 px-2 py-1 text-xs transition-colors rounded-l",
           "text-muted-foreground hover:text-foreground hover:bg-muted",
@@ -176,6 +177,7 @@ export function OpenButton() {
           setOpen((prev) => !prev)
         }}
         disabled={disabled}
+        data-testid="open-button-menu"
         className={cn(
           "inline-flex items-center justify-center w-5 py-1 transition-colors rounded-r",
           "text-muted-foreground hover:text-foreground hover:bg-muted",
@@ -196,6 +198,7 @@ export function OpenButton() {
                   key={editor.id}
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => selectAndRun({ type: "editor", id: editor.id })}
+                  data-testid={`open-button-item-${editor.id}`}
                   className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-xs transition-colors rounded-md whitespace-nowrap text-foreground hover:bg-accent"
                 >
                   {renderIcon(editor.icon, "w-3.5 h-3.5 flex-shrink-0")}
@@ -208,6 +211,7 @@ export function OpenButton() {
               <button
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => selectAndRun({ type: "action", id: "ghostty" })}
+                data-testid="open-button-item-ghostty"
                 className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-xs transition-colors rounded-md whitespace-nowrap text-foreground hover:bg-accent"
               >
                 {renderIcon("/icons/ghostty.png", "w-3.5 h-3.5 flex-shrink-0")}
@@ -223,6 +227,7 @@ export function OpenButton() {
                     key={action.id}
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => selectAndRun({ type: "action", id: action.id })}
+                    data-testid={`open-button-item-${action.id}`}
                     className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-xs transition-colors rounded-md whitespace-nowrap text-foreground hover:bg-accent"
                   >
                     {renderIcon(action.icon, "w-3.5 h-3.5 flex-shrink-0")}

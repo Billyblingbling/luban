@@ -520,6 +520,18 @@ test("expanded agent running card keeps header anchored as activities grow", asy
   await expect(page.getByTestId("user-message-bubble").filter({ hasText: `filler 120 ${runId}` }).first()).toBeVisible({
     timeout: 20_000,
   })
+  // Avoid racing the filler run; ensure the conversation is idle before starting the main run.
+  await expect
+    .poll(
+      async () => {
+        const res = await page.request.get(`/api/workspaces/${workspaceId}/conversations/${threadId}`)
+        if (!res.ok()) return "unknown"
+        const snapshot = (await res.json()) as { run_status?: string }
+        return String(snapshot.run_status ?? "unknown")
+      },
+      { timeout: 20_000 },
+    )
+    .toBe("idle")
 
   await sendWsAction(page, {
     type: "send_agent_message",
