@@ -1081,8 +1081,10 @@ impl AppState {
                 let default_model_id = self.agent_default_model_id.clone();
                 let default_thinking_effort = self.agent_default_thinking_effort;
                 let mut max_thread_id = 0u64;
+                let mut loaded_thread_ids = Vec::new();
                 for meta in threads {
                     max_thread_id = max_thread_id.max(meta.thread_id.0);
+                    loaded_thread_ids.push(meta.thread_id);
                     let conversation = self
                         .conversations
                         .entry((workspace_id, meta.thread_id))
@@ -1096,10 +1098,31 @@ impl AppState {
                     conversation.title = meta.title;
                     conversation.thread_id = meta.remote_thread_id;
                 }
+                let mut did_update_tabs = false;
                 if let Some(tabs) = self.workspace_tabs.get_mut(&workspace_id) {
+                    let previous_next_thread_id = tabs.next_thread_id;
                     tabs.next_thread_id = tabs.next_thread_id.max(max_thread_id + 1);
+                    if tabs.next_thread_id != previous_next_thread_id {
+                        did_update_tabs = true;
+                    }
+
+                    let mut known_tabs = tabs.open_tabs.iter().copied().collect::<HashSet<_>>();
+                    known_tabs.extend(tabs.archived_tabs.iter().copied());
+                    loaded_thread_ids.sort_by_key(|id| id.0);
+                    loaded_thread_ids.dedup();
+                    for thread_id in loaded_thread_ids {
+                        if known_tabs.insert(thread_id) {
+                            tabs.open_tabs.push(thread_id);
+                            did_update_tabs = true;
+                        }
+                    }
                 }
-                Vec::new()
+
+                if did_update_tabs {
+                    vec![Effect::SaveAppState]
+                } else {
+                    Vec::new()
+                }
             }
             Action::WorkspaceThreadsLoadFailed {
                 workspace_id: _,
@@ -1740,7 +1763,7 @@ mod tests {
     use super::*;
     use crate::{
         ChatScrollAnchor, CodexCommandExecutionStatus, CodexThreadError, CodexThreadItem,
-        CodexUsage, ContextTokenKind, ConversationSnapshot,
+        CodexUsage, ContextTokenKind, ConversationSnapshot, ConversationThreadMeta,
     };
 
     fn default_thread_id() -> WorkspaceThreadId {
@@ -1833,6 +1856,84 @@ mod tests {
             .expect("missing conversation");
         assert_eq!(conversation.agent_model_id, "gpt-5.2-codex");
         assert_eq!(conversation.thinking_effort, ThinkingEffort::High);
+    }
+
+    #[test]
+    fn workspace_threads_loaded_restores_missing_tabs() {
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+            is_git: true,
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::CreateWorkspace {
+            project_id,
+            branch_name_hint: None,
+        });
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "w1".to_owned(),
+            branch_name: "repo/w1".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/w1"),
+        });
+
+        let workspace_id = workspace_id_by_name(&state, "w1");
+        let effects = state.apply(Action::WorkspaceThreadsLoaded {
+            workspace_id,
+            threads: vec![
+                ConversationThreadMeta {
+                    thread_id: WorkspaceThreadId(3),
+                    remote_thread_id: Some("remote-3".to_owned()),
+                    title: "Thread 3".to_owned(),
+                    updated_at_unix_seconds: 300,
+                },
+                ConversationThreadMeta {
+                    thread_id: WorkspaceThreadId(2),
+                    remote_thread_id: Some("remote-2".to_owned()),
+                    title: "Thread 2".to_owned(),
+                    updated_at_unix_seconds: 200,
+                },
+                ConversationThreadMeta {
+                    thread_id: WorkspaceThreadId(1),
+                    remote_thread_id: Some("remote-1".to_owned()),
+                    title: "Thread 1".to_owned(),
+                    updated_at_unix_seconds: 100,
+                },
+            ],
+        });
+
+        assert!(
+            effects
+                .iter()
+                .any(|effect| matches!(effect, Effect::SaveAppState))
+        );
+
+        let tabs = state
+            .workspace_tabs(workspace_id)
+            .expect("missing workspace tabs");
+        assert_eq!(
+            tabs.open_tabs,
+            vec![
+                WorkspaceThreadId(1),
+                WorkspaceThreadId(2),
+                WorkspaceThreadId(3)
+            ]
+        );
+        assert_eq!(tabs.next_thread_id, 4);
+
+        for thread_id in [
+            WorkspaceThreadId(1),
+            WorkspaceThreadId(2),
+            WorkspaceThreadId(3),
+        ] {
+            let conversation = state
+                .workspace_thread_conversation(workspace_id, thread_id)
+                .expect("missing conversation");
+            assert_eq!(
+                conversation.thread_id,
+                Some(format!("remote-{}", thread_id.0))
+            );
+        }
     }
 
     #[test]
