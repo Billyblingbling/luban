@@ -135,11 +135,38 @@ export function activityFromAgentItemLike(args: {
   if (kind === "file_change") {
     const status = forcedStatus ?? "done"
     const changes = Array.isArray(payload?.changes) ? payload.changes : []
-    const detail = changes.map((c: any) => `${c.kind ?? "update"} ${c.path ?? ""}`).join("\n")
+
+    const normalizePathForSummary = (raw: unknown): string => {
+      const value = String(raw ?? "").trim()
+      if (!value) return ""
+      return value.replace(/^(\.\/|\.\\)+/, "")
+    }
+
+    const paths = (() => {
+      const out: string[] = []
+      for (const change of changes) {
+        const path = normalizePathForSummary(change?.path)
+        if (!path) continue
+        if (out.includes(path)) continue
+        out.push(path)
+      }
+      return out
+    })()
+
+    const title = (() => {
+      if (paths.length === 0) return `File changes (${changes.length})`
+      const limit = 3
+      const shown = paths.slice(0, limit)
+      const remaining = paths.length - shown.length
+      const suffix = remaining > 0 ? `, +${remaining}` : ""
+      return `File changes: ${shown.join(", ")}${suffix}`
+    })()
+
+    const detail = changes.map((c: any) => `${c.kind ?? "update"} ${normalizePathForSummary(c.path)}`).join("\n")
     return {
       id: args.id,
       type: "file_edit",
-      title: `File changes (${changes.length})`,
+      title,
       detail,
       status,
     }

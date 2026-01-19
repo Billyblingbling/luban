@@ -1769,6 +1769,7 @@ impl Engine {
                         let emit_many_steps = prompt.contains("e2e-many-steps");
                         let emit_pagination_steps = prompt.contains("e2e-pagination-steps");
                         let emit_markdown_reasoning = prompt.contains("e2e-thinking-markdown");
+                        let emit_file_change = prompt.contains("e2e-file-change");
 
                         if emit_many_steps || emit_pagination_steps {
                             let count = if emit_pagination_steps {
@@ -1955,6 +1956,35 @@ impl Engine {
                                                 text:
                                                     "**Plan**: verify markdown summary stripping."
                                                         .to_owned(),
+                                            },
+                                        },
+                                    }),
+                                });
+                            }
+
+                            if emit_file_change {
+                                let _ = tx.blocking_send(EngineCommand::DispatchAction {
+                                    action: Box::new(Action::AgentEventReceived {
+                                        workspace_id,
+                                        thread_id,
+                                        event: luban_domain::CodexThreadEvent::ItemCompleted {
+                                            item: luban_domain::CodexThreadItem::FileChange {
+                                                id: "e2e_file_change_1".to_owned(),
+                                                changes: vec![
+                                                    luban_domain::CodexFileUpdateChange {
+                                                        path: "src/e2e-file-change/a.txt".to_owned(),
+                                                        kind: luban_domain::CodexPatchChangeKind::Add,
+                                                    },
+                                                    luban_domain::CodexFileUpdateChange {
+                                                        path: "web/e2e-file-change/b.ts".to_owned(),
+                                                        kind: luban_domain::CodexPatchChangeKind::Update,
+                                                    },
+                                                    luban_domain::CodexFileUpdateChange {
+                                                        path: "README.md".to_owned(),
+                                                        kind: luban_domain::CodexPatchChangeKind::Delete,
+                                                    },
+                                                ],
+                                                status: luban_domain::CodexPatchApplyStatus::Completed,
                                             },
                                         },
                                     }),
