@@ -9,6 +9,10 @@ use std::{
     time::Duration,
 };
 
+fn should_skip_git_repo_check(worktree_path: &Path) -> bool {
+    !worktree_path.join(".git").exists()
+}
+
 pub(super) struct CodexTurnParams {
     pub(super) thread_id: Option<String>,
     pub(super) worktree_path: PathBuf,
@@ -90,7 +94,13 @@ pub(super) fn run_codex_turn_streamed_via_cli(
         .arg(sandbox_mode)
         .arg("--ask-for-approval")
         .arg("never")
-        .arg("--search")
+        .arg("--search");
+
+    if should_skip_git_repo_check(&worktree_path) {
+        command.arg("--skip-git-repo-check");
+    }
+
+    command
         .arg("exec")
         .arg("--json")
         .arg("-C")
@@ -248,6 +258,36 @@ pub(super) fn run_codex_turn_streamed_via_cli(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn temp_dir(prefix: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("{prefix}-{}-{}", std::process::id(), nanos));
+        std::fs::create_dir_all(&path).expect("create temp dir");
+        path
+    }
+
+    #[test]
+    fn skip_git_repo_check_is_true_for_non_git_dirs() {
+        let root = temp_dir("luban-codex-nongit");
+        assert!(should_skip_git_repo_check(&root));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn skip_git_repo_check_is_false_when_dot_git_exists() {
+        let root = temp_dir("luban-codex-gitfile");
+        std::fs::write(root.join(".git"), "gitdir: /tmp/example\n").expect("write .git");
+        assert!(!should_skip_git_repo_check(&root));
+        let _ = std::fs::remove_dir_all(root);
+
+        let root2 = temp_dir("luban-codex-gitdir");
+        std::fs::create_dir(root2.join(".git")).expect("mkdir .git");
+        assert!(!should_skip_git_repo_check(&root2));
+        let _ = std::fs::remove_dir_all(root2);
+    }
 
     #[test]
     fn codex_stdout_parsing_accepts_events() {
