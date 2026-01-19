@@ -1,8 +1,10 @@
 import { expect, test } from "@playwright/test"
-import { ensureWorkspace } from "./helpers"
+import { activeWorkspaceId, ensureWorkspace } from "./helpers"
 
 test("loads older conversation entries when scrolling to top", async ({ page }) => {
   await ensureWorkspace(page)
+
+  const workspaceId = await activeWorkspaceId(page)
 
   const tabTitles = page.getByTestId("thread-tab-title")
   const beforeTabs = await tabTitles.count()
@@ -12,17 +14,12 @@ test("loads older conversation entries when scrolling to top", async ({ page }) 
   await newTab.scrollIntoViewIfNeeded()
   await newTab.click()
 
-  const ids = await page.evaluate(async () => {
-    const raw = localStorage.getItem("luban:active_workspace_id")
-    const workspaceId = raw ? Number(raw) : null
-    if (!workspaceId || !Number.isFinite(workspaceId)) throw new Error("missing active workspace id")
-    const threadsRes = await fetch(`/api/workspaces/${workspaceId}/threads`)
-    if (!threadsRes.ok) throw new Error(`threads fetch failed: ${threadsRes.status}`)
-    const threads = await threadsRes.json()
-    const threadId = Number(threads?.tabs?.active_tab ?? null)
-    if (!threadId || !Number.isFinite(threadId)) throw new Error("missing active thread id")
-    return { workspaceId, threadId }
-  })
+  const threadsRes = await page.request.get(`/api/workspaces/${workspaceId}/threads`)
+  expect(threadsRes.ok()).toBeTruthy()
+  const threads = (await threadsRes.json()) as { tabs: { active_tab: number } }
+  const threadId = Number(threads.tabs.active_tab)
+  expect(Number.isFinite(threadId) && threadId > 0).toBeTruthy()
+  const ids = { workspaceId, threadId }
 
   const runId = Math.random().toString(16).slice(2)
   const marker = `e2e-pagination-steps-${runId}`
@@ -30,7 +27,16 @@ test("loads older conversation entries when scrolling to top", async ({ page }) 
   await page.getByTestId("chat-input").fill(marker)
   await page.getByTestId("chat-send").click()
 
-  await page.getByTestId("agent-running-header").waitFor({ timeout: 60_000 })
+  await expect
+    .poll(async () => {
+      const res = await page.request.get(
+        `/api/workspaces/${ids.workspaceId}/conversations/${ids.threadId}?limit=1`,
+      )
+      if (!res.ok()) return 0
+      const snap = (await res.json()) as { entries_total?: number }
+      return snap.entries_total ?? 0
+    }, { timeout: 60_000 })
+    .toBeGreaterThan(2000)
 
   await expect
     .poll(async () => {

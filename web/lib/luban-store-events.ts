@@ -3,6 +3,7 @@
 import type { ServerEvent, WorkspaceId } from "./luban-api"
 import type { LubanStore } from "./luban-store"
 import { DEFAULT_NEW_THREAD_TIMEOUT_MS, pickCreatedThreadId } from "./luban-thread-flow"
+import { normalizeWorkspaceTabsSnapshot } from "./workspace-tabs"
 
 export function createLubanServerEventHandler(args: {
   store: LubanStore
@@ -20,7 +21,7 @@ export function createLubanServerEventHandler(args: {
         if (wid == null || wid !== event.workspace_id) return
 
         args.store.setThreads(event.threads)
-        args.store.setWorkspaceTabs(event.tabs)
+        args.store.setWorkspaceTabs(normalizeWorkspaceTabsSnapshot({ tabs: event.tabs, threads: event.threads }))
         const current = args.store.refs.activeThreadIdRef.current
 
         const pending = args.store.refs.pendingCreateThreadRef.current

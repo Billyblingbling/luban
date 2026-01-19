@@ -88,6 +88,13 @@ pub(crate) fn apply_persisted_app_state(
         ),
     };
     state.last_open_workspace_id = persisted.last_open_workspace_id.map(WorkspaceId);
+    state.open_button_selection = persisted
+        .open_button_selection
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .filter(|s| s.len() <= 1024)
+        .map(ToOwned::to_owned);
     state.workspace_tabs = HashMap::new();
     state.conversations = HashMap::new();
     state.workspace_unread_completions = persisted
@@ -271,6 +278,7 @@ pub(crate) fn to_persisted_app_state(state: &AppState) -> PersistedAppState {
         ),
         agent_codex_enabled: Some(state.agent_codex_enabled),
         last_open_workspace_id: state.last_open_workspace_id.map(|id| id.0),
+        open_button_selection: state.open_button_selection.clone(),
         workspace_active_thread_id: state
             .workspace_tabs
             .iter()

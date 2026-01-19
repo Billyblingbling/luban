@@ -122,6 +122,8 @@ impl GitWorkspaceService {
                 entries_start: 0,
                 pending_prompts: Vec::new(),
                 queue_paused: false,
+                run_started_at_unix_ms: None,
+                run_finished_at_unix_ms: None,
             }));
         }
 
@@ -161,6 +163,8 @@ impl GitWorkspaceService {
             entries_start: 0,
             pending_prompts: Vec::new(),
             queue_paused: false,
+            run_started_at_unix_ms: None,
+            run_finished_at_unix_ms: None,
         }))
     }
 

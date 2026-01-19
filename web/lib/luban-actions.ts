@@ -12,26 +12,18 @@ import type {
   SystemTaskKind,
   TaskIntentKind,
   TaskDraft,
-  TaskExecuteMode,
-  TaskExecuteResult,
-  ThinkingEffort,
-  WorkspaceId,
-  WorkspaceThreadId,
+	TaskExecuteMode,
+	TaskExecuteResult,
+	ThinkingEffort,
+	WorkspaceId,
+	WorkspaceThreadId,
 } from "./luban-api"
 import { fetchConversation, fetchThreads } from "./luban-http"
 import type { LubanStore } from "./luban-store"
-import { ACTIVE_WORKSPACE_KEY, activeThreadKey } from "./ui-prefs"
 import { waitForNewThread } from "./luban-thread-flow"
 import { prependConversationSnapshot } from "./conversation-pagination"
 import { pickThreadId } from "./thread-ui"
-
-function readStoredActiveThreadId(workspaceId: WorkspaceId): number | null {
-  const raw = localStorage.getItem(activeThreadKey(workspaceId))
-  if (!raw) return null
-  const parsed = Number(raw)
-  if (!Number.isFinite(parsed)) return null
-  return parsed
-}
+import { normalizeWorkspaceTabsSnapshot } from "./workspace-tabs"
 
 export type LubanActions = {
   pickProjectPath: () => Promise<string | null>
@@ -96,6 +88,7 @@ export type LubanActions = {
   setAppearanceTheme: (theme: AppearanceTheme) => void
   setAppearanceFonts: (fonts: AppearanceFontsSnapshot) => void
   setGlobalZoom: (zoom: number) => void
+  setOpenButtonSelection: (selection: string) => void
 }
 
 export type LubanActionsInternal = LubanActions & {
@@ -259,7 +252,6 @@ export function createLubanActions(args: {
 
   async function selectThreadInWorkspace(workspaceId: WorkspaceId, threadId: number) {
     store.setActiveThreadId(threadId)
-    localStorage.setItem(activeThreadKey(workspaceId), String(threadId))
 
     args.sendAction({
       type: "activate_workspace_thread",
@@ -280,13 +272,12 @@ export function createLubanActions(args: {
   }> {
     const snap = await fetchThreads(workspaceId)
     store.setThreads(snap.threads)
-    store.setWorkspaceTabs(snap.tabs)
+    store.setWorkspaceTabs(normalizeWorkspaceTabsSnapshot({ tabs: snap.tabs, threads: snap.threads }))
 
     const current = store.refs.activeThreadIdRef.current
-    const stored = readStoredActiveThreadId(workspaceId)
     const initial = pickThreadId({
       threads: snap.threads,
-      preferredThreadId: current ?? stored ?? snap.tabs.active_tab,
+      preferredThreadId: current ?? snap.tabs.active_tab,
     })
 
     store.setActiveThreadId(initial)
@@ -294,7 +285,6 @@ export function createLubanActions(args: {
       store.setConversation(null)
       return { threadId: null }
     }
-    localStorage.setItem(activeThreadKey(workspaceId), String(initial))
 
     try {
       const convo = await fetchConversation(workspaceId, initial)
@@ -319,16 +309,14 @@ export function createLubanActions(args: {
 
     store.refs.pendingCreateThreadRef.current = null
     store.setThreads(created.threads)
-    store.setWorkspaceTabs(created.tabs)
+    store.setWorkspaceTabs(normalizeWorkspaceTabsSnapshot({ tabs: created.tabs, threads: created.threads }))
     await selectThreadInWorkspace(args2.workspaceId, created.createdThreadId)
     return true
   }
 
   async function openWorkspace(workspaceId: WorkspaceId) {
     store.setActiveWorkspaceId(workspaceId)
-    localStorage.setItem(ACTIVE_WORKSPACE_KEY, String(workspaceId))
-    const storedActiveThreadId = readStoredActiveThreadId(workspaceId)
-    store.setActiveThreadId(storedActiveThreadId)
+    store.setActiveThreadId(null)
     store.setThreads([])
     store.setWorkspaceTabs(null)
     store.setConversation(null)
@@ -338,12 +326,11 @@ export function createLubanActions(args: {
     try {
       const snap = await fetchThreads(workspaceId)
       store.setThreads(snap.threads)
-      store.setWorkspaceTabs(snap.tabs)
+      store.setWorkspaceTabs(normalizeWorkspaceTabsSnapshot({ tabs: snap.tabs, threads: snap.threads }))
 
-      const stored = storedActiveThreadId
       const initial = pickThreadId({
         threads: snap.threads,
-        preferredThreadId: stored ?? snap.tabs.active_tab,
+        preferredThreadId: snap.tabs.active_tab,
       })
 
       if (initial == null) {
@@ -357,7 +344,6 @@ export function createLubanActions(args: {
       }
 
       store.setActiveThreadId(initial)
-      localStorage.setItem(activeThreadKey(workspaceId), String(initial))
       if (initial !== snap.tabs.active_tab) {
         args.sendAction({
           type: "activate_workspace_thread",
@@ -592,6 +578,10 @@ export function createLubanActions(args: {
     args.sendAction({ type: "appearance_global_zoom_changed", zoom })
   }
 
+  function setOpenButtonSelection(selection: string) {
+    args.sendAction({ type: "open_button_selection_changed", selection })
+  }
+
   return {
     pickProjectPath,
     addProject,
@@ -636,5 +626,6 @@ export function createLubanActions(args: {
     setAppearanceTheme,
     setAppearanceFonts,
     setGlobalZoom,
+    setOpenButtonSelection,
   }
 }

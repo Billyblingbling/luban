@@ -42,10 +42,22 @@ test("terminal background matches card background and survives reload", async ({
   expect(Math.abs(pixel.b - (rgb?.b ?? 0))).toBeLessThanOrEqual(tol)
 
   await page.reload()
-  await expect(page.getByTestId("thread-tab-title").first()).toBeVisible({ timeout: 60_000 })
+  await ensureWorkspace(page)
   await expect
     .poll(async () => await terminal.locator("canvas").count(), { timeout: 20_000 })
     .toBeGreaterThan(0)
+
+  const expectedAfter = await terminal.evaluate((el) => getComputedStyle(el as Element).backgroundColor)
+  const rgbAfter = parseRgb(expectedAfter)
+  expect(rgbAfter, `unexpected terminal background after reload: ${expectedAfter}`).not.toBeNull()
+
+  const shotAfter = await terminal.screenshot()
+  const pngAfter = PNG.sync.read(shotAfter)
+  const pixelAfter = samplePixel(pngAfter, Math.floor(pngAfter.width / 2), Math.max(0, pngAfter.height - 10))
+
+  expect(Math.abs(pixelAfter.r - (rgbAfter?.r ?? 0))).toBeLessThanOrEqual(tol)
+  expect(Math.abs(pixelAfter.g - (rgbAfter?.g ?? 0))).toBeLessThanOrEqual(tol)
+  expect(Math.abs(pixelAfter.b - (rgbAfter?.b ?? 0))).toBeLessThanOrEqual(tol)
 })
 
 test("terminal paste sends input frames", async ({ page }) => {

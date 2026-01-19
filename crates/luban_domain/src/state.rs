@@ -266,6 +266,10 @@ pub struct ConversationSnapshot {
     pub pending_prompts: Vec<QueuedPrompt>,
     #[serde(default)]
     pub queue_paused: bool,
+    #[serde(default)]
+    pub run_started_at_unix_ms: Option<u64>,
+    #[serde(default)]
+    pub run_finished_at_unix_ms: Option<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -290,6 +294,8 @@ pub struct WorkspaceConversation {
     pub entries_start: u64,
     pub codex_item_ids: HashSet<String>,
     pub run_status: OperationStatus,
+    pub run_started_at_unix_ms: Option<u64>,
+    pub run_finished_at_unix_ms: Option<u64>,
     pub current_run_config: Option<AgentRunConfig>,
     pub in_progress_items: BTreeMap<String, CodexThreadItem>,
     pub in_progress_order: VecDeque<String>,
@@ -309,6 +315,8 @@ impl WorkspaceConversation {
                 .saturating_add(self.entries.len() as u64),
         );
         self.entries_start = snapshot.entries_start;
+        self.run_started_at_unix_ms = snapshot.run_started_at_unix_ms;
+        self.run_finished_at_unix_ms = snapshot.run_finished_at_unix_ms;
         self.rebuild_codex_item_ids();
         self.trim_entries_to_limit();
     }
@@ -562,6 +570,7 @@ pub struct AppState {
     pub workspace_tabs: HashMap<WorkspaceId, WorkspaceTabs>,
     pub dashboard_preview_workspace_id: Option<WorkspaceId>,
     pub last_open_workspace_id: Option<WorkspaceId>,
+    pub open_button_selection: Option<String>,
     pub last_error: Option<String>,
     pub workspace_chat_scroll_y10: HashMap<(WorkspaceId, WorkspaceThreadId), i32>,
     pub workspace_chat_scroll_anchor: HashMap<(WorkspaceId, WorkspaceThreadId), ChatScrollAnchor>,
@@ -599,6 +608,7 @@ pub struct PersistedAppState {
     pub agent_default_thinking_effort: Option<String>,
     pub agent_codex_enabled: Option<bool>,
     pub last_open_workspace_id: Option<u64>,
+    pub open_button_selection: Option<String>,
     pub workspace_active_thread_id: HashMap<u64, u64>,
     pub workspace_open_tabs: HashMap<u64, Vec<u64>>,
     pub workspace_archived_tabs: HashMap<u64, Vec<u64>>,

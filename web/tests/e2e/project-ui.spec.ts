@@ -4,7 +4,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { requireEnv } from "./env"
-import { sendWsAction } from "./helpers"
+import { activeWorkspaceId, sendWsAction } from "./helpers"
 
 function runGit(cwd: string, args: string[]) {
   execFileSync("git", args, { cwd, stdio: "ignore" })
@@ -155,9 +155,7 @@ test("deleting the active project switches to another project's main workspace",
 
   await projectAToggle.click()
   await expect
-    .poll(async () => (await page.evaluate(() => localStorage.getItem("luban:active_workspace_id"))) ?? "", {
-      timeout: 20_000,
-    })
+    .poll(async () => String(await activeWorkspaceId(page, { timeoutMs: 500 })), { timeout: 20_000 })
     .toBe(String(snap.projectA.mainId))
 
   const projectAContainer = projectAToggle.locator("..").locator("..")
@@ -168,9 +166,7 @@ test("deleting the active project switches to another project's main workspace",
   await expect(page.getByTitle(projectPathA, { exact: true })).toHaveCount(0, { timeout: 20_000 })
 
   await expect
-    .poll(async () => (await page.evaluate(() => localStorage.getItem("luban:active_workspace_id"))) ?? "", {
-      timeout: 30_000,
-    })
+    .poll(async () => String(await activeWorkspaceId(page, { timeoutMs: 500 })), { timeout: 30_000 })
     .toBe(String(snap.projectB.mainId))
   await expect(page.getByTestId("active-project-name")).toHaveText(displayNameAfterDeletion, { timeout: 30_000 })
 })

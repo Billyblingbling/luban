@@ -1,11 +1,26 @@
 import { expect, test } from "@playwright/test"
-import { ensureWorkspace, sendWsAction } from "./helpers"
+import { activeWorkspaceId, ensureWorkspace, sendWsAction } from "./helpers"
 
 async function activeThreadId(page: import("@playwright/test").Page, workspaceId: number): Promise<number> {
   const res = await page.request.get(`/api/workspaces/${workspaceId}/threads`)
   expect(res.ok()).toBeTruthy()
   const snapshot = (await res.json()) as { tabs: { active_tab: number } }
   return Number(snapshot.tabs.active_tab)
+}
+
+async function threadTitle(page: import("@playwright/test").Page, workspaceId: number, threadId: number): Promise<string> {
+  const res = await page.request.get(`/api/workspaces/${workspaceId}/threads`)
+  expect(res.ok()).toBeTruthy()
+  const snapshot = (await res.json()) as { threads?: { thread_id: number; title: string }[] }
+  const found = snapshot.threads?.find((t) => Number(t.thread_id) === threadId)?.title
+  return found ?? `Thread ${threadId}`
+}
+
+async function clickThreadTab(page: import("@playwright/test").Page, title: string) {
+  const label = page.getByTestId("thread-tab-title").filter({ hasText: title }).first()
+  const tab = label.locator("..")
+  await tab.scrollIntoViewIfNeeded()
+  await tab.click()
 }
 
 async function createThreadViaUi(page: import("@playwright/test").Page, workspaceId: number): Promise<number> {
@@ -182,10 +197,7 @@ test("file attachments upload and render in user messages", async ({ page }) => 
 test("queued messages can be reordered and edited", async ({ page }) => {
   await ensureWorkspace(page)
 
-  const workspaceIdRaw = (await page.evaluate(() => localStorage.getItem("luban:active_workspace_id"))) ?? ""
-  const workspaceId = Number(workspaceIdRaw)
-  expect(Number.isFinite(workspaceId)).toBeTruthy()
-  expect(workspaceId).toBeGreaterThan(0)
+  const workspaceId = await activeWorkspaceId(page)
 
   const threadId = await activeThreadId(page, workspaceId)
   expect(threadId).toBeGreaterThan(0)
@@ -256,10 +268,7 @@ test("queued messages can be reordered and edited", async ({ page }) => {
 test("cancel -> submit turns the previous run into a cancelled activity stream and starts a new turn", async ({ page }) => {
   await ensureWorkspace(page)
 
-  const workspaceIdRaw = (await page.evaluate(() => localStorage.getItem("luban:active_workspace_id"))) ?? ""
-  const workspaceId = Number(workspaceIdRaw)
-  expect(Number.isFinite(workspaceId)).toBeTruthy()
-  expect(workspaceId).toBeGreaterThan(0)
+  const workspaceId = await activeWorkspaceId(page)
 
   const threadId = await createThreadViaUi(page, workspaceId)
   expect(threadId).toBeGreaterThan(0)
@@ -294,10 +303,7 @@ test("cancel -> submit turns the previous run into a cancelled activity stream a
 test("cancel -> escape pauses when queued prompts exist and shows resume", async ({ page }) => {
   await ensureWorkspace(page)
 
-  const workspaceIdRaw = (await page.evaluate(() => localStorage.getItem("luban:active_workspace_id"))) ?? ""
-  const workspaceId = Number(workspaceIdRaw)
-  expect(Number.isFinite(workspaceId)).toBeTruthy()
-  expect(workspaceId).toBeGreaterThan(0)
+  const workspaceId = await activeWorkspaceId(page)
 
   const threadId = await createThreadViaUi(page, workspaceId)
   expect(threadId).toBeGreaterThan(0)
@@ -341,10 +347,7 @@ test("cancel -> escape pauses when queued prompts exist and shows resume", async
 test("cancel -> escape without queued prompts shows cancelled activity stream", async ({ page }) => {
   await ensureWorkspace(page)
 
-  const workspaceIdRaw = (await page.evaluate(() => localStorage.getItem("luban:active_workspace_id"))) ?? ""
-  const workspaceId = Number(workspaceIdRaw)
-  expect(Number.isFinite(workspaceId)).toBeTruthy()
-  expect(workspaceId).toBeGreaterThan(0)
+  const workspaceId = await activeWorkspaceId(page)
 
   const threadId = await createThreadViaUi(page, workspaceId)
   expect(threadId).toBeGreaterThan(0)
@@ -375,10 +378,7 @@ test("cancel -> escape without queued prompts shows cancelled activity stream", 
 test("sending from chat input while paused queues instead of starting a new run", async ({ page }) => {
   await ensureWorkspace(page)
 
-  const workspaceIdRaw = (await page.evaluate(() => localStorage.getItem("luban:active_workspace_id"))) ?? ""
-  const workspaceId = Number(workspaceIdRaw)
-  expect(Number.isFinite(workspaceId)).toBeTruthy()
-  expect(workspaceId).toBeGreaterThan(0)
+  const workspaceId = await activeWorkspaceId(page)
 
   const threadId = await createThreadViaUi(page, workspaceId)
   expect(threadId).toBeGreaterThan(0)
@@ -429,10 +429,7 @@ test("sending from chat input while paused queues instead of starting a new run"
 test("agent running timer increments while running", async ({ page }) => {
   await ensureWorkspace(page)
 
-  const workspaceIdRaw = (await page.evaluate(() => localStorage.getItem("luban:active_workspace_id"))) ?? ""
-  const workspaceId = Number(workspaceIdRaw)
-  expect(Number.isFinite(workspaceId)).toBeTruthy()
-  expect(workspaceId).toBeGreaterThan(0)
+  const workspaceId = await activeWorkspaceId(page)
 
   const threadId = await createThreadViaUi(page, workspaceId)
   expect(threadId).toBeGreaterThan(0)
@@ -462,13 +459,60 @@ test("agent running timer increments while running", async ({ page }) => {
   await page.getByTestId("agent-running-input").press("Escape")
 })
 
+test("agent running timer survives switching tabs", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  const workspaceId = await activeWorkspaceId(page)
+
+  const firstThreadId = await activeThreadId(page, workspaceId)
+  expect(firstThreadId).toBeGreaterThan(0)
+  const secondThreadId = await createThreadViaUi(page, workspaceId)
+  expect(secondThreadId).toBeGreaterThan(0)
+
+  const firstTitle = await threadTitle(page, workspaceId, firstThreadId)
+  const secondTitle = await threadTitle(page, workspaceId, secondThreadId)
+  await clickThreadTab(page, firstTitle)
+
+  const runId = Math.random().toString(16).slice(2)
+  const seed = `e2e-cancel-tab-switch-${runId}`
+
+  await sendWsAction(page, {
+    type: "send_agent_message",
+    workspace_id: workspaceId,
+    thread_id: firstThreadId,
+    text: `${seed}-run`,
+    attachments: [],
+  })
+
+  await expect(page.getByTestId("agent-running-cancel")).toBeVisible({ timeout: 20_000 })
+
+  const timer = page.getByTestId("agent-running-timer")
+  await expect(timer).toBeVisible({ timeout: 20_000 })
+
+  await expect
+    .poll(async () => (await timer.textContent())?.trim() ?? "", { timeout: 10_000 })
+    .not.toBe("00:00")
+  const initial = (await timer.textContent())?.trim() ?? ""
+
+  await clickThreadTab(page, secondTitle)
+  await expect(page.getByTestId("agent-running-timer")).toHaveCount(0, { timeout: 20_000 })
+
+  await clickThreadTab(page, firstTitle)
+  await expect(timer).toBeVisible({ timeout: 20_000 })
+  await expect(timer).not.toHaveText("00:00")
+  await expect
+    .poll(async () => (await timer.textContent())?.trim() ?? "", { timeout: 10_000 })
+    .not.toBe(initial)
+
+  // Cleanup: cancel this run so it doesn't leak into other tests.
+  await page.getByTestId("agent-running-cancel").click()
+  await page.getByTestId("agent-running-input").press("Escape")
+})
+
 test("double-Esc while agent is running opens cancel editor", async ({ page }) => {
   await ensureWorkspace(page)
 
-  const workspaceIdRaw = (await page.evaluate(() => localStorage.getItem("luban:active_workspace_id"))) ?? ""
-  const workspaceId = Number(workspaceIdRaw)
-  expect(Number.isFinite(workspaceId)).toBeTruthy()
-  expect(workspaceId).toBeGreaterThan(0)
+  const workspaceId = await activeWorkspaceId(page)
 
   const threadId = await createThreadViaUi(page, workspaceId)
   expect(threadId).toBeGreaterThan(0)
@@ -501,10 +545,7 @@ test("double-Esc while agent is running opens cancel editor", async ({ page }) =
 test("expanded agent running card keeps header anchored as activities grow", async ({ page }) => {
   await ensureWorkspace(page)
 
-  const workspaceIdRaw = (await page.evaluate(() => localStorage.getItem("luban:active_workspace_id"))) ?? ""
-  const workspaceId = Number(workspaceIdRaw)
-  expect(Number.isFinite(workspaceId)).toBeTruthy()
-  expect(workspaceId).toBeGreaterThan(0)
+  const workspaceId = await activeWorkspaceId(page)
 
   const threadId = await createThreadViaUi(page, workspaceId)
   expect(threadId).toBeGreaterThan(0)

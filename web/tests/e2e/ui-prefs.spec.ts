@@ -1,12 +1,5 @@
 import { expect, test } from "@playwright/test"
-import { ensureWorkspace, sendWsAction } from "./helpers"
-
-async function activeWorkspaceId(page: import("@playwright/test").Page): Promise<number> {
-  const raw = (await page.evaluate(() => localStorage.getItem("luban:active_workspace_id"))) ?? ""
-  const id = Number(raw)
-  expect(Number.isFinite(id) && id > 0).toBeTruthy()
-  return id
-}
+import { activeWorkspaceId, ensureWorkspace, fetchAppSnapshot } from "./helpers"
 
 async function serverActiveThreadId(
   page: import("@playwright/test").Page,
@@ -18,7 +11,7 @@ async function serverActiveThreadId(
   return Number(snapshot.tabs.active_tab)
 }
 
-test("restores last active tab per workspace even if server differs", async ({ page }) => {
+test("restores last active tab per workspace on reload", async ({ page }) => {
   await ensureWorkspace(page)
 
   const workspaceId = await activeWorkspaceId(page)
@@ -28,23 +21,13 @@ test("restores last active tab per workspace even if server differs", async ({ p
 
   await expect.poll(async () => await serverActiveThreadId(page, workspaceId), { timeout: 30_000 }).not.toBe(before)
   const createdThreadId = await serverActiveThreadId(page, workspaceId)
-  const storedKey = `luban:active_thread_id:${workspaceId}`
-  await expect
-    .poll(async () => (await page.evaluate((k) => localStorage.getItem(k), storedKey)) ?? "", { timeout: 10_000 })
-    .toBe(String(createdThreadId))
-
-  // Simulate another client selecting a different tab on the server (without changing localStorage).
-  await sendWsAction(page, { type: "activate_workspace_thread", workspace_id: workspaceId, thread_id: before })
-  await expect
-    .poll(async () => await serverActiveThreadId(page, workspaceId), { timeout: 10_000 })
-    .toBe(before)
 
   await page.reload()
   await page.getByTestId("chat-input").waitFor({ state: "visible", timeout: 60_000 })
 
-  // The UI should restore the locally stored active tab, and self-heal the server state.
+  await expect.poll(async () => await serverActiveThreadId(page, workspaceId), { timeout: 30_000 }).toBe(createdThreadId)
   await expect
-    .poll(async () => await serverActiveThreadId(page, workspaceId), { timeout: 30_000 })
+    .poll(async () => Number((await fetchAppSnapshot(page))?.ui?.active_thread_id ?? 0), { timeout: 30_000 })
     .toBe(createdThreadId)
 })
 
@@ -54,6 +37,9 @@ test("remembers the last used open button selection", async ({ page }) => {
   await page.getByTestId("open-button-menu").click()
   await page.getByTestId("open-button-item-cursor").click()
   await expect(page.getByTestId("open-button-primary")).toHaveText(/Cursor/, { timeout: 10_000 })
+  await expect
+    .poll(async () => String((await fetchAppSnapshot(page))?.ui?.open_button_selection ?? ""), { timeout: 10_000 })
+    .toContain("cursor")
 
   await page.reload()
   await page.getByTestId("open-button-primary").waitFor({ timeout: 30_000 })

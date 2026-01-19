@@ -197,6 +197,16 @@ pub enum Action {
         thread_id: WorkspaceThreadId,
         event: CodexThreadEvent,
     },
+    AgentRunStartedAt {
+        workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
+        started_at_unix_ms: u64,
+    },
+    AgentRunFinishedAt {
+        workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
+        finished_at_unix_ms: u64,
+    },
     AgentTurnFinished {
         workspace_id: WorkspaceId,
         thread_id: WorkspaceThreadId,
@@ -285,6 +295,10 @@ pub enum Action {
         workspace_id: WorkspaceId,
         thread_id: WorkspaceThreadId,
         anchor: ChatScrollAnchor,
+    },
+
+    OpenButtonSelectionChanged {
+        selection: String,
     },
 
     SaveAppState,

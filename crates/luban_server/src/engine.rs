@@ -1148,6 +1148,8 @@ impl Engine {
                 ThinkingEffort::XHigh => luban_api::ThinkingEffort::XHigh,
             },
             run_status: luban_api::OperationStatus::Idle,
+            run_started_at_unix_ms: loaded.run_started_at_unix_ms,
+            run_finished_at_unix_ms: loaded.run_finished_at_unix_ms,
             entries: loaded.entries.iter().map(map_conversation_entry).collect(),
             entries_total,
             entries_start,
@@ -1227,6 +1229,8 @@ impl Engine {
         };
 
         let queue_paused = conversation.queue_paused;
+        let run_started_at_unix_ms = conversation.run_started_at_unix_ms;
+        let run_finished_at_unix_ms = conversation.run_finished_at_unix_ms;
         let pending_prompts = conversation
             .pending_prompts
             .iter()
@@ -1243,6 +1247,8 @@ impl Engine {
                 workspace_name,
                 thread_local_id,
                 queue_paused,
+                run_started_at_unix_ms,
+                run_finished_at_unix_ms,
                 pending_prompts,
             )
         })
@@ -1709,6 +1715,13 @@ impl Engine {
                 attachments,
                 run_config: _,
             } => {
+                let started_at_unix_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis()
+                    .try_into()
+                    .unwrap_or(0u64);
+
                 let use_fake_agent = std::env::var_os("LUBAN_E2E_ROOT").is_some()
                     && std::env::var("LUBAN_CODEX_BIN")
                         .ok()
@@ -2005,6 +2018,19 @@ impl Engine {
                         }
 
                         let _ = tx.blocking_send(EngineCommand::DispatchAction {
+                            action: Box::new(Action::AgentRunFinishedAt {
+                                workspace_id,
+                                thread_id,
+                                finished_at_unix_ms: std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_millis()
+                                    .try_into()
+                                    .unwrap_or(0u64),
+                            }),
+                        });
+
+                        let _ = tx.blocking_send(EngineCommand::DispatchAction {
                             action: Box::new(Action::AgentTurnFinished {
                                 workspace_id,
                                 thread_id,
@@ -2012,7 +2038,11 @@ impl Engine {
                         });
                     });
 
-                    return Ok(VecDeque::new());
+                    return Ok(VecDeque::from([Action::AgentRunStartedAt {
+                        workspace_id,
+                        thread_id,
+                        started_at_unix_ms,
+                    }]));
                 }
 
                 let services = self.services.clone();
@@ -2043,6 +2073,19 @@ impl Engine {
                     }
 
                     let _ = tx.blocking_send(EngineCommand::DispatchAction {
+                        action: Box::new(Action::AgentRunFinishedAt {
+                            workspace_id,
+                            thread_id,
+                            finished_at_unix_ms: std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis()
+                                .try_into()
+                                .unwrap_or(0u64),
+                        }),
+                    });
+
+                    let _ = tx.blocking_send(EngineCommand::DispatchAction {
                         action: Box::new(Action::AgentTurnFinished {
                             workspace_id,
                             thread_id,
@@ -2050,7 +2093,11 @@ impl Engine {
                     });
                 });
 
-                Ok(VecDeque::new())
+                Ok(VecDeque::from([Action::AgentRunStartedAt {
+                    workspace_id,
+                    thread_id,
+                    started_at_unix_ms,
+                }]))
             }
             Effect::CancelAgentTurn {
                 workspace_id,
@@ -2419,6 +2466,21 @@ impl Engine {
                     })
                     .collect(),
             },
+            ui: {
+                let active_workspace_id = match self.state.main_pane {
+                    luban_domain::MainPane::Workspace(id) => Some(id),
+                    _ => self.state.last_open_workspace_id,
+                };
+                let active_thread_id =
+                    active_workspace_id.and_then(|id| self.state.active_thread_id(id));
+                luban_api::UiSnapshot {
+                    active_workspace_id: active_workspace_id
+                        .map(|id| luban_api::WorkspaceId(id.as_u64())),
+                    active_thread_id: active_thread_id
+                        .map(|id| luban_api::WorkspaceThreadId(id.as_u64())),
+                    open_button_selection: self.state.open_button_selection.clone(),
+                }
+            },
         }
     }
 
@@ -2480,6 +2542,8 @@ impl Engine {
                 OperationStatus::Idle => luban_api::OperationStatus::Idle,
                 OperationStatus::Running => luban_api::OperationStatus::Running,
             },
+            run_started_at_unix_ms: conversation.run_started_at_unix_ms,
+            run_finished_at_unix_ms: conversation.run_finished_at_unix_ms,
             entries: conversation
                 .entries
                 .get(local_start..local_end)
@@ -2759,6 +2823,16 @@ fn conversation_key_for_action(action: &Action) -> Option<(WorkspaceId, Workspac
             thread_id,
             ..
         } => Some((*workspace_id, *thread_id)),
+        Action::AgentRunStartedAt {
+            workspace_id,
+            thread_id,
+            ..
+        } => Some((*workspace_id, *thread_id)),
+        Action::AgentRunFinishedAt {
+            workspace_id,
+            thread_id,
+            ..
+        } => Some((*workspace_id, *thread_id)),
         Action::AgentTurnFinished {
             workspace_id,
             thread_id,
@@ -2850,6 +2924,16 @@ fn queue_state_key_for_action(action: &Action) -> Option<(WorkspaceId, Workspace
                 CodexThreadEvent::TurnCompleted { .. }
                 | CodexThreadEvent::TurnFailed { .. }
                 | CodexThreadEvent::Error { .. },
+        } => Some((*workspace_id, *thread_id)),
+        Action::AgentRunStartedAt {
+            workspace_id,
+            thread_id,
+            ..
+        } => Some((*workspace_id, *thread_id)),
+        Action::AgentRunFinishedAt {
+            workspace_id,
+            thread_id,
+            ..
         } => Some((*workspace_id, *thread_id)),
         _ => None,
     }
@@ -3293,6 +3377,9 @@ fn map_client_action(action: luban_api::ClientAction) -> Option<Action> {
             thread_id: WorkspaceThreadId::from_u64(thread_id.0),
             to_index,
         }),
+        luban_api::ClientAction::OpenButtonSelectionChanged { selection } => {
+            Some(Action::OpenButtonSelectionChanged { selection })
+        }
         luban_api::ClientAction::AppearanceThemeChanged { theme } => {
             Some(Action::AppearanceThemeChanged {
                 theme: match theme {
@@ -3594,6 +3681,7 @@ mod tests {
                 agent_default_thinking_effort: None,
                 agent_codex_enabled: Some(true),
                 last_open_workspace_id: None,
+                open_button_selection: None,
                 workspace_active_thread_id: HashMap::new(),
                 workspace_open_tabs: HashMap::new(),
                 workspace_archived_tabs: HashMap::new(),
@@ -4064,6 +4152,7 @@ mod tests {
             agent_default_thinking_effort: None,
             agent_codex_enabled: Some(true),
             last_open_workspace_id: Some(10),
+            open_button_selection: None,
             workspace_active_thread_id: HashMap::from([(10, 2)]),
             workspace_open_tabs: HashMap::from([(10, vec![1, 2])]),
             workspace_archived_tabs: HashMap::new(),
@@ -4225,6 +4314,7 @@ mod tests {
                 agent_default_thinking_effort: None,
                 agent_codex_enabled: Some(true),
                 last_open_workspace_id: None,
+                open_button_selection: None,
                 workspace_active_thread_id: HashMap::new(),
                 workspace_open_tabs: HashMap::new(),
                 workspace_archived_tabs: HashMap::new(),
@@ -4498,6 +4588,7 @@ mod tests {
                 agent_default_thinking_effort: None,
                 agent_codex_enabled: Some(true),
                 last_open_workspace_id: None,
+                open_button_selection: None,
                 workspace_active_thread_id: HashMap::new(),
                 workspace_open_tabs: HashMap::new(),
                 workspace_archived_tabs: HashMap::new(),
@@ -4816,6 +4907,7 @@ mod tests {
                 agent_default_thinking_effort: None,
                 agent_codex_enabled: Some(true),
                 last_open_workspace_id: None,
+                open_button_selection: None,
                 workspace_active_thread_id: HashMap::new(),
                 workspace_open_tabs: HashMap::new(),
                 workspace_archived_tabs: HashMap::new(),
@@ -5023,6 +5115,7 @@ mod tests {
                 agent_default_thinking_effort: None,
                 agent_codex_enabled: Some(true),
                 last_open_workspace_id: None,
+                open_button_selection: None,
                 workspace_active_thread_id: HashMap::new(),
                 workspace_open_tabs: HashMap::new(),
                 workspace_archived_tabs: HashMap::new(),

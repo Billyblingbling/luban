@@ -50,6 +50,13 @@ export type AppSnapshot = {
   appearance: AppearanceSnapshot
   agent: AgentSettingsSnapshot
   task: TaskSettingsSnapshot
+  ui: UiSnapshot
+}
+
+export type UiSnapshot = {
+  active_workspace_id?: WorkspaceId
+  active_thread_id?: WorkspaceThreadId
+  open_button_selection?: string
 }
 
 export type ProjectSnapshot = {
@@ -174,6 +181,8 @@ export type ConversationSnapshot = {
   agent_model_id: string
   thinking_effort: ThinkingEffort
   run_status: OperationStatus
+  run_started_at_unix_ms?: number | null
+  run_finished_at_unix_ms?: number | null
   entries: ConversationEntry[]
   entries_total?: number
   entries_start?: number
@@ -353,6 +362,7 @@ export type ClientAction =
       thread_id: WorkspaceThreadId
       to_index: number
     }
+  | { type: "open_button_selection_changed"; selection: string }
   | { type: "appearance_theme_changed"; theme: AppearanceTheme }
   | { type: "appearance_fonts_changed"; fonts: AppearanceFontsSnapshot }
   | { type: "appearance_global_zoom_changed"; zoom: number }

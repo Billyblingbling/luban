@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
-const LATEST_SCHEMA_VERSION: u32 = 12;
+const LATEST_SCHEMA_VERSION: u32 = 13;
 const WORKSPACE_CHAT_SCROLL_PREFIX: &str = "workspace_chat_scroll_y10_";
 const WORKSPACE_CHAT_SCROLL_ANCHOR_PREFIX: &str = "workspace_chat_scroll_anchor_";
 const WORKSPACE_ACTIVE_THREAD_PREFIX: &str = "workspace_active_thread_id_";
@@ -18,6 +18,7 @@ const WORKSPACE_ARCHIVED_TAB_PREFIX: &str = "workspace_archived_tab_";
 const WORKSPACE_NEXT_THREAD_ID_PREFIX: &str = "workspace_next_thread_id_";
 const WORKSPACE_UNREAD_COMPLETION_PREFIX: &str = "workspace_unread_completion_";
 const LAST_OPEN_WORKSPACE_ID_KEY: &str = "last_open_workspace_id";
+const OPEN_BUTTON_SELECTION_KEY: &str = "open_button_selection";
 const GLOBAL_ZOOM_PERCENT_KEY: &str = "global_zoom_percent";
 const AGENT_DEFAULT_MODEL_ID_KEY: &str = "agent_default_model_id";
 const AGENT_DEFAULT_THINKING_EFFORT_KEY: &str = "agent_default_thinking_effort";
@@ -112,6 +113,13 @@ const MIGRATIONS: &[(u32, &str)] = &[
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/migrations/0012_conversation_queue.sql"
+        )),
+    ),
+    (
+        13,
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/migrations/0013_conversation_run_timing.sql"
         )),
     ),
 ];
@@ -215,6 +223,8 @@ enum DbCommand {
         workspace_name: String,
         thread_local_id: u64,
         queue_paused: bool,
+        run_started_at_unix_ms: Option<u64>,
+        run_finished_at_unix_ms: Option<u64>,
         pending_prompts: Vec<QueuedPrompt>,
         reply: mpsc::Sender<anyhow::Result<()>>,
     },
@@ -397,6 +407,8 @@ impl SqliteStore {
                                 workspace_name,
                                 thread_local_id,
                                 queue_paused,
+                                run_started_at_unix_ms,
+                                run_finished_at_unix_ms,
                                 pending_prompts,
                                 reply,
                             },
@@ -406,6 +418,8 @@ impl SqliteStore {
                                 &workspace_name,
                                 thread_local_id,
                                 queue_paused,
+                                run_started_at_unix_ms,
+                                run_finished_at_unix_ms,
                                 &pending_prompts,
                             ));
                         }
@@ -661,12 +675,15 @@ impl SqliteStore {
         reply_rx.recv().context("sqlite worker terminated")?
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn save_conversation_queue_state(
         &self,
         project_slug: String,
         workspace_name: String,
         thread_local_id: u64,
         queue_paused: bool,
+        run_started_at_unix_ms: Option<u64>,
+        run_finished_at_unix_ms: Option<u64>,
         pending_prompts: Vec<QueuedPrompt>,
     ) -> anyhow::Result<()> {
         let (reply_tx, reply_rx) = mpsc::channel();
@@ -676,6 +693,8 @@ impl SqliteStore {
                 workspace_name,
                 thread_local_id,
                 queue_paused,
+                run_started_at_unix_ms,
+                run_finished_at_unix_ms,
                 pending_prompts,
                 reply: reply_tx,
             })
@@ -945,6 +964,7 @@ impl SqliteDatabase {
                 agent_default_thinking_effort,
                 agent_codex_enabled,
                 last_open_workspace_id: None,
+                open_button_selection: None,
                 workspace_active_thread_id: HashMap::new(),
                 workspace_open_tabs: HashMap::new(),
                 workspace_archived_tabs: HashMap::new(),
@@ -1049,6 +1069,16 @@ impl SqliteDatabase {
             .optional()
             .context("failed to load last open workspace id")?
             .and_then(|value| u64::try_from(value).ok());
+
+        let open_button_selection = self
+            .conn
+            .query_row(
+                "SELECT value FROM app_settings_text WHERE key = ?1",
+                params![OPEN_BUTTON_SELECTION_KEY],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .context("failed to load open button selection")?;
 
         let mut workspace_active_thread_id = HashMap::new();
         let mut stmt = self.conn.prepare(
@@ -1287,6 +1317,7 @@ impl SqliteDatabase {
             agent_default_thinking_effort,
             agent_codex_enabled,
             last_open_workspace_id,
+            open_button_selection,
             workspace_active_thread_id,
             workspace_open_tabs,
             workspace_archived_tabs,
@@ -1548,6 +1579,11 @@ impl SqliteDatabase {
                 &tx,
                 APPEARANCE_TERMINAL_FONT_KEY,
                 snapshot.appearance_terminal_font.as_deref(),
+            )?;
+            upsert_text(
+                &tx,
+                OPEN_BUTTON_SELECTION_KEY,
+                snapshot.open_button_selection.as_deref(),
             )?;
 
             if let Some(value) = snapshot.global_zoom_percent {
@@ -1868,6 +1904,7 @@ impl SqliteDatabase {
         workspace_name: &str,
     ) -> anyhow::Result<Vec<ConversationThreadMeta>> {
         self.ensure_conversation(project_slug, workspace_name, 1)?;
+        self.repair_conversation_rows_for_entries(project_slug, workspace_name)?;
         let mut stmt = self.conn.prepare(
             "SELECT thread_local_id, thread_id, title, updated_at
              FROM conversations
@@ -1902,6 +1939,52 @@ impl SqliteDatabase {
         }
 
         Ok(threads)
+    }
+
+    fn repair_conversation_rows_for_entries(
+        &mut self,
+        project_slug: &str,
+        workspace_name: &str,
+    ) -> anyhow::Result<()> {
+        let thread_ids = {
+            let mut stmt = self.conn.prepare(
+                "SELECT DISTINCT thread_local_id
+                 FROM conversation_entries
+                 WHERE project_slug = ?1 AND workspace_name = ?2",
+            )?;
+            let rows = stmt.query_map(params![project_slug, workspace_name], |row| {
+                row.get::<_, i64>(0)
+            })?;
+            let mut thread_ids = Vec::new();
+            for row in rows {
+                let thread_local_id = row?;
+                let Some(thread_local_id) = u64::try_from(thread_local_id).ok() else {
+                    continue;
+                };
+                thread_ids.push(thread_local_id);
+            }
+            thread_ids
+        };
+
+        for thread_local_id in thread_ids {
+            self.ensure_conversation(project_slug, workspace_name, thread_local_id)?;
+            self.conn.execute(
+                "UPDATE conversations
+                 SET updated_at = MAX(
+                   updated_at,
+                   COALESCE(
+                     (SELECT MAX(created_at)
+                      FROM conversation_entries
+                      WHERE project_slug = ?1 AND workspace_name = ?2 AND thread_local_id = ?3),
+                     updated_at
+                   )
+                 )
+                 WHERE project_slug = ?1 AND workspace_name = ?2 AND thread_local_id = ?3",
+                params![project_slug, workspace_name, thread_local_id as i64],
+            )?;
+        }
+
+        Ok(())
     }
 
     fn append_conversation_entries(
@@ -2045,18 +2128,32 @@ impl SqliteDatabase {
         thread_local_id: u64,
     ) -> anyhow::Result<ConversationSnapshot> {
         self.ensure_conversation(project_slug, workspace_name, thread_local_id)?;
-        let (thread_id, queue_paused) = self
+        let (thread_id, queue_paused, run_started_at_unix_ms, run_finished_at_unix_ms) = self
             .conn
             .query_row(
-                "SELECT thread_id, queue_paused FROM conversations
+                "SELECT thread_id, queue_paused, run_started_at_unix_ms, run_finished_at_unix_ms FROM conversations
                  WHERE project_slug = ?1 AND workspace_name = ?2 AND thread_local_id = ?3",
                 params![project_slug, workspace_name, thread_local_id as i64],
-                |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?)),
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, Option<i64>>(2)?,
+                        row.get::<_, Option<i64>>(3)?,
+                    ))
+                },
             )
             .optional()
             .context("failed to load conversation meta")?
-            .map(|(thread_id, queue_paused)| (thread_id, queue_paused != 0))
-            .unwrap_or((None, false));
+            .map(|(thread_id, queue_paused, started, finished)| {
+                (
+                    thread_id,
+                    queue_paused != 0,
+                    started.and_then(|v| u64::try_from(v).ok()),
+                    finished.and_then(|v| u64::try_from(v).ok()),
+                )
+            })
+            .unwrap_or((None, false, None, None));
 
         let mut stmt = self.conn.prepare(
             "SELECT payload_json
@@ -2104,6 +2201,8 @@ impl SqliteDatabase {
             entries_start: 0,
             pending_prompts,
             queue_paused,
+            run_started_at_unix_ms,
+            run_finished_at_unix_ms,
         })
     }
 
@@ -2117,18 +2216,32 @@ impl SqliteDatabase {
     ) -> anyhow::Result<ConversationSnapshot> {
         self.ensure_conversation(project_slug, workspace_name, thread_local_id)?;
 
-        let (thread_id, queue_paused) = self
+        let (thread_id, queue_paused, run_started_at_unix_ms, run_finished_at_unix_ms) = self
             .conn
             .query_row(
-                "SELECT thread_id, queue_paused FROM conversations
+                "SELECT thread_id, queue_paused, run_started_at_unix_ms, run_finished_at_unix_ms FROM conversations
                  WHERE project_slug = ?1 AND workspace_name = ?2 AND thread_local_id = ?3",
                 params![project_slug, workspace_name, thread_local_id as i64],
-                |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?)),
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, Option<i64>>(2)?,
+                        row.get::<_, Option<i64>>(3)?,
+                    ))
+                },
             )
             .optional()
             .context("failed to load conversation meta")?
-            .map(|(thread_id, queue_paused)| (thread_id, queue_paused != 0))
-            .unwrap_or((None, false));
+            .map(|(thread_id, queue_paused, started, finished)| {
+                (
+                    thread_id,
+                    queue_paused != 0,
+                    started.and_then(|v| u64::try_from(v).ok()),
+                    finished.and_then(|v| u64::try_from(v).ok()),
+                )
+            })
+            .unwrap_or((None, false, None, None));
 
         let total_entries: u64 = self.conn.query_row(
             "SELECT COUNT(*) FROM conversation_entries
@@ -2203,15 +2316,20 @@ impl SqliteDatabase {
             entries_start: start as u64,
             pending_prompts,
             queue_paused,
+            run_started_at_unix_ms,
+            run_finished_at_unix_ms,
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn save_conversation_queue_state(
         &mut self,
         project_slug: &str,
         workspace_name: &str,
         thread_local_id: u64,
         queue_paused: bool,
+        run_started_at_unix_ms: Option<u64>,
+        run_finished_at_unix_ms: Option<u64>,
         pending_prompts: &[QueuedPrompt],
     ) -> anyhow::Result<()> {
         self.ensure_conversation(project_slug, workspace_name, thread_local_id)?;
@@ -2255,13 +2373,19 @@ impl SqliteDatabase {
 
         tx.execute(
             "UPDATE conversations
-             SET queue_paused = ?4, next_queued_prompt_id = ?5, updated_at = ?6
+             SET queue_paused = ?4,
+                 run_started_at_unix_ms = ?5,
+                 run_finished_at_unix_ms = ?6,
+                 next_queued_prompt_id = ?7,
+                 updated_at = ?8
              WHERE project_slug = ?1 AND workspace_name = ?2 AND thread_local_id = ?3",
             params![
                 project_slug,
                 workspace_name,
                 thread_local_id as i64,
                 if queue_paused { 1 } else { 0 },
+                run_started_at_unix_ms.map(|v| v as i64),
+                run_finished_at_unix_ms.map(|v| v as i64),
                 next_queued_prompt_id as i64,
                 now
             ],
@@ -2596,6 +2720,7 @@ mod tests {
             agent_default_thinking_effort: None,
             agent_codex_enabled: Some(true),
             last_open_workspace_id: None,
+            open_button_selection: None,
             workspace_active_thread_id: HashMap::new(),
             workspace_open_tabs: HashMap::new(),
             workspace_archived_tabs: HashMap::new(),
@@ -2645,6 +2770,7 @@ mod tests {
             agent_default_thinking_effort: Some("high".to_owned()),
             agent_codex_enabled: Some(true),
             last_open_workspace_id: Some(10),
+            open_button_selection: None,
             workspace_active_thread_id: HashMap::from([(10, 1)]),
             workspace_open_tabs: HashMap::from([(10, vec![1, 2, 3])]),
             workspace_archived_tabs: HashMap::from([(10, vec![9, 8])]),
@@ -2704,6 +2830,7 @@ mod tests {
             agent_default_thinking_effort: None,
             agent_codex_enabled: Some(true),
             last_open_workspace_id: None,
+            open_button_selection: None,
             workspace_active_thread_id: HashMap::new(),
             workspace_open_tabs: HashMap::new(),
             workspace_archived_tabs: HashMap::new(),
@@ -2767,7 +2894,7 @@ mod tests {
             },
         ];
 
-        db.save_conversation_queue_state("p", "w", 1, true, &prompts)
+        db.save_conversation_queue_state("p", "w", 1, true, None, None, &prompts)
             .unwrap();
 
         let snapshot = db.load_conversation("p", "w", 1).unwrap();
@@ -2777,6 +2904,27 @@ mod tests {
         assert_eq!(snapshot.pending_prompts[0].text, "queued-a");
         assert_eq!(snapshot.pending_prompts[1].id, 7);
         assert_eq!(snapshot.pending_prompts[1].text, "queued-b");
+    }
+
+    #[test]
+    fn conversation_run_timing_round_trip() {
+        let path = temp_db_path("conversation_run_timing_round_trip");
+        let mut db = open_db(&path);
+
+        db.ensure_conversation("p", "w", 1).unwrap();
+
+        db.save_conversation_queue_state("p", "w", 1, false, Some(10), None, &[])
+            .unwrap();
+
+        let snapshot = db.load_conversation("p", "w", 1).unwrap();
+        assert_eq!(snapshot.run_started_at_unix_ms, Some(10));
+        assert_eq!(snapshot.run_finished_at_unix_ms, None);
+
+        db.save_conversation_queue_state("p", "w", 1, false, Some(10), Some(42), &[])
+            .unwrap();
+        let snapshot = db.load_conversation_page("p", "w", 1, None, 10).unwrap();
+        assert_eq!(snapshot.run_started_at_unix_ms, Some(10));
+        assert_eq!(snapshot.run_finished_at_unix_ms, Some(42));
     }
 
     #[test]
@@ -2840,6 +2988,7 @@ mod tests {
             agent_default_thinking_effort: None,
             agent_codex_enabled: Some(true),
             last_open_workspace_id: None,
+            open_button_selection: None,
             workspace_active_thread_id: HashMap::new(),
             workspace_open_tabs: HashMap::new(),
             workspace_archived_tabs: HashMap::new(),
@@ -2943,6 +3092,7 @@ mod tests {
             agent_default_thinking_effort: None,
             agent_codex_enabled: Some(true),
             last_open_workspace_id: None,
+            open_button_selection: None,
             workspace_active_thread_id: HashMap::new(),
             workspace_open_tabs: HashMap::new(),
             workspace_archived_tabs: HashMap::new(),
@@ -3002,6 +3152,7 @@ mod tests {
             agent_default_thinking_effort: None,
             agent_codex_enabled: Some(true),
             last_open_workspace_id: None,
+            open_button_selection: None,
             workspace_active_thread_id: HashMap::new(),
             workspace_open_tabs: HashMap::new(),
             workspace_archived_tabs: HashMap::new(),
@@ -3060,6 +3211,7 @@ mod tests {
             agent_default_thinking_effort: None,
             agent_codex_enabled: Some(true),
             last_open_workspace_id: None,
+            open_button_selection: None,
             workspace_active_thread_id: HashMap::new(),
             workspace_open_tabs: HashMap::new(),
             workspace_archived_tabs: HashMap::new(),
@@ -3103,6 +3255,7 @@ mod tests {
             agent_default_thinking_effort: None,
             agent_codex_enabled: Some(true),
             last_open_workspace_id: None,
+            open_button_selection: None,
             workspace_active_thread_id: HashMap::new(),
             workspace_open_tabs: HashMap::new(),
             workspace_archived_tabs: HashMap::new(),

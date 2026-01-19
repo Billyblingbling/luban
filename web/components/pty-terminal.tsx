@@ -36,9 +36,20 @@ async function copyToClipboard(text: string): Promise<void> {
   }
 }
 
-function cssVar(name: string): string | null {
-  const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+function cssVar(scope: Element, name: string): string | null {
+  const raw = getComputedStyle(scope).getPropertyValue(name).trim()
   return raw.length > 0 ? raw : null
+}
+
+function parseHexColor(raw: string): { r: number; g: number; b: number } | null {
+  const normalized = normalizeHexColor(raw)
+  if (!normalized) return null
+  const h = normalized.slice(1)
+  const r = Number.parseInt(h.slice(0, 2), 16)
+  const g = Number.parseInt(h.slice(2, 4), 16)
+  const b = Number.parseInt(h.slice(4, 6), 16)
+  if (![r, g, b].every((v) => Number.isFinite(v) && v >= 0 && v <= 255)) return null
+  return { r, g, b }
 }
 
 function normalizeHexColor(raw: string): string | null {
@@ -61,6 +72,45 @@ function parseRgbColor(raw: string): { r: number; g: number; b: number } | null 
   const b = Number.parseInt(m[3], 10)
   if (![r, g, b].every((v) => Number.isFinite(v) && v >= 0 && v <= 255)) return null
   return { r, g, b }
+}
+
+function parseHslTriple(raw: string): { h: number; s: number; l: number } | null {
+  const parts = raw.trim().split(/\s+/)
+  if (parts.length < 3) return null
+  const h = Number.parseFloat(parts[0] ?? "")
+  const sStr = parts[1] ?? ""
+  const lStr = parts[2] ?? ""
+  if (!sStr.endsWith("%") || !lStr.endsWith("%")) return null
+  const s = Number.parseFloat(sStr.slice(0, -1))
+  const l = Number.parseFloat(lStr.slice(0, -1))
+  if (![h, s, l].every((v) => Number.isFinite(v))) return null
+  if (s < 0 || s > 100 || l < 0 || l > 100) return null
+  return { h, s, l }
+}
+
+function hslToRgb(h: number, s: number, l: number): { r: number; g: number; b: number } {
+  const hh = ((h % 360) + 360) % 360
+  const ss = Math.max(0, Math.min(1, s / 100))
+  const ll = Math.max(0, Math.min(1, l / 100))
+  const c = (1 - Math.abs(2 * ll - 1)) * ss
+  const x = c * (1 - Math.abs(((hh / 60) % 2) - 1))
+  const m = ll - c / 2
+
+  const [rp, gp, bp] =
+    hh < 60
+      ? [c, x, 0]
+      : hh < 120
+        ? [x, c, 0]
+        : hh < 180
+          ? [0, c, x]
+          : hh < 240
+            ? [0, x, c]
+            : hh < 300
+              ? [x, 0, c]
+              : [c, 0, x]
+
+  const to255 = (v: number) => Math.round((v + m) * 255)
+  return { r: to255(rp), g: to255(gp), b: to255(bp) }
 }
 
 function toHexColor(raw: string): string | null {
@@ -91,13 +141,47 @@ function hexToRgba(hex: string, alpha: number): string | null {
   return `rgba(${r}, ${g}, ${b}, ${a})`
 }
 
-function terminalThemeFromCss(): ITheme {
-  const background = cssVar("--card") ?? "#ffffff"
-  const foreground = cssVar("--card-foreground") ?? "#333333"
-  const cursor = cssVar("--foreground") ?? foreground
-  const primary = cssVar("--primary") ?? "#3b82f6"
-  const mutedForeground = cssVar("--muted-foreground") ?? "#6b7280"
-  const selectionBackground = hexToRgba(toHexColor(primary) ?? primary, 0.25) ?? "rgba(59, 130, 246, 0.25)"
+function resolveCssColor(scope: Element, name: string, fallback: { r: number; g: number; b: number }): { r: number; g: number; b: number } {
+  const raw = cssVar(scope, name)
+  if (!raw) return fallback
+
+  const hex = parseHexColor(raw)
+  if (hex) return hex
+  const rgb = parseRgbColor(raw)
+  if (rgb) return rgb
+
+  const hsl = parseHslTriple(raw)
+  if (hsl) return hslToRgb(hsl.h, hsl.s, hsl.l)
+
+  return fallback
+}
+
+function rgbToCss(rgb: { r: number; g: number; b: number }): string {
+  return `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`
+}
+
+function rgbToHex(rgb: { r: number; g: number; b: number }): string {
+  const to2 = (v: number) => Math.max(0, Math.min(255, v)).toString(16).padStart(2, "0")
+  return `#${to2(rgb.r)}${to2(rgb.g)}${to2(rgb.b)}`
+}
+
+function rgbToRgbaCss(rgb: { r: number; g: number; b: number }, alpha: number): string {
+  const a = Math.max(0, Math.min(1, alpha))
+  return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${a})`
+}
+
+function terminalThemeFromCss(scope: Element): ITheme {
+  const backgroundRgb = resolveCssColor(scope, "--card", { r: 255, g: 255, b: 255 })
+  const foregroundRgb = resolveCssColor(scope, "--card-foreground", { r: 51, g: 51, b: 51 })
+  const cursorRgb = resolveCssColor(scope, "--foreground", foregroundRgb)
+  const primaryRgb = resolveCssColor(scope, "--primary", { r: 59, g: 130, b: 246 })
+  const mutedForegroundRgb = resolveCssColor(scope, "--muted-foreground", { r: 107, g: 114, b: 128 })
+
+  const background = rgbToHex(backgroundRgb)
+  const foreground = rgbToHex(foregroundRgb)
+  const cursor = rgbToHex(cursorRgb)
+  const mutedForeground = rgbToHex(mutedForegroundRgb)
+  const selectionBackground = rgbToRgbaCss(primaryRgb, 0.25)
   return {
     background,
     foreground,
@@ -135,12 +219,14 @@ export function PtyTerminal() {
   useEffect(() => {
     const term = termRef.current
     if (!term) return
+    const scope = outerRef.current
+    if (!scope) return
 
     let cancelled = false
     window.requestAnimationFrame(() => {
       if (cancelled) return
 
-      const theme = terminalThemeFromCss()
+      const theme = terminalThemeFromCss(scope)
       const digest = JSON.stringify(theme)
       if (lastThemeDigestRef.current === digest) return
       lastThemeDigestRef.current = digest
@@ -178,7 +264,8 @@ export function PtyTerminal() {
       fontFamily: terminalFontFamily(fonts.terminalFont),
       fontSize: 12,
       cursorBlink: true,
-      theme: terminalThemeFromCss(),
+      allowTransparency: true,
+      theme: terminalThemeFromCss(outer),
       scrollback: 5000,
     })
     termRef.current = term
@@ -231,12 +318,23 @@ export function PtyTerminal() {
       window.requestAnimationFrame(tick)
     }
 
-    try {
-      term.open(container)
-    } catch (err) {
-      container.textContent = `Terminal init failed: ${String(err)}`
-      return
-    }
+	    try {
+	      term.open(container)
+	    } catch (err) {
+	      container.textContent = `Terminal init failed: ${String(err)}`
+	      return
+	    }
+
+	    // The terminal is often initialized before theme variables settle (e.g. next-themes
+	    // hydration). Re-apply once after mount so the renderer picks up the correct background.
+	    window.requestAnimationFrame(() => {
+	      if (disposed) return
+	      const theme = terminalThemeFromCss(outer)
+	      const digest = JSON.stringify(theme)
+	      lastThemeDigestRef.current = digest
+	      term.options.theme = theme
+	      term.refresh(0, Math.max(0, term.rows - 1))
+	    })
 
     focusCapture = () => {
       try {

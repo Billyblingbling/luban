@@ -52,34 +52,20 @@ const actions: ActionConfig[] = [
 
 type SelectedItem = { type: "editor"; id: EditorType } | { type: "action"; id: ActionType }
 
-const STORAGE_KEY = "open-button-last-selection"
-
 function getDefaultSelection(): SelectedItem {
   return { type: "editor", id: "vscode" }
 }
 
-function getStoredSelection(): SelectedItem {
-  if (typeof window === "undefined") return getDefaultSelection()
+function parseSelection(raw: string | null | undefined): SelectedItem | null {
+  if (!raw) return null
   try {
-    const stored = localStorage.getItem(STORAGE_KEY)
-    if (stored) {
-      const parsed = JSON.parse(stored)
-      if (parsed.type === "editor" && editors.some((e) => e.id === parsed.id)) return parsed
-      if (parsed.type === "action" && actions.some((a) => a.id === parsed.id)) return parsed
-    }
+    const parsed = JSON.parse(raw)
+    if (parsed.type === "editor" && editors.some((e) => e.id === parsed.id)) return parsed
+    if (parsed.type === "action" && actions.some((a) => a.id === parsed.id)) return parsed
   } catch {
     // ignore
   }
-  return getDefaultSelection()
-}
-
-function saveSelection(selection: SelectedItem) {
-  if (typeof window === "undefined") return
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(selection))
-  } catch {
-    // ignore
-  }
+  return null
 }
 
 function getItemConfig(
@@ -107,14 +93,15 @@ function selectionToTarget(selection: SelectedItem): OpenTarget | null {
 }
 
 export function OpenButton() {
-  const { activeWorkspaceId, activeWorkspace, openWorkspaceWith } = useLuban()
+  const { app, activeWorkspaceId, activeWorkspace, openWorkspaceWith, setOpenButtonSelection } = useLuban()
   const [selection, setSelection] = useState<SelectedItem>(getDefaultSelection)
   const [open, setOpen] = useState(false)
   const [copied, setCopied] = useState(false)
 
   useEffect(() => {
-    setSelection(getStoredSelection())
-  }, [])
+    const fromApp = parseSelection(app?.ui?.open_button_selection ?? null)
+    setSelection(fromApp ?? getDefaultSelection())
+  }, [app?.ui?.open_button_selection])
 
   const worktreePath = activeWorkspace?.worktree_path ?? null
 
@@ -144,7 +131,7 @@ export function OpenButton() {
 
   const selectAndRun = (item: SelectedItem) => {
     setSelection(item)
-    saveSelection(item)
+    setOpenButtonSelection(JSON.stringify(item))
     setOpen(false)
     void executeAction(item)
   }

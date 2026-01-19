@@ -40,6 +40,7 @@ impl AppState {
             workspace_tabs: HashMap::new(),
             dashboard_preview_workspace_id: None,
             last_open_workspace_id: None,
+            open_button_selection: None,
             last_error: None,
             workspace_chat_scroll_y10: HashMap::new(),
             workspace_chat_scroll_anchor: HashMap::new(),
@@ -508,6 +509,8 @@ impl AppState {
                 if should_apply_queue_snapshot {
                     conversation.pending_prompts = VecDeque::from(snapshot.pending_prompts.clone());
                     conversation.queue_paused = snapshot.queue_paused;
+                    conversation.run_started_at_unix_ms = snapshot.run_started_at_unix_ms;
+                    conversation.run_finished_at_unix_ms = snapshot.run_finished_at_unix_ms;
                     conversation.next_queued_prompt_id = conversation
                         .pending_prompts
                         .iter()
@@ -586,6 +589,8 @@ impl AppState {
                         attachments: attachments.clone(),
                     });
                     conversation.run_status = OperationStatus::Running;
+                    conversation.run_started_at_unix_ms = None;
+                    conversation.run_finished_at_unix_ms = None;
                     conversation.current_run_config = Some(run_config.clone());
                     conversation.in_progress_items.clear();
                     conversation.in_progress_order.clear();
@@ -606,6 +611,8 @@ impl AppState {
                         attachments: attachments.clone(),
                     });
                     conversation.run_status = OperationStatus::Running;
+                    conversation.run_started_at_unix_ms = None;
+                    conversation.run_finished_at_unix_ms = None;
                     conversation.current_run_config = Some(run_config.clone());
                     conversation.in_progress_items.clear();
                     conversation.in_progress_order.clear();
@@ -865,6 +872,31 @@ impl AppState {
                 start_next_queued_prompt(conversation, workspace_id, thread_id)
                     .into_iter()
                     .collect()
+            }
+            Action::AgentRunStartedAt {
+                workspace_id,
+                thread_id,
+                started_at_unix_ms,
+            } => {
+                let Some(conversation) = self.conversations.get_mut(&(workspace_id, thread_id))
+                else {
+                    return Vec::new();
+                };
+                conversation.run_started_at_unix_ms = Some(started_at_unix_ms);
+                conversation.run_finished_at_unix_ms = None;
+                Vec::new()
+            }
+            Action::AgentRunFinishedAt {
+                workspace_id,
+                thread_id,
+                finished_at_unix_ms,
+            } => {
+                let Some(conversation) = self.conversations.get_mut(&(workspace_id, thread_id))
+                else {
+                    return Vec::new();
+                };
+                conversation.run_finished_at_unix_ms = Some(finished_at_unix_ms);
+                Vec::new()
             }
             Action::AgentEventReceived {
                 workspace_id,
@@ -1352,6 +1384,22 @@ impl AppState {
                 self.workspace_chat_scroll_anchor.insert(key, anchor);
                 vec![Effect::SaveAppState]
             }
+            Action::OpenButtonSelectionChanged { selection } => {
+                let trimmed = selection.trim();
+                if trimmed.len() > 1024 {
+                    return Vec::new();
+                }
+                let next = if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_owned())
+                };
+                if self.open_button_selection == next {
+                    return Vec::new();
+                }
+                self.open_button_selection = next;
+                vec![Effect::SaveAppState]
+            }
             Action::SaveAppState => vec![Effect::SaveAppState],
 
             Action::AppStateLoaded { persisted } => {
@@ -1474,6 +1522,8 @@ impl AppState {
             entries_start: 0,
             codex_item_ids: HashSet::new(),
             run_status: OperationStatus::Idle,
+            run_started_at_unix_ms: None,
+            run_finished_at_unix_ms: None,
             current_run_config: None,
             in_progress_items: BTreeMap::new(),
             in_progress_order: VecDeque::new(),
@@ -1761,6 +1811,8 @@ fn start_next_queued_prompt(
         attachments: queued.attachments.clone(),
     });
     conversation.run_status = OperationStatus::Running;
+    conversation.run_started_at_unix_ms = None;
+    conversation.run_finished_at_unix_ms = None;
     conversation.current_run_config = Some(queued.run_config.clone());
     conversation.in_progress_items.clear();
     conversation.in_progress_order.clear();
@@ -2170,6 +2222,8 @@ mod tests {
             entries_start: 0,
             pending_prompts: Vec::new(),
             queue_paused: false,
+            run_started_at_unix_ms: None,
+            run_finished_at_unix_ms: None,
         };
         state.apply(Action::ConversationLoaded {
             workspace_id,
@@ -2326,6 +2380,7 @@ mod tests {
                 agent_default_thinking_effort: None,
                 agent_codex_enabled: Some(true),
                 last_open_workspace_id: None,
+                open_button_selection: None,
                 workspace_active_thread_id: HashMap::new(),
                 workspace_open_tabs: HashMap::new(),
                 workspace_archived_tabs: HashMap::new(),
@@ -2366,6 +2421,7 @@ mod tests {
                 agent_default_thinking_effort: None,
                 agent_codex_enabled: Some(true),
                 last_open_workspace_id: None,
+                open_button_selection: None,
                 workspace_active_thread_id: HashMap::new(),
                 workspace_open_tabs: HashMap::new(),
                 workspace_archived_tabs: HashMap::new(),
@@ -2406,6 +2462,7 @@ mod tests {
                 agent_default_thinking_effort: None,
                 agent_codex_enabled: Some(true),
                 last_open_workspace_id: None,
+                open_button_selection: None,
                 workspace_active_thread_id: HashMap::new(),
                 workspace_open_tabs: HashMap::new(),
                 workspace_archived_tabs: HashMap::new(),
@@ -2448,6 +2505,7 @@ mod tests {
                 agent_default_thinking_effort: None,
                 agent_codex_enabled: Some(true),
                 last_open_workspace_id: None,
+                open_button_selection: None,
                 workspace_active_thread_id: HashMap::new(),
                 workspace_open_tabs: HashMap::new(),
                 workspace_archived_tabs: HashMap::new(),
@@ -3033,6 +3091,8 @@ mod tests {
                 entries_start: 0,
                 pending_prompts: Vec::new(),
                 queue_paused: false,
+                run_started_at_unix_ms: None,
+                run_finished_at_unix_ms: None,
             },
         });
         assert_eq!(state.workspace_conversation(w1).unwrap().draft, "draft-1");
@@ -3181,6 +3241,8 @@ mod tests {
                 entries_start: 0,
                 pending_prompts: Vec::new(),
                 queue_paused: false,
+                run_started_at_unix_ms: None,
+                run_finished_at_unix_ms: None,
             },
         });
 
@@ -3226,6 +3288,8 @@ mod tests {
                 entries_start: 0,
                 pending_prompts: Vec::new(),
                 queue_paused: false,
+                run_started_at_unix_ms: None,
+                run_finished_at_unix_ms: None,
             },
         });
 
@@ -3260,6 +3324,8 @@ mod tests {
                 entries_start: 0,
                 pending_prompts: Vec::new(),
                 queue_paused: false,
+                run_started_at_unix_ms: None,
+                run_finished_at_unix_ms: None,
             },
         });
 
@@ -3279,6 +3345,8 @@ mod tests {
                 entries_start: 0,
                 pending_prompts: Vec::new(),
                 queue_paused: false,
+                run_started_at_unix_ms: None,
+                run_finished_at_unix_ms: None,
             },
         });
 
@@ -3316,6 +3384,8 @@ mod tests {
                     },
                 }],
                 queue_paused: true,
+                run_started_at_unix_ms: None,
+                run_finished_at_unix_ms: None,
             },
         });
 

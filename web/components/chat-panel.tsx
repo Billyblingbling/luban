@@ -149,10 +149,7 @@ export function ChatPanel({
   const [agentEditorValue, setAgentEditorValue] = useState("")
   const [agentEditorAttachments, setAgentEditorAttachments] = useState<ComposerAttachment[]>([])
   const agentAttachmentScopeRef = useRef<string>("")
-  const [agentRunElapsedMs, setAgentRunElapsedMs] = useState(0)
-  const agentRunStartAtMsRef = useRef<number | null>(null)
-  const [agentRunStartedAtMs, setAgentRunStartedAtMs] = useState<number | null>(null)
-  const agentRunMarkerRef = useRef<string | null>(null)
+  const [agentRunNowMs, setAgentRunNowMs] = useState(() => Date.now())
 
   const [activePanel, setActivePanel] = useState<"thread" | "diff">("thread")
   const [diffStyle, setDiffStyle] = useState<"split" | "unified">("split")
@@ -202,9 +199,7 @@ export function ChatPanel({
     setAgentOverrideStatus(null)
     setAgentEditorValue("")
     setAgentEditorAttachments([])
-    setAgentRunElapsedMs(0)
-    agentRunStartAtMsRef.current = null
-    setAgentRunStartedAtMs(null)
+    setAgentRunNowMs(Date.now())
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeWorkspaceId, activeThreadId])
 
@@ -621,57 +616,27 @@ export function ChatPanel({
   const agentStatus = agentOverrideStatus ?? baseAgentStatus
 
   const agentTurnIsRunning = conversation?.run_status === "running"
-  const agentTurnMarker = useMemo(() => {
-    if (!conversation || conversation.run_status !== "running") return null
-    const entries = conversation.entries ?? []
-    for (let idx = entries.length - 1; idx >= 0; idx -= 1) {
-      const entry = entries[idx]
-      if (entry?.type === "user_message") {
-        return `${activeWorkspaceId ?? "none"}:${activeThreadId ?? "none"}:${idx}`
-      }
-    }
-    return `${activeWorkspaceId ?? "none"}:${activeThreadId ?? "none"}:none`
-  }, [conversation?.rev, conversation?.run_status, activeWorkspaceId, activeThreadId])
+  const agentRunStartedAtMs = conversation?.run_started_at_unix_ms ?? null
+  const agentRunFinishedAtMs = conversation?.run_finished_at_unix_ms ?? null
 
   useEffect(() => {
-    if (!agentTurnIsRunning) {
-      agentRunStartAtMsRef.current = null
-      agentRunMarkerRef.current = null
-      setAgentRunElapsedMs(0)
-      setAgentRunStartedAtMs(null)
-      return
-    }
-
-    if (agentTurnMarker && agentTurnMarker !== agentRunMarkerRef.current) {
-      agentRunMarkerRef.current = agentTurnMarker
-      const startedAt = Date.now()
-      agentRunStartAtMsRef.current = startedAt
-      setAgentRunStartedAtMs(startedAt)
-      setAgentRunElapsedMs(0)
-    }
-
-    if (agentRunStartAtMsRef.current == null) {
-      const startedAt = Date.now()
-      agentRunStartAtMsRef.current = startedAt
-      setAgentRunStartedAtMs(startedAt)
-      setAgentRunElapsedMs(0)
-    }
-
+    if (!agentTurnIsRunning) return
+    if (agentRunStartedAtMs == null) return
     const timer = window.setInterval(() => {
-      const start = agentRunStartAtMsRef.current
-      if (start == null) return
-      setAgentRunElapsedMs(Date.now() - start)
+      setAgentRunNowMs(Date.now())
     }, 250)
 
     return () => window.clearInterval(timer)
-  }, [agentTurnIsRunning, agentTurnMarker])
+  }, [agentTurnIsRunning, agentRunStartedAtMs])
 
   const agentRunElapsedLabel = useMemo(() => {
-    const totalSeconds = Math.max(0, Math.floor(agentRunElapsedMs / 1000))
+    if (agentRunStartedAtMs == null) return "00:00"
+    const end = agentTurnIsRunning ? agentRunNowMs : (agentRunFinishedAtMs ?? agentRunNowMs)
+    const totalSeconds = Math.max(0, Math.floor((end - agentRunStartedAtMs) / 1000))
     const minutes = Math.floor(totalSeconds / 60)
     const seconds = totalSeconds % 60
     return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
-  }, [agentRunElapsedMs])
+  }, [agentRunFinishedAtMs, agentRunNowMs, agentRunStartedAtMs, agentTurnIsRunning])
 
   useEffect(() => {
     if (baseAgentStatus == null && agentOverrideStatus != null) {

@@ -959,6 +959,8 @@ impl ProjectWorkspaceService for GitWorkspaceService {
         workspace_name: String,
         thread_id: u64,
         queue_paused: bool,
+        run_started_at_unix_ms: Option<u64>,
+        run_finished_at_unix_ms: Option<u64>,
         pending_prompts: Vec<luban_domain::QueuedPrompt>,
     ) -> Result<(), String> {
         self.sqlite
@@ -967,6 +969,8 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                 workspace_name,
                 thread_id,
                 queue_paused,
+                run_started_at_unix_ms,
+                run_finished_at_unix_ms,
                 pending_prompts,
             )
             .map_err(|e| format!("{e:#}"))
@@ -2941,6 +2945,7 @@ mod tests {
             agent_default_thinking_effort: None,
             agent_codex_enabled: Some(true),
             last_open_workspace_id: None,
+            open_button_selection: None,
             workspace_active_thread_id: std::collections::HashMap::new(),
             workspace_open_tabs: std::collections::HashMap::new(),
             workspace_archived_tabs: std::collections::HashMap::new(),

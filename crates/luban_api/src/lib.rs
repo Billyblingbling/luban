@@ -23,6 +23,18 @@ pub struct AppSnapshot {
     pub agent: AgentSettingsSnapshot,
     #[serde(default)]
     pub task: TaskSettingsSnapshot,
+    #[serde(default)]
+    pub ui: UiSnapshot,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct UiSnapshot {
+    #[serde(default)]
+    pub active_workspace_id: Option<WorkspaceId>,
+    #[serde(default)]
+    pub active_thread_id: Option<WorkspaceThreadId>,
+    #[serde(default)]
+    pub open_button_selection: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -241,6 +253,10 @@ pub struct ConversationSnapshot {
     pub agent_model_id: String,
     pub thinking_effort: ThinkingEffort,
     pub run_status: OperationStatus,
+    #[serde(default)]
+    pub run_started_at_unix_ms: Option<u64>,
+    #[serde(default)]
+    pub run_finished_at_unix_ms: Option<u64>,
     pub entries: Vec<ConversationEntry>,
     #[serde(default)]
     pub entries_total: u64,
@@ -651,6 +667,9 @@ pub enum ClientAction {
         workspace_id: WorkspaceId,
         thread_id: WorkspaceThreadId,
         to_index: usize,
+    },
+    OpenButtonSelectionChanged {
+        selection: String,
     },
     AppearanceThemeChanged {
         theme: AppearanceTheme,

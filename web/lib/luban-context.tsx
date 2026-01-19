@@ -32,7 +32,6 @@ import { createLubanActions } from "./luban-actions"
 import { useLubanStore } from "./luban-store"
 import { createLubanServerEventHandler } from "./luban-store-events"
 import { useExternalLinkInterceptor } from "./external-link-interceptor"
-import { ACTIVE_WORKSPACE_KEY } from "./ui-prefs"
 import { useLubanTransport } from "./luban-transport"
 import { focusChatInput } from "./focus-chat-input"
 
@@ -104,6 +103,7 @@ type LubanContextValue = {
   setAppearanceTheme: (theme: AppearanceTheme) => void
   setAppearanceFonts: (fonts: AppearanceFontsSnapshot) => void
   setGlobalZoom: (zoom: number) => void
+  setOpenButtonSelection: (selection: string) => void
 
   setCodexEnabled: (enabled: boolean) => void
   setTaskPromptTemplate: (intentKind: TaskIntentKind, template: string) => void
@@ -154,11 +154,13 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (app == null) return
     if (activeWorkspaceId != null) return
-    const raw = localStorage.getItem(ACTIVE_WORKSPACE_KEY)
-    const stored = raw ? Number(raw) : null
+    const fromApp = app.ui.active_workspace_id ?? null
+    const stored = fromApp
     if (!stored || !Number.isFinite(stored)) return
-    const exists = app.projects.some((p) => p.workspaces.some((w) => w.id === stored))
-    if (!exists) return
+    const existsAndActive = app.projects.some((p) =>
+      p.workspaces.some((w) => w.id === stored && w.status === "active"),
+    )
+    if (!existsAndActive) return
     void actions.openWorkspace(stored)
   }, [app, activeWorkspaceId])
 
@@ -270,6 +272,7 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     setAppearanceTheme: actions.setAppearanceTheme,
     setAppearanceFonts: actions.setAppearanceFonts,
     setGlobalZoom: actions.setGlobalZoom,
+    setOpenButtonSelection: actions.setOpenButtonSelection,
     setCodexEnabled: actions.setCodexEnabled,
     setTaskPromptTemplate: actions.setTaskPromptTemplate,
     setSystemPromptTemplate: actions.setSystemPromptTemplate,

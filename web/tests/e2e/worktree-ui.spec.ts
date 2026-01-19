@@ -4,7 +4,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { PNG } from "pngjs"
-import { ensureWorkspace, sendWsAction } from "./helpers"
+import { activeWorkspaceId, ensureWorkspace, sendWsAction } from "./helpers"
 
 function projectToggleByPath(page: Page, projectPath: string) {
   return page.getByTitle(projectPath, { exact: true }).locator("..")
@@ -83,10 +83,7 @@ test("new tab is appended to the end", async ({ page }) => {
 test("archived tabs list does not hide older threads", async ({ page }) => {
   await ensureWorkspace(page)
 
-  const workspaceIdRaw =
-    (await page.evaluate(() => localStorage.getItem("luban:active_workspace_id"))) ?? ""
-  const workspaceId = Number(workspaceIdRaw)
-  expect(Number.isFinite(workspaceId) && workspaceId > 0).toBeTruthy()
+  const workspaceId = await activeWorkspaceId(page)
 
   for (let i = 0; i < 21; i++) {
     const threadId = i + 2
@@ -100,12 +97,38 @@ test("archived tabs list does not hide older threads", async ({ page }) => {
   await expect(closedSection.getByRole("button", { name: /^Thread 2$/ })).toHaveCount(1)
 })
 
+test("thread tabs persist across reload", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  await page.getByTitle("New tab").click()
+  const workspaceId = await activeWorkspaceId(page)
+  const res = await page.request.get(`/api/workspaces/${workspaceId}/threads`)
+  expect(res.ok()).toBeTruthy()
+  const snapshot: any = await res.json()
+  const createdThreadId = Number(snapshot?.tabs?.open_tabs?.at?.(-1) ?? NaN)
+  expect(Number.isFinite(createdThreadId)).toBeTruthy()
+  expect(createdThreadId).toBeGreaterThan(1)
+
+  await sendWsAction(page, {
+    type: "close_workspace_thread_tab",
+    workspace_id: workspaceId,
+    thread_id: createdThreadId,
+  })
+
+  await ensureWorkspace(page)
+
+  await page.getByTitle("All tabs").click()
+
+  const closedSection = page.getByText("Recently Closed", { exact: true }).locator("..").locator("..")
+  await expect(
+    closedSection.getByRole("button", { name: new RegExp(`^Thread ${createdThreadId}$`) }),
+  ).toHaveCount(1)
+})
+
 test("creating a worktree auto-opens its conversation", async ({ page }) => {
   await ensureWorkspace(page)
 
-  const beforeWorkspaceId =
-    (await page.evaluate(() => localStorage.getItem("luban:active_workspace_id"))) ?? ""
-  expect(beforeWorkspaceId.length).toBeGreaterThan(0)
+  const beforeWorkspaceId = await activeWorkspaceId(page)
 
   const projectToggle = page.getByRole("button", { name: "e2e-project", exact: true })
   const projectContainer = projectToggle.locator("..").locator("..")
@@ -114,10 +137,10 @@ test("creating a worktree auto-opens its conversation", async ({ page }) => {
   await addWorktree.click()
 
   await expect
-    .poll(async () => (await page.evaluate(() => localStorage.getItem("luban:active_workspace_id"))) ?? "", {
+    .poll(async () => String(await activeWorkspaceId(page, { timeoutMs: 500 })), {
       timeout: 90_000,
     })
-    .not.toBe(beforeWorkspaceId)
+    .not.toBe(String(beforeWorkspaceId))
 
   await expect(page.getByTestId("chat-input")).toBeFocused({ timeout: 20_000 })
 })
@@ -172,9 +195,7 @@ test("add-project-and-open opens the project's main workspace", async ({ page })
 
   const expected = String(mainWorkspaceId)
   await expect
-    .poll(async () => (await page.evaluate(() => localStorage.getItem("luban:active_workspace_id"))) ?? "", {
-      timeout: 15_000,
-    })
+    .poll(async () => String(await activeWorkspaceId(page, { timeoutMs: 500 })), { timeout: 15_000 })
     .toBe(expected)
 })
 
@@ -213,9 +234,7 @@ test("clicking a non-git project opens its main workspace", async ({ page }) => 
 
   const expected = String(mainWorkspaceId)
   await expect
-    .poll(async () => (await page.evaluate(() => localStorage.getItem("luban:active_workspace_id"))) ?? "", {
-      timeout: 15_000,
-    })
+    .poll(async () => String(await activeWorkspaceId(page, { timeoutMs: 500 })), { timeout: 15_000 })
     .toBe(expected)
 })
 
@@ -322,9 +341,7 @@ test("git projects with only main worktree render as a standalone entry", async 
 
   await projectToggle.click()
   await expect
-    .poll(async () => (await page.evaluate(() => localStorage.getItem("luban:active_workspace_id"))) ?? "", {
-      timeout: 20_000,
-    })
+    .poll(async () => String(await activeWorkspaceId(page, { timeoutMs: 500 })), { timeout: 20_000 })
     .toBe(String(ids.mainId))
 })
 
@@ -360,9 +377,7 @@ test("left sidebar does not allow horizontal scrolling", async ({ page }) => {
 test("changes panel opens unified diff tab", async ({ page }) => {
   await ensureWorkspace(page)
 
-  const workspaceIdRaw = (await page.evaluate(() => localStorage.getItem("luban:active_workspace_id"))) ?? ""
-  const workspaceId = Number(workspaceIdRaw)
-  expect(workspaceId).toBeGreaterThan(0)
+  const workspaceId = await activeWorkspaceId(page)
 
   const worktreePath = await page.evaluate(async (workspaceId) => {
     const res = await fetch("/api/app")
