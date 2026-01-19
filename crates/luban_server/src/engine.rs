@@ -1854,20 +1854,20 @@ impl Engine {
                                 if !sent_1_done && elapsed >= Duration::from_millis(250) {
                                     sent_1_done = true;
                                     let _ = tx.blocking_send(EngineCommand::DispatchAction {
-                                        action: Box::new(Action::AgentEventReceived {
-                                            workspace_id,
-                                            thread_id,
-                                            event: luban_domain::CodexThreadEvent::ItemCompleted {
-                                                item: luban_domain::CodexThreadItem::CommandExecution {
-                                                    id: "e2e_cmd_1".to_owned(),
-                                                    command: "echo 1".to_owned(),
-                                                    aggregated_output: "ok".to_owned(),
-                                                    exit_code: Some(0),
-                                                    status: luban_domain::CodexCommandExecutionStatus::Completed,
-                                                },
-                                            },
-                                        }),
-                                    });
+	                                        action: Box::new(Action::AgentEventReceived {
+	                                            workspace_id,
+	                                            thread_id,
+	                                            event: luban_domain::CodexThreadEvent::ItemCompleted {
+	                                                item: luban_domain::CodexThreadItem::CommandExecution {
+	                                                    id: "e2e_cmd_1".to_owned(),
+	                                                    command: "echo 1".to_owned(),
+	                                                    aggregated_output: "".to_owned(),
+	                                                    exit_code: Some(0),
+	                                                    status: luban_domain::CodexCommandExecutionStatus::Completed,
+	                                                },
+	                                            },
+	                                        }),
+	                                    });
                                 }
                                 if !sent_2_start && elapsed >= Duration::from_millis(350) {
                                     sent_2_start = true;

@@ -251,18 +251,19 @@ export function AgentRunningCard({
           {historyActivities.map((event) => {
             const Icon = eventIcons[event.type] || Wrench
             const isEventExpanded = expandedEvents.has(event.id)
-            const hasDetail = Boolean(event.detail)
+            const detail = typeof event.detail === "string" ? event.detail : ""
+            const hasExpandableDetail = event.type === "bash" || detail.trim().length > 0
             const durationLabel = activityDurationLabel(event)
             const badge = event.type === "bash" ? (event.badge ?? null) : null
 
             return (
               <div key={event.id} className="group">
                 <button
-                  onClick={(e) => hasDetail && toggleEvent(event.id, e)}
+                  onClick={(e) => hasExpandableDetail && toggleEvent(event.id, e)}
                   className={cn(
                     "relative w-full flex items-center gap-2 text-xs py-1 px-1 pr-[84px] -mx-1 rounded transition-colors text-muted-foreground overflow-hidden",
-                    hasDetail && "hover:bg-muted/50 cursor-pointer",
-                    !hasDetail && "cursor-default",
+                    hasExpandableDetail && "hover:bg-muted/50 cursor-pointer",
+                    !hasExpandableDetail && "cursor-default",
                   )}
                 >
                   <Check className="w-3.5 h-3.5 text-status-success flex-shrink-0" />
@@ -284,7 +285,7 @@ export function AgentRunningCard({
                     <span className="relative z-10 text-[10px] text-muted-foreground/60 font-mono tabular-nums text-right min-w-[52px] flex-shrink-0">
                       {durationLabel ?? ""}
                     </span>
-                    {hasDetail && (
+                    {hasExpandableDetail && (
                       <ChevronRight
                         className={cn(
                           "relative z-10 w-3 h-3 text-muted-foreground/40 transition-transform flex-shrink-0",
@@ -295,10 +296,10 @@ export function AgentRunningCard({
                   </div>
                 </button>
 
-                {isEventExpanded && event.detail && (
+                {isEventExpanded && hasExpandableDetail && (
                   <div className="ml-6 mt-1 mb-2 p-2 rounded bg-muted/30 border border-border/50">
                     <pre className="text-[11px] text-muted-foreground whitespace-pre-wrap font-mono">
-                      {event.detail}
+                      {detail.trim().length > 0 ? detail : "No output."}
                     </pre>
                   </div>
                 )}

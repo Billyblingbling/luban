@@ -29,6 +29,8 @@ function ActivityEventItem({
   onToggle: () => void
   duration: string | null
 }) {
+  const detail = typeof event.detail === "string" ? event.detail : ""
+  const hasExpandableDetail = event.type === "bash" || detail.trim().length > 0
   const icon = (() => {
     switch (event.type) {
       case "thinking":
@@ -51,10 +53,13 @@ function ActivityEventItem({
   return (
     <div className="group">
       <button
-        onClick={onToggle}
+        onClick={() => {
+          if (!hasExpandableDetail) return
+          onToggle()
+        }}
         className={cn(
           "relative w-full flex items-center gap-2 py-1 px-2 pr-[84px] -mx-2 rounded text-xs transition-colors overflow-hidden",
-          "hover:bg-muted/50",
+          hasExpandableDetail ? "hover:bg-muted/50" : "cursor-default",
           event.status === "running" ? "text-status-running" : "text-muted-foreground",
         )}
       >
@@ -77,7 +82,7 @@ function ActivityEventItem({
           <span className="relative z-10 text-[10px] text-muted-foreground/70 font-mono tabular-nums text-right min-w-[52px]">
             {duration ?? ""}
           </span>
-          {event.detail && (
+          {hasExpandableDetail && (
             <ChevronRight
               className={cn(
                 "relative z-10 w-3 h-3 text-muted-foreground/50 transition-transform flex-shrink-0",
@@ -87,9 +92,11 @@ function ActivityEventItem({
           )}
         </div>
       </button>
-      {isExpanded && event.detail && (
+      {isExpanded && hasExpandableDetail && (
         <div className="ml-5 pl-2 border-l border-border text-[11px] text-muted-foreground py-1 mb-1">
-          {event.detail}
+          <pre className="whitespace-pre-wrap font-mono">
+            {detail.trim().length > 0 ? detail : "No output."}
+          </pre>
         </div>
       )}
     </div>

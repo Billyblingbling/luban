@@ -47,3 +47,29 @@ test("agent turn and step timers advance beyond 00:00", async ({ page }) => {
   await expect(activityEcho2.locator("span.font-mono")).not.toHaveText("00:00")
 })
 
+test("command steps remain expandable even when they produce no output", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  const runId = Math.random().toString(16).slice(2)
+  const marker = `e2e-running-card-empty-output-${runId}`
+
+  await page.getByTestId("chat-input").fill(marker)
+  await page.getByTestId("chat-send").click()
+
+  const runningHeader = page.getByTestId("agent-running-header")
+  await expect(runningHeader).toBeVisible({ timeout: 20_000 })
+  await expect(runningHeader).toHaveCount(0, { timeout: 30_000 })
+
+  const activityHeader = page.getByRole("button", { name: /Completed|Cancelled/i }).first()
+  await expect(activityHeader).toBeVisible({ timeout: 20_000 })
+  await activityHeader.click()
+
+  const echo1Row = page.getByRole("button", { name: /echo 1/ }).first()
+  await expect(echo1Row).toBeVisible({ timeout: 20_000 })
+  await expect(echo1Row.locator("svg.lucide-chevron-right")).toHaveCount(1)
+
+  await echo1Row.click()
+
+  const echo1Container = echo1Row.locator("..")
+  await expect(echo1Container.getByText("No output.", { exact: true })).toBeVisible({ timeout: 10_000 })
+})
