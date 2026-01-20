@@ -115,7 +115,7 @@ export function AgentRunningCard({
   const latestBadge =
     latestActivity && latestActivity.type === "bash" ? (latestActivity.badge ?? null) : null
 
-  const findScrollContainer = (): HTMLElement | null => {
+  const findScrollContainer = React.useCallback((): HTMLElement | null => {
     const header = headerRef.current
     if (!header) return null
 
@@ -123,15 +123,15 @@ export function AgentRunningCard({
     if (byTestId) return byTestId
 
     return header.closest(".overflow-y-auto") as HTMLElement | null
-  }
+  }, [])
 
-  const anchorHeaderTop = () => {
+  const anchorHeaderTop = React.useCallback(() => {
     const header = headerRef.current
     if (!header) return
     anchorTopRef.current = header.getBoundingClientRect().top
-  }
+  }, [])
 
-  const compensateScrollToKeepHeaderAnchored = () => {
+  const compensateScrollToKeepHeaderAnchored = React.useCallback(() => {
     const header = headerRef.current
     if (!header) return
     const anchor = anchorTopRef.current
@@ -149,7 +149,7 @@ export function AgentRunningCard({
     requestAnimationFrame(() => {
       isCompensatingScrollRef.current = false
     })
-  }
+  }, [findScrollContainer])
 
   const toggleExpand = () => {
     if (headerRef.current) {
@@ -223,14 +223,12 @@ export function AgentRunningCard({
 
     scrollContainer.addEventListener("scroll", onScroll, { passive: true })
     return () => scrollContainer.removeEventListener("scroll", onScroll)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isExpanded])
+  }, [anchorHeaderTop, findScrollContainer, isExpanded])
 
   React.useLayoutEffect(() => {
     if (!isExpanded) return
     compensateScrollToKeepHeaderAnchored()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isExpanded, historyActivities.length, expandedEvents.size])
+  }, [compensateScrollToKeepHeaderAnchored, expandedEvents.size, historyActivities.length, isExpanded])
 
   if (!activities.length) return null
 

@@ -443,7 +443,6 @@ export function ChatPanel({
     if (!followTail) return
     if (messages.length === 0) return
     scheduleScrollToBottom()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages.length, followTail, activeWorkspaceId, activeThreadId])
 
   function persistDraft(nextText: string) {
@@ -686,7 +685,6 @@ export function ChatPanel({
     if (!queuedPrompts.some((p) => p.id === editingQueuedPromptId)) {
       handleCancelQueuedEdit()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queuedPrompts, editingQueuedPromptId])
   const handleQueueDrop = (activeId: number, overId: number) => {
     if (activeWorkspaceId == null || activeThreadId == null) return

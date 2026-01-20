@@ -213,7 +213,6 @@ function MarkdownHighlight({
   return (
     <div
       className="shiki-highlight [&_pre]:!bg-transparent [&_code]:!bg-transparent [&_.shiki]:!bg-transparent [&_pre]:!whitespace-pre-wrap [&_code]:!whitespace-pre-wrap [&_pre]:!break-words [&_code]:!break-words"
-      // eslint-disable-next-line react/no-danger
       dangerouslySetInnerHTML={{ __html: html }}
     />
   )
