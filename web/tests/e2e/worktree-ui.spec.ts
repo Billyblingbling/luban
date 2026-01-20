@@ -429,7 +429,7 @@ test("changes panel opens unified diff tab", async ({ page }) => {
   if (!worktreePath) throw new Error("worktree_path not found")
 
   const demo = path.join(worktreePath, "diff-demo.txt")
-  fs.writeFileSync(demo, "hello\nworld\n", "utf8")
+  fs.writeFileSync(demo, Array.from({ length: 400 }, (_, i) => `line ${i}\n`).join(""), "utf8")
 
   await page.getByTestId("right-sidebar-tab-changes").click()
   const fileRow = page.getByRole("button", { name: /diff-demo\.txt/ }).first()
@@ -438,6 +438,13 @@ test("changes panel opens unified diff tab", async ({ page }) => {
 
   await expect(page.getByTestId("diff-viewer")).toBeVisible({ timeout: 20_000 })
   await expect(page.getByTestId("diff-viewer").getByText("diff-demo.txt").first()).toBeVisible({ timeout: 20_000 })
+
+  const scroll = page.getByTestId("diff-scroll-container")
+  await scroll.hover()
+  const before = await scroll.evaluate((el) => el.scrollTop)
+  await page.mouse.wheel(0, 600)
+  const after = await scroll.evaluate((el) => el.scrollTop)
+  expect(after).toBeGreaterThan(before)
 })
 
 test("archiving a worktree shows an executing animation", async ({ page }) => {

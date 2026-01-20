@@ -923,7 +923,7 @@ export function ChatPanel({
   }, [activeWorkspaceId, activeThreadId, attachments, draftText])
 
   return (
-    <div className="flex-1 flex flex-col min-w-0 bg-background">
+    <div className="flex-1 min-h-0 flex flex-col min-w-0 bg-background">
       <WorkspaceChatHeader
         projectName={projectInfo.name}
         branchName={projectInfo.branch}
@@ -950,7 +950,7 @@ export function ChatPanel({
       />
 
       {activePanel === "diff" ? (
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
           <DiffTabPanel
             isLoading={isDiffLoading}
             error={diffError}

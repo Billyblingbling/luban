@@ -93,7 +93,7 @@ export function AgentIDE() {
 
   return (
     <div className="flex flex-col h-screen bg-background text-foreground overflow-hidden">
-      <div className="relative flex flex-1 overflow-hidden">
+      <div className="relative flex flex-1 min-h-0 overflow-hidden">
         {viewMode === "workspace" ? (
           <>
             <Sidebar viewMode={viewMode} onViewModeChange={setViewMode} widthPx={sidebarWidthPx} />
@@ -117,7 +117,7 @@ export function AgentIDE() {
               />
             </div>
 
-            <div className="flex-1 min-w-0 flex">
+            <div className="flex-1 min-h-0 min-w-0 flex">
               <ChatPanel
                 pendingDiffFile={pendingDiffFile}
                 onDiffFileOpened={() => setPendingDiffFile(null)}
