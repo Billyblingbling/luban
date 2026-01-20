@@ -4,16 +4,9 @@ import type React from "react"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
-  Copy,
   ArrowDown,
   Clock,
   X,
-  GitBranch,
-  Pencil,
-  Sparkles,
-  Check,
-  Loader2,
-  Paperclip,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useLuban } from "@/lib/luban-context"
@@ -36,7 +29,6 @@ import {
   saveJson,
 } from "@/lib/ui-prefs"
 import type { ChangedFile } from "./right-sidebar"
-import { OpenButton } from "@/components/shared/open-button"
 import { type ComposerAttachment as EditorComposerAttachment } from "@/components/shared/message-editor"
 import { AgentRunningCard, type AgentRunningStatus } from "@/components/shared/agent-running-card"
 import { openSettingsPanel } from "@/lib/open-settings"
@@ -49,6 +41,7 @@ import { DiffTabPanel, type DiffFileData, type DiffStyle } from "@/components/di
 import { QueuedPromptRow } from "@/components/queued-prompts"
 import { EscCancelHint } from "@/components/esc-cancel-hint"
 import { ChatComposer } from "@/components/chat-composer"
+import { WorkspaceChatHeader } from "@/components/workspace-chat-header"
 
 type ComposerAttachment = EditorComposerAttachment
 
@@ -134,11 +127,7 @@ export function ChatPanel({
   const [isDiffLoading, setIsDiffLoading] = useState(false)
   const [diffError, setDiffError] = useState<string | null>(null)
 
-  const [isRenamingBranch, setIsRenamingBranch] = useState(false)
-  const [branchRenameValue, setBranchRenameValue] = useState("")
-  const branchInputRef = useRef<HTMLInputElement | null>(null)
-  const branchRenameCanceledRef = useRef(false)
-  const [copySuccess, setCopySuccess] = useState(false)
+  const [isEditingBranchName, setIsEditingBranchName] = useState(false)
   const [branchRenamePending, setBranchRenamePending] = useState<{ initialBranch: string; startedAt: number } | null>(
     null,
   )
@@ -329,13 +318,22 @@ export function ChatPanel({
     }
   }, [activeWorkspace?.branch_rename_status, branchRenamePending, projectInfo.branch])
 
-  useEffect(() => {
-    if (!isRenamingBranch) return
-    const el = branchInputRef.current
-    if (!el) return
-    el.focus()
-    el.select()
-  }, [isRenamingBranch])
+  const handleRenameBranch = useCallback(
+    (nextBranch: string) => {
+      if (activeWorkspaceId == null) return
+      if (!projectInfo.branch) return
+      setBranchRenamePending({ initialBranch: projectInfo.branch, startedAt: Date.now() })
+      renameWorkspaceBranch(activeWorkspaceId, nextBranch)
+    },
+    [activeWorkspaceId, projectInfo.branch, renameWorkspaceBranch],
+  )
+
+  const handleAiRenameBranch = useCallback(() => {
+    if (activeWorkspaceId == null || activeThreadId == null) return
+    if (!projectInfo.branch) return
+    setBranchRenamePending({ initialBranch: projectInfo.branch, startedAt: Date.now() })
+    aiRenameWorkspaceBranch(activeWorkspaceId, activeThreadId)
+  }, [activeWorkspaceId, activeThreadId, aiRenameWorkspaceBranch, projectInfo.branch])
 
   const { tabs, archivedTabs, openThreadIds, activeTabId } = useThreadTabs({
     threads,
@@ -570,7 +568,7 @@ export function ChatPanel({
 
   const { escHintVisible, escTimeoutMs: ESC_TIMEOUT_MS, clearEscHint } = useAgentCancelHotkey({
     enabled: agentStatus === "running",
-    blocked: editingQueuedPromptId != null || isRenamingBranch,
+    blocked: editingQueuedPromptId != null || isEditingBranchName,
     onCancel: handleAgentCancel,
   })
 
@@ -943,117 +941,16 @@ export function ChatPanel({
 
   return (
     <div className="flex-1 flex flex-col min-w-0 bg-background">
-      <div className="flex items-center h-11 border-b border-border bg-card px-4">
-        <div className="flex items-center gap-2 min-w-0">
-          <span data-testid="active-project-name" className="text-sm font-medium text-foreground truncate">
-            {projectInfo.name}
-          </span>
-          <div className="group/branch relative flex items-center gap-1 text-muted-foreground">
-            <GitBranch className="w-3.5 h-3.5" />
-            {isRenamingBranch ? (
-              <div className="flex items-center gap-1">
-                    <input
-                      ref={branchInputRef}
-                      type="text"
-                      value={branchRenameValue}
-                      onChange={(e) => setBranchRenameValue(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          if (activeWorkspaceId == null) return
-                          setIsRenamingBranch(false)
-                          setBranchRenamePending({ initialBranch: projectInfo.branch, startedAt: Date.now() })
-                          renameWorkspaceBranch(activeWorkspaceId, branchRenameValue)
-                        }
-                        if (e.key === "Escape") {
-                          branchRenameCanceledRef.current = true
-                          setBranchRenameValue(projectInfo.branch)
-                          setIsRenamingBranch(false)
-                        }
-                      }}
-                      onBlur={() => {
-                        if (activeWorkspaceId == null) return
-                        setIsRenamingBranch(false)
-                        if (branchRenameCanceledRef.current) {
-                          branchRenameCanceledRef.current = false
-                          return
-                        }
-                        setBranchRenamePending({ initialBranch: projectInfo.branch, startedAt: Date.now() })
-                        renameWorkspaceBranch(activeWorkspaceId, branchRenameValue)
-                      }}
-                      className="text-xs bg-muted border border-border rounded px-1.5 py-0.5 w-40 focus:outline-none focus:ring-1 focus:ring-primary"
-                    />
-                    <button
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => {
-                        if (activeWorkspaceId == null) return
-                        setIsRenamingBranch(false)
-                        setBranchRenamePending({ initialBranch: projectInfo.branch, startedAt: Date.now() })
-                        renameWorkspaceBranch(activeWorkspaceId, branchRenameValue)
-                      }}
-                      className="p-0.5 text-muted-foreground hover:text-primary transition-colors"
-                      title="Confirm"
-                    >
-                  <Check className="w-3 h-3" />
-                </button>
-              </div>
-            ) : (
-              <>
-                <span data-testid="active-workspace-branch" className="text-xs">
-                  {projectInfo.branch}
-                </span>
-                {isBranchRenaming ? (
-                  <Loader2 className="w-3 h-3 animate-spin text-primary ml-1" />
-                ) : (
-                  <div className="absolute right-0 top-1/2 -translate-y-1/2 z-10 flex items-center gap-0.5 opacity-0 group-hover/branch:opacity-100 transition-opacity bg-card px-0.5">
-                    {projectInfo.isGit && !projectInfo.isMainBranch && (
-                      <>
-                        <button
-                          onClick={() => {
-                            setBranchRenameValue(projectInfo.branch)
-                            setIsRenamingBranch(true)
-                          }}
-                          className="p-0.5 text-muted-foreground hover:text-foreground transition-colors"
-                          title="Rename branch"
-                        >
-                          <Pencil className="w-3 h-3" />
-                        </button>
-                        <button
-                          onClick={() => {
-                            if (activeWorkspaceId == null || activeThreadId == null) return
-                            setBranchRenamePending({ initialBranch: projectInfo.branch, startedAt: Date.now() })
-                            aiRenameWorkspaceBranch(activeWorkspaceId, activeThreadId)
-                          }}
-                          className="p-0.5 text-muted-foreground hover:text-primary transition-colors"
-                          title="AI rename"
-                        >
-                          <Sparkles className="w-3 h-3" />
-                        </button>
-                      </>
-                    )}
-                    <button
-                      onClick={async () => {
-                        if (!projectInfo.branch) return
-                        try {
-                          await navigator.clipboard.writeText(projectInfo.branch)
-                          setCopySuccess(true)
-                          window.setTimeout(() => setCopySuccess(false), 1200)
-                        } catch {
-                          setCopySuccess(false)
-                        }
-                      }}
-                      className="p-0.5 text-muted-foreground hover:text-foreground transition-colors"
-                      title={copySuccess ? "Copied!" : "Copy branch name"}
-                    >
-                      {copySuccess ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
-                    </button>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-          <OpenButton />
-        </div>
-      </div>
+      <WorkspaceChatHeader
+        projectName={projectInfo.name}
+        branchName={projectInfo.branch}
+        isGit={projectInfo.isGit}
+        isMainBranch={projectInfo.isMainBranch}
+        isBranchRenaming={isBranchRenaming}
+        onRenameBranch={handleRenameBranch}
+        onAiRenameBranch={handleAiRenameBranch}
+        onEditingBranchChange={setIsEditingBranchName}
+      />
 
       <ThreadTabsBar
         tabs={tabs}
