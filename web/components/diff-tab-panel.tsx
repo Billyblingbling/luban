@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { AlignJustify, ChevronDown, ChevronRight, Columns2, GitCompareArrows } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -66,7 +66,7 @@ export function DiffTabPanel({
 }
 
 const pierreDiffWorkerPoolOptions: WorkerPoolOptions = {
-  workerFactory: () => new Worker(new URL("../workers/pierre-diffs-worker.ts", import.meta.url), { type: "module" }),
+  workerFactory: () => new Worker(new URL("../node_modules/@pierre/diffs/dist/worker/worker-portable.js", import.meta.url)),
   poolSize: 2,
 }
 
@@ -219,13 +219,14 @@ function AllFilesDiffViewer({
     }
   }, [fileIndexById, files])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (files.length === 0) return
+    if (renderedFilesRef.current.size > 0) return
     const initial: string[] = []
     if (activeFileId) initial.push(activeFileId)
     initial.push(files[0].file.id)
     renderFilesImmediately(initial)
-  }, [files])
+  }, [activeFileId, files])
 
   const getStatusColor = (status: ChangedFile["status"]) => {
     switch (status) {
@@ -304,7 +305,8 @@ function AllFilesDiffViewer({
       >
         {files.map((fileData) => {
           const isCollapsed = collapsedFiles.has(fileData.file.id)
-          const isRendered = renderedFiles.has(fileData.file.id)
+          const isRendered =
+            files.length === 1 || renderedFiles.has(fileData.file.id) || (activeFileId != null && fileData.file.id === activeFileId)
           return (
             <div
               key={fileData.file.id}

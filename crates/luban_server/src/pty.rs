@@ -13,6 +13,24 @@ type PtySessions = HashMap<PtyKey, Arc<PtySession>>;
 
 const MAX_OUTPUT_HISTORY_BYTES: usize = 512 * 1024;
 
+fn trace_bytes(label: &str, bytes: &[u8]) {
+    if std::env::var_os("LUBAN_PTY_TRACE").is_none() {
+        return;
+    }
+    const MAX: usize = 64;
+    let mut out = String::new();
+    for (idx, b) in bytes.iter().take(MAX).enumerate() {
+        if idx > 0 {
+            out.push(' ');
+        }
+        out.push_str(&format!("{b:02x}"));
+    }
+    if bytes.len() > MAX {
+        out.push_str(" …");
+    }
+    tracing::info!(label = %label, len = bytes.len(), hex = %out);
+}
+
 #[derive(Clone)]
 pub struct PtyManager {
     inner: Arc<Mutex<PtySessions>>,
@@ -252,7 +270,10 @@ fn handle_incoming(session: &PtySession, msg: Message) -> anyhow::Result<()> {
                 PtyClientMessage::Resize { cols, rows } => session.resize(cols, rows),
             }
         }
-        Message::Binary(bytes) => session.write_input(&bytes),
+        Message::Binary(bytes) => {
+            trace_bytes("pty_in_binary", &bytes);
+            session.write_input(&bytes)
+        }
         Message::Close(_) => Ok(()),
         _ => Ok(()),
     }

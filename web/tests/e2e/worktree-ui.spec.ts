@@ -439,12 +439,16 @@ test("changes panel opens unified diff tab", async ({ page }) => {
   await expect(page.getByTestId("diff-viewer")).toBeVisible({ timeout: 20_000 })
   await expect(page.getByTestId("diff-viewer").getByText("diff-demo.txt").first()).toBeVisible({ timeout: 20_000 })
 
-  const scroll = page.getByTestId("diff-scroll-container")
-  await scroll.hover()
-  const before = await scroll.evaluate((el) => el.scrollTop)
-  await page.mouse.wheel(0, 600)
-  const after = await scroll.evaluate((el) => el.scrollTop)
-  expect(after).toBeGreaterThan(before)
+  const viewer = page.getByTestId("diff-viewer")
+  await expect(viewer.getByText("line 0").first()).toBeVisible({ timeout: 20_000 })
+
+  const diffViewport = viewer.locator("diffs-container").first()
+  await expect(diffViewport).toBeVisible({ timeout: 20_000 })
+  await diffViewport.hover()
+
+  // Ensure the diff panel actually scrolls (regression for non-scrollable diffs).
+  await page.mouse.wheel(0, 2400)
+  await expect(viewer.getByText("line 150").first()).toBeVisible({ timeout: 20_000 })
 })
 
 test("archiving a worktree shows an executing animation", async ({ page }) => {

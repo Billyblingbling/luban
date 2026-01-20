@@ -2,6 +2,15 @@ import { expect, test } from "@playwright/test"
 import { PNG } from "pngjs"
 import { ensureWorkspace, sendWsAction } from "./helpers"
 
+function decodeWsPayload(payload: unknown): { kind: "text" | "binary"; text: string } {
+  if (typeof payload === "string") return { kind: "text", text: payload }
+  if (payload == null) return { kind: "text", text: "" }
+
+  if (payload instanceof Uint8Array) return { kind: "binary", text: Buffer.from(payload).toString("utf8") }
+  if (payload instanceof ArrayBuffer) return { kind: "binary", text: Buffer.from(new Uint8Array(payload)).toString("utf8") }
+  return { kind: "text", text: String(payload) }
+}
+
 function parseRgb(color: string): { r: number; g: number; b: number } | null {
   const m = /^rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/.exec(color.trim())
   if (!m) return null
@@ -91,13 +100,14 @@ test("terminal paste sends input frames", async ({ page }) => {
   const token = `luban-e2e-paste-${Math.random().toString(16).slice(2)}`
   const payload = `echo ${token}\n`
 
-  const sentFrame = new Promise<string>((resolve) => {
+  const sentFrame = new Promise<void>((resolve) => {
     page.on("websocket", (ws) => {
       if (!ws.url().includes("/api/pty/")) return
       ws.on("framesent", (ev) => {
-        const data = typeof ev.payload === "string" ? ev.payload : String(ev.payload)
-        if (data.includes("\"type\":\"input\"") && data.includes(token)) {
-          resolve(data)
+        const decoded = decodeWsPayload(ev.payload)
+        if (decoded.kind !== "binary") return
+        if (decoded.text.includes(token)) {
+          resolve()
         }
       })
     })
@@ -127,26 +137,24 @@ test("terminal paste sends input frames", async ({ page }) => {
 })
 
 test("terminal ctrl+arrow sends word navigation input frames", async ({ page }) => {
-  const leftFrame = new Promise<string>((resolve) => {
+  const leftFrame = new Promise<void>((resolve) => {
     page.on("websocket", (ws) => {
       if (!ws.url().includes("/api/pty/")) return
       ws.on("framesent", (ev) => {
-        const data = typeof ev.payload === "string" ? ev.payload : String(ev.payload)
-        if (data.includes("\"type\":\"input\"") && data.includes("\\u001bb")) {
-          resolve(data)
-        }
+        const decoded = decodeWsPayload(ev.payload)
+        if (decoded.kind !== "binary") return
+        if (decoded.text.includes("\u001bb")) resolve()
       })
     })
   })
 
-  const rightFrame = new Promise<string>((resolve) => {
+  const rightFrame = new Promise<void>((resolve) => {
     page.on("websocket", (ws) => {
       if (!ws.url().includes("/api/pty/")) return
       ws.on("framesent", (ev) => {
-        const data = typeof ev.payload === "string" ? ev.payload : String(ev.payload)
-        if (data.includes("\"type\":\"input\"") && data.includes("\\u001bf")) {
-          resolve(data)
-        }
+        const decoded = decodeWsPayload(ev.payload)
+        if (decoded.kind !== "binary") return
+        if (decoded.text.includes("\u001bf")) resolve()
       })
     })
   })
@@ -169,6 +177,32 @@ test("terminal ctrl+arrow sends word navigation input frames", async ({ page }) 
   await page.keyboard.press("ArrowRight")
   await page.keyboard.up("Control")
   await rightFrame
+})
+
+test("terminal does not leak OSC color query replies as visible text", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  const terminal = page.getByTestId("pty-terminal")
+  await expect
+    .poll(async () => await terminal.locator("canvas").count(), { timeout: 20_000 })
+    .toBeGreaterThan(0)
+
+  await terminal.click({ force: true })
+
+  // Trigger an OSC query that xterm.js may answer; the reply must never become visible text.
+  // If control bytes are lost on the input path, the shell would echo plain `rgb:` content.
+  await page.keyboard.type("printf '\\e]10;?\\a'\n")
+
+  await expect
+    .poll(async () => {
+      return await terminal.evaluate((outer) => {
+        const lines = Array.from(outer.querySelectorAll(".xterm-rows > div"))
+          .map((el) => (el as HTMLElement).innerText)
+          .join("\n")
+        return lines.includes("rgb:")
+      })
+    })
+    .toBe(false)
 })
 
 test("terminal theme follows app theme changes", async ({ page }) => {
@@ -395,9 +429,17 @@ test("terminal scrollbar is styled via app CSS", async ({ page }) => {
 
 test("terminal restarts after the shell exits", async ({ page }) => {
   let ptySocketCount = 0
+  let receivedInitialOutput = false
   page.on("websocket", (ws) => {
     if (!ws.url().includes("/api/pty/")) return
     ptySocketCount += 1
+
+    ws.on("framereceived", (ev) => {
+      const decoded = decodeWsPayload(ev.payload)
+      if (decoded.kind !== "binary") return
+      if (decoded.text.length === 0) return
+      receivedInitialOutput = true
+    })
   })
 
   await ensureWorkspace(page)
@@ -408,16 +450,40 @@ test("terminal restarts after the shell exits", async ({ page }) => {
     .toBeGreaterThan(0)
 
   await expect.poll(async () => ptySocketCount, { timeout: 20_000 }).toBeGreaterThan(0)
+  await expect.poll(async () => receivedInitialOutput, { timeout: 20_000 }).toBe(true)
 
-  await terminal.evaluate((el) => {
-    const event = new Event("paste", { bubbles: true, cancelable: true }) as any
-    Object.defineProperty(event, "clipboardData", {
-      value: {
-        getData: (t: string) => (t === "text/plain" ? "exit\n" : ""),
+  const pasteIntoTerminal = async (text: string) => {
+    await terminal.evaluate(
+      (el, text) => {
+        const event = new Event("paste", { bubbles: true, cancelable: true }) as any
+        Object.defineProperty(event, "clipboardData", {
+          value: {
+            getData: (t: string) => (t === "text/plain" ? text : ""),
+          },
+        })
+        el.dispatchEvent(event)
       },
-    })
-    el.dispatchEvent(event)
-  })
+      text,
+    )
+  }
 
+  // Prefer Ctrl+D (EOT) to exit at the prompt, but fall back to `exit\n` for shells
+  // that ignore EOT (e.g. `IGNORE_EOF`) so this test stays deterministic.
+  // First, try to interrupt any long-running foreground process to avoid state bleed
+  // from other terminal tests that reuse the same PTY session.
+  await pasteIntoTerminal("\u0003")
+  await page.waitForTimeout(100)
+
+  await pasteIntoTerminal("\u0004")
+  try {
+    await expect.poll(async () => ptySocketCount, { timeout: 3_000 }).toBeGreaterThan(1)
+    return
+  } catch {
+    // ignore and fall back
+  }
+
+  // Killing the shell is more deterministic than `exit\n` in case the shell is configured
+  // to ignore EOF or refuses to exit due to interactive constraints.
+  await pasteIntoTerminal("kill -KILL $$\n")
   await expect.poll(async () => ptySocketCount, { timeout: 20_000 }).toBeGreaterThan(1)
 })

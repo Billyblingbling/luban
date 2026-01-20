@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef } from "react"
 import { Terminal, type ITheme } from "@xterm/xterm"
 import { FitAddon } from "@xterm/addon-fit"
 import { WebglAddon } from "@xterm/addon-webgl"
@@ -11,6 +11,12 @@ import { useAppearance } from "@/components/appearance-provider"
 
 function escapeCssFontName(value: string): string {
   return value.replaceAll('"', '\\"')
+}
+
+function encodeBinaryString(value: string): Uint8Array {
+  const out = new Uint8Array(value.length)
+  for (let i = 0; i < value.length; i++) out[i] = value.charCodeAt(i) & 0xff
+  return out
 }
 
 function terminalFontFamily(fontName: string): string {
@@ -202,7 +208,6 @@ export function PtyTerminal() {
   const { activeWorkspaceId } = useLuban()
   const { fonts } = useAppearance()
   const { resolvedTheme } = useTheme()
-  const [sessionEpoch, setSessionEpoch] = useState(0)
   const outerRef = useRef<HTMLDivElement | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
@@ -256,7 +261,6 @@ export function PtyTerminal() {
     const ptyThreadId = 1
 
     let disposed = false
-    let restartRequested = false
     const fitAddon = new FitAddon()
     const webglAddon = new WebglAddon()
     fitAddonRef.current = fitAddon
@@ -279,9 +283,10 @@ export function PtyTerminal() {
       // Ignore WebGL initialization failures (unsupported GPU context).
     }
 
-    const decoder = new TextDecoder("utf-8")
+    const encoder = new TextEncoder()
     let ws: WebSocket | null = null
     let dataDisposable: { dispose: () => void } | null = null
+    let binaryDisposable: { dispose: () => void } | null = null
     let resizeDisposable: { dispose: () => void } | null = null
     let resizeObserver: ResizeObserver | null = null
     let keydownCapture: ((ev: KeyboardEvent) => void) | null = null
@@ -289,10 +294,29 @@ export function PtyTerminal() {
     let focusCapture: (() => void) | null = null
     let pendingPastePromise: Promise<string> | null = null
     let pasteHandled = false
+    let pendingInput: Uint8Array[] = []
+    let pendingReconnectTimer: number | null = null
 
     function sendInput(text: string) {
-      if (ws?.readyState !== WebSocket.OPEN) return
-      ws.send(JSON.stringify({ type: "input", data: text }))
+      const socket = ws
+      if (!socket) return
+      const bytes = encoder.encode(text)
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(bytes)
+      } else {
+        pendingInput.push(bytes)
+      }
+    }
+
+    function sendBinaryInput(value: string) {
+      const socket = ws
+      if (!socket) return
+      const bytes = encodeBinaryString(value)
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(bytes)
+      } else {
+        pendingInput.push(bytes)
+      }
     }
 
     function sendResizeIfReady(cols: number, rows: number) {
@@ -320,23 +344,23 @@ export function PtyTerminal() {
       window.requestAnimationFrame(tick)
     }
 
-	    try {
-	      term.open(container)
-	    } catch (err) {
-	      container.textContent = `Terminal init failed: ${String(err)}`
-	      return
-	    }
+    try {
+      term.open(container)
+    } catch (err) {
+      container.textContent = `Terminal init failed: ${String(err)}`
+      return
+    }
 
-	    // The terminal is often initialized before theme variables settle (e.g. next-themes
-	    // hydration). Re-apply once after mount so the renderer picks up the correct background.
-	    window.requestAnimationFrame(() => {
-	      if (disposed) return
-	      const theme = terminalThemeFromCss(outer)
-	      const digest = JSON.stringify(theme)
-	      lastThemeDigestRef.current = digest
-	      term.options.theme = theme
-	      term.refresh(0, Math.max(0, term.rows - 1))
-	    })
+    // The terminal is often initialized before theme variables settle (e.g. next-themes
+    // hydration). Re-apply once after mount so the renderer picks up the correct background.
+    window.requestAnimationFrame(() => {
+      if (disposed) return
+      const theme = terminalThemeFromCss(outer)
+      const digest = JSON.stringify(theme)
+      lastThemeDigestRef.current = digest
+      term.options.theme = theme
+      term.refresh(0, Math.max(0, term.rows - 1))
+    })
 
     focusCapture = () => {
       try {
@@ -443,44 +467,46 @@ export function PtyTerminal() {
 
     scheduleFitAndResizeSync()
 
-    const url = new URL(`/api/pty/${activeWorkspaceId}/${ptyThreadId}`, window.location.href)
-    url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
-    ws = new WebSocket(url.toString())
-    ws.binaryType = "arraybuffer"
+    const connect = () => {
+      const url = new URL(`/api/pty/${activeWorkspaceId}/${ptyThreadId}`, window.location.href)
+      url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
 
-    ws.onmessage = (ev) => {
-      if (disposed) return
-      if (typeof ev.data === "string") {
-        try {
-          const payload = JSON.parse(ev.data) as { type?: string } | null
-          if (payload && payload.type === "exited") {
-            restartRequested = true
-            ws?.close()
-          }
-        } catch {
-          // Ignore non-JSON control messages.
-        }
-        return
+      const socket = new WebSocket(url.toString())
+      socket.binaryType = "arraybuffer"
+      ws = socket
+
+      socket.onmessage = (ev) => {
+        if (disposed) return
+        if (typeof ev.data === "string") return
+        const bytes = new Uint8Array(ev.data as ArrayBuffer)
+        term.write(bytes)
       }
-      const bytes = new Uint8Array(ev.data as ArrayBuffer)
-      term.write(decoder.decode(bytes))
+
+      socket.onopen = () => {
+        if (disposed) return
+        if (pendingInput.length > 0) {
+          for (const bytes of pendingInput) socket.send(bytes)
+          pendingInput = []
+        }
+        scheduleFitAndResizeSync()
+      }
+
+      socket.onclose = () => {
+        if (disposed) return
+        if (ws !== socket) return
+        if (pendingReconnectTimer != null) return
+        pendingReconnectTimer = window.setTimeout(() => {
+          pendingReconnectTimer = null
+          if (disposed) return
+          connect()
+        }, 150)
+      }
     }
 
-    ws.onopen = () => {
-      if (disposed) return
-      scheduleFitAndResizeSync()
-    }
+    connect()
 
-    ws.onclose = () => {
-      if (disposed) return
-      if (!restartRequested) return
-      setSessionEpoch((prev) => prev + 1)
-    }
-
-    dataDisposable = term.onData((data: string) => {
-      if (ws?.readyState !== WebSocket.OPEN) return
-      ws.send(JSON.stringify({ type: "input", data }))
-    })
+    dataDisposable = term.onData((data: string) => sendInput(data))
+    binaryDisposable = term.onBinary((data: string) => sendBinaryInput(data))
 
     return () => {
       disposed = true
@@ -493,12 +519,14 @@ export function PtyTerminal() {
       if (pasteCapture) outer.removeEventListener("paste", pasteCapture, true)
       resizeObserver?.disconnect()
       dataDisposable?.dispose()
+      binaryDisposable?.dispose()
       resizeDisposable?.dispose()
+      if (pendingReconnectTimer != null) window.clearTimeout(pendingReconnectTimer)
       ws?.close()
       webglAddon.dispose()
       term.dispose()
     }
-  }, [activeWorkspaceId, sessionEpoch])
+  }, [activeWorkspaceId])
 
   return (
     <div
