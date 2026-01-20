@@ -1,3 +1,5 @@
+set dotenv-load
+
 default:
   @just --list
 
@@ -142,8 +144,8 @@ package target profile="release":
   fi; \
   target_flag="--target $target_triple"; \
   (cd crates/luban_tauri && cargo tauri build --ci --bundles app $build_flags $target_flag); \
-  version="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; d=json.load(sys.stdin); pkgs=d.get(\"packages\",[]); v=None\nfor p in pkgs:\n  if p.get(\"name\")==\"luban_tauri\":\n    v=p.get(\"version\"); break\nif not v: raise SystemExit(\"failed to resolve luban_tauri version\")\nprint(v)')"; \
-  bundle_root="crates/luban_tauri/target/$target_triple"; \
+  version="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(p[\"version\"] for p in d.get(\"packages\",[]) if p.get(\"name\")==\"luban_tauri\"))')"; \
+  bundle_root="target/$target_triple"; \
   bundle_macos="$bundle_root/$build_dir/bundle/macos"; \
   app_archive="$(find "$bundle_macos" -maxdepth 2 -type f -name \"*.app.tar.gz\" | head -n 1 || true)"; \
   app_path=""; \
