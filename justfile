@@ -186,27 +186,4 @@ upload:
     echo "missing .context/package/package.env; run: just package darwin-aarch64"; \
     exit 1; \
   fi; \
-  if ! command -v aws >/dev/null 2>&1; then \
-    echo "aws CLI not found; install awscli to upload to Cloudflare R2"; \
-    exit 1; \
-  fi; \
-  if [ -z "${R2_BUCKET:-}" ] || [ -z "${R2_ENDPOINT_URL:-}" ]; then \
-    echo "missing R2 config; set R2_BUCKET and R2_ENDPOINT_URL"; \
-    exit 1; \
-  fi; \
-  if [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then \
-    echo "missing AWS credentials; set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY for Cloudflare R2"; \
-    exit 1; \
-  fi; \
-  set -a; . .context/package/package.env; set +a; \
-  AWS_EC2_METADATA_DISABLED=1; export AWS_EC2_METADATA_DISABLED; \
-  if [ -z "${AWS_DEFAULT_REGION:-}" ]; then AWS_DEFAULT_REGION=auto; export AWS_DEFAULT_REGION; fi; \
-  archive_path="$LUBAN_PACKAGE_ARCHIVE"; \
-  sig_path="$LUBAN_PACKAGE_SIGNATURE"; \
-  manifest_path="$LUBAN_PACKAGE_MANIFEST"; \
-  archive_name="$(basename "$archive_path")"; \
-  echo "uploading: $archive_name"; \
-  aws --endpoint-url "$R2_ENDPOINT_URL" s3 cp "$archive_path" "s3://$R2_BUCKET/$archive_name" --cache-control "public, max-age=31536000, immutable" --content-type "application/gzip"; \
-  aws --endpoint-url "$R2_ENDPOINT_URL" s3 cp "$sig_path" "s3://$R2_BUCKET/$archive_name.sig" --cache-control "public, max-age=31536000, immutable" --content-type "text/plain; charset=utf-8"; \
-  aws --endpoint-url "$R2_ENDPOINT_URL" s3 cp "$manifest_path" "s3://$R2_BUCKET/latest.json" --cache-control "no-cache" --content-type "application/json; charset=utf-8"; \
-  echo "uploaded manifest: ${LUBAN_RELEASE_BASE_URL:-https://releases.luban.dev}/latest.json"
+  cargo run --quiet --manifest-path=dev/Cargo.toml -- upload
