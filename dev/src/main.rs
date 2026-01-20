@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
+use std::process::Stdio;
 use time::format_description::well_known::Rfc3339;
 
 #[derive(Parser)]
@@ -73,17 +74,16 @@ fn file_name(path: &Path) -> Result<String> {
 }
 
 fn run_cmd(mut cmd: ProcessCommand, context: &str) -> Result<()> {
-    let output = cmd.output().with_context(|| format!("spawn {context}"))?;
-    if output.status.success() {
+    let status = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()
+        .with_context(|| format!("spawn {context}"))?;
+    if status.success() {
         return Ok(());
     }
-    anyhow::bail!(
-        "{} failed (exit {}):\nstdout:\n{}\nstderr:\n{}",
-        context,
-        output.status,
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
+    anyhow::bail!("{context} failed (exit {status})");
 }
 
 fn run_cmd_capture_stdout(mut cmd: ProcessCommand, context: &str) -> Result<String> {
