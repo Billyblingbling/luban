@@ -175,7 +175,7 @@ export function NewTaskModal({ open, onOpenChange }: NewTaskModalProps) {
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-[560px] p-0 gap-0 bg-background border-border overflow-hidden">
+      <DialogContent data-testid="new-task-modal" className="sm:max-w-[560px] p-0 gap-0 bg-background border-border overflow-hidden">
         <div className="px-5 py-4 border-b border-border">
           <h2 className="text-base font-medium flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-primary" />

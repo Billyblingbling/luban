@@ -1221,7 +1221,7 @@ export function ChatPanel({
               {tabs.length > 1 && (
                 <button
                   onClick={(e) => handleCloseTab(tab.id, e)}
-                  className="p-0.5 opacity-0 group-hover:opacity-100 hover:bg-muted rounded transition-all"
+                  className="p-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto hover:bg-muted rounded transition-all"
                 >
                   <X className="w-3 h-3" />
                 </button>
@@ -1247,7 +1247,7 @@ export function ChatPanel({
               <span className="text-xs truncate flex-1">Changes</span>
               <button
                 onClick={handleCloseDiffTab}
-                className="p-0.5 opacity-0 group-hover:opacity-100 hover:bg-muted rounded transition-all"
+                className="p-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto hover:bg-muted rounded transition-all"
                 title="Close changes tab"
               >
                 <X className="w-3 h-3" />

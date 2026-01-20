@@ -1616,7 +1616,17 @@ export function SettingsPanel({
   if (!open) return null
 
   return (
-    <div data-testid="settings-panel" className="fixed inset-0 z-50 bg-background flex">
+    <div
+      data-testid="settings-panel"
+      className="fixed inset-0 z-50 bg-background flex"
+      onKeyDown={(e) => {
+        if (e.key !== "Escape") return
+        e.stopPropagation()
+        ;(e.nativeEvent as unknown as { stopImmediatePropagation?: () => void }).stopImmediatePropagation?.()
+        e.preventDefault()
+        onOpenChange(false)
+      }}
+    >
       <div className="w-60 flex-shrink-0 border-r border-border bg-sidebar flex flex-col">
         <div className="flex items-center justify-between h-11 px-3 border-b border-border">
           <div className="flex items-center gap-2 px-1.5 py-1">
