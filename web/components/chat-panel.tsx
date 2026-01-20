@@ -32,7 +32,6 @@ import type { ChangedFile } from "./right-sidebar"
 import { type ComposerAttachment as EditorComposerAttachment } from "@/components/shared/message-editor"
 import { AgentRunningCard, type AgentRunningStatus } from "@/components/shared/agent-running-card"
 import { openSettingsPanel } from "@/lib/open-settings"
-import { computeProjectDisplayNames } from "@/lib/project-display-names"
 import { focusChatInput } from "@/lib/focus-chat-input"
 import { useAgentCancelHotkey } from "@/lib/use-agent-cancel-hotkey"
 import { useThreadTabs, type ArchivedTab } from "@/lib/use-thread-tabs"
@@ -42,6 +41,7 @@ import { QueuedPromptRow } from "@/components/queued-prompts"
 import { EscCancelHint } from "@/components/esc-cancel-hint"
 import { ChatComposer } from "@/components/chat-composer"
 import { WorkspaceChatHeader } from "@/components/workspace-chat-header"
+import { getActiveProjectInfo } from "@/lib/active-project-info"
 
 type ComposerAttachment = EditorComposerAttachment
 
@@ -264,24 +264,7 @@ export function ChatPanel({
     [codexCustomPrompts],
   )
 
-  const projectInfo = useMemo(() => {
-    if (app == null || activeWorkspaceId == null) {
-      return { name: "Luban", branch: "", isGit: false, isMainBranch: false }
-    }
-    const displayNames = computeProjectDisplayNames(app.projects.map((p) => ({ path: p.path, name: p.name })))
-    for (const p of app.projects) {
-      for (const w of p.workspaces) {
-        if (w.id !== activeWorkspaceId) continue
-        return {
-          name: displayNames.get(p.path) ?? p.slug,
-          branch: w.branch_name,
-          isGit: p.is_git,
-          isMainBranch: w.workspace_name === "main",
-        }
-      }
-    }
-    return { name: "Luban", branch: "", isGit: false, isMainBranch: false }
-  }, [app, activeWorkspaceId])
+  const projectInfo = useMemo(() => getActiveProjectInfo(app, activeWorkspaceId), [app, activeWorkspaceId])
 
   const isBranchRenaming = activeWorkspace?.branch_rename_status === "running" || branchRenamePending != null
 
