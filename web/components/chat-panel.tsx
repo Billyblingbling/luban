@@ -95,6 +95,8 @@ export function ChatPanel({
   const [draftText, setDraftText] = useState("")
   const [followTail, setFollowTail] = useState(true)
   const programmaticScrollRef = useRef(false)
+  const pinToBottomRef = useRef<{ epoch: number; until: number; raf: number | null } | null>(null)
+  const pinToBottomEpochRef = useRef(0)
   const [isLoadingOlder, setIsLoadingOlder] = useState(false)
   const loadingOlderRef = useRef(false)
   const lastScrollTopRef = useRef(0)
@@ -324,6 +326,56 @@ export function ChatPanel({
     activeThreadId,
   })
 
+  const stopPinToBottom = useCallback(() => {
+    const pending = pinToBottomRef.current
+    if (pending?.raf != null) {
+      window.cancelAnimationFrame(pending.raf)
+    }
+    pinToBottomRef.current = null
+    programmaticScrollRef.current = false
+  }, [])
+
+  const isPinningBottom = useCallback((): boolean => {
+    const pending = pinToBottomRef.current
+    return pending != null && Date.now() < pending.until
+  }, [])
+
+  const startPinToBottom = useCallback(
+    (durationMs: number) => {
+      pinToBottomEpochRef.current += 1
+      const epoch = pinToBottomEpochRef.current
+      const until = Date.now() + durationMs
+
+      const prev = pinToBottomRef.current
+      if (prev?.raf != null) window.cancelAnimationFrame(prev.raf)
+      pinToBottomRef.current = { epoch, until, raf: null }
+      programmaticScrollRef.current = true
+
+      const tick = () => {
+        const pending = pinToBottomRef.current
+        if (!pending || pending.epoch !== epoch) return
+        const el = scrollContainerRef.current
+        if (!el) {
+          if (Date.now() >= until) stopPinToBottom()
+          else pending.raf = window.requestAnimationFrame(tick)
+          return
+        }
+
+        el.scrollTop = el.scrollHeight
+
+        if (Date.now() >= until) {
+          stopPinToBottom()
+          return
+        }
+
+        pending.raf = window.requestAnimationFrame(tick)
+      }
+
+      pinToBottomRef.current.raf = window.requestAnimationFrame(tick)
+    },
+    [stopPinToBottom],
+  )
+
   useEffect(() => {
     if (activeWorkspaceId == null || activeThreadId == null) {
       setDraftText("")
@@ -338,6 +390,7 @@ export function ChatPanel({
 
     setFollowTail(true)
     localStorage.setItem(followTailKey(activeWorkspaceId, activeThreadId), "true")
+    startPinToBottom(500)
 
     const saved = loadJson<{ text: string }>(draftKey(activeWorkspaceId, activeThreadId))
     setDraftText(saved?.text ?? "")
@@ -348,7 +401,21 @@ export function ChatPanel({
     setQueuedDraftAttachments([])
     setQueuedDraftModelId(null)
     setQueuedDraftThinkingEffort(null)
-  }, [activeWorkspaceId, activeThreadId])
+  }, [activeWorkspaceId, activeThreadId, startPinToBottom])
+
+  useEffect(() => {
+    if (!followTail) stopPinToBottom()
+  }, [followTail, stopPinToBottom])
+
+  useEffect(() => {
+    if (!scrollContainerEl) return
+    if (activeWorkspaceId == null || activeThreadId == null) return
+    if (!followTail) return
+    if (!isPinningBottom()) return
+    startPinToBottom(250)
+  }, [activeThreadId, activeWorkspaceId, followTail, isPinningBottom, scrollContainerEl, startPinToBottom])
+
+  useEffect(() => stopPinToBottom, [stopPinToBottom])
 
   useEffect(() => {
     setIsDiffTabOpen(false)
@@ -402,7 +469,7 @@ export function ChatPanel({
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         el.scrollTop = el.scrollHeight
-        programmaticScrollRef.current = false
+        if (!isPinningBottom()) programmaticScrollRef.current = false
       })
     })
   }

@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 
 import type { Message } from "@/lib/conversation-ui"
 import { cn } from "@/lib/utils"
@@ -48,11 +48,15 @@ export function VirtualizedConversationView({
   const [viewport, setViewport] = useState({ scrollTop: 0, height: 0 })
   const pendingScrollRef = useRef<number | null>(null)
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     sizesRef.current = new Map()
     setSizesVersion((v) => v + 1)
-    setViewport((prev) => ({ ...prev, scrollTop: 0 }))
-  }, [listKey])
+    if (scrollElement) {
+      setViewport({ scrollTop: scrollElement.scrollTop, height: scrollElement.clientHeight })
+    } else {
+      setViewport({ scrollTop: 0, height: 0 })
+    }
+  }, [listKey, scrollElement])
 
   useEffect(() => {
     const el = scrollElement
