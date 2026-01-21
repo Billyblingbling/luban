@@ -273,6 +273,55 @@ fn apply_updater_signing_env(cmd: &mut ProcessCommand) {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ArchiveSpec {
+    program: &'static str,
+    args: Vec<String>,
+}
+
+fn build_archive_spec(app_dir: &Path, archive_path: &Path, use_bsdtar: bool) -> Result<ArchiveSpec> {
+    let app_parent = app_dir.parent().context("missing app parent dir")?;
+    let app_name = app_dir.file_name().context("missing app dir name")?;
+
+    if use_bsdtar {
+        // The Tauri updater extracts archives via Rust's `tar` crate.
+        // Some macOS metadata (xattrs/ACLs/flags) can cause extraction to fail
+        // with `EPERM` on certain systems. Avoid embedding that metadata in
+        // updater artifacts for better compatibility.
+        let args = vec![
+            "-C".to_owned(),
+            app_parent.display().to_string(),
+            "--no-xattrs".to_owned(),
+            "--no-acls".to_owned(),
+            "--no-fflags".to_owned(),
+            "--no-mac-metadata".to_owned(),
+            "-czf".to_owned(),
+            archive_path.display().to_string(),
+            app_name.to_string_lossy().to_string(),
+        ];
+        return Ok(ArchiveSpec { program: "bsdtar", args });
+    }
+
+    let args = vec![
+        "-C".to_owned(),
+        app_parent.display().to_string(),
+        "-czf".to_owned(),
+        archive_path.display().to_string(),
+        app_name.to_string_lossy().to_string(),
+    ];
+    Ok(ArchiveSpec { program: "tar", args })
+}
+
+fn bsdtar_available() -> bool {
+    ProcessCommand::new("bsdtar")
+        .arg("--version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok()
+}
+
 fn run_package(target: String, profile: String, out_dir: PathBuf) -> Result<()> {
     package_env_required()?;
 
@@ -321,13 +370,10 @@ fn run_package(target: String, profile: String, out_dir: PathBuf) -> Result<()> 
     let archive_name = format!("Luban_{version}_{platform_key}.app.tar.gz");
     let archive_path = out_dir.join(&archive_name);
 
-    let mut tar = ProcessCommand::new("tar");
-    tar.arg("-C")
-        .arg(app_dir.parent().context("missing app parent dir")?)
-        .arg("-czf")
-        .arg(&archive_path)
-        .arg(app_dir.file_name().context("missing app dir name")?);
-    run_cmd(tar, "tar app")?;
+    let spec = build_archive_spec(&app_dir, &archive_path, bsdtar_available())?;
+    let mut archive = ProcessCommand::new(spec.program);
+    archive.args(spec.args);
+    run_cmd(archive, "archive app")?;
 
     let signature = sign_archive(&archive_path)?;
 
@@ -565,5 +611,17 @@ mod tests {
         let err = expand_kv_value("${LUBAN_TEST_ENV_MISSING}", &kv)
             .expect_err("must error on missing variable");
         assert!(format!("{err:#}").contains("unknown variable"));
+    }
+
+    #[test]
+    fn build_archive_spec_uses_bsdtar_flags() {
+        let app_dir = Path::new("/tmp/Luban.app");
+        let archive_path = Path::new("/tmp/Luban_0.1.2_darwin-aarch64.app.tar.gz");
+        let spec = build_archive_spec(app_dir, archive_path, true).expect("must build spec");
+        assert_eq!(spec.program, "bsdtar");
+        assert!(spec.args.iter().any(|arg| arg == "--no-xattrs"));
+        assert!(spec.args.iter().any(|arg| arg == "--no-acls"));
+        assert!(spec.args.iter().any(|arg| arg == "--no-fflags"));
+        assert!(spec.args.iter().any(|arg| arg == "--no-mac-metadata"));
     }
 }
