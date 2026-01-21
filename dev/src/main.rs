@@ -230,6 +230,8 @@ fn run_package(target: String, profile: String, out_dir: PathBuf) -> Result<()> 
         .arg("tauri")
         .arg("build")
         .arg("--ci")
+        // TODO: Skip stapling until the app passes notarization.
+        .arg("--skip-stapling")
         .arg("--bundles")
         .arg("app")
         .args(build_flags)
