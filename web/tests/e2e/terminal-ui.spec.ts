@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test"
+import { expect, test, type Page } from "@playwright/test"
 import { PNG } from "pngjs"
 import { ensureWorkspace, sendWsAction } from "./helpers"
 
@@ -9,6 +9,63 @@ function decodeWsPayload(payload: unknown): { kind: "text" | "binary"; text: str
   if (payload instanceof Uint8Array) return { kind: "binary", text: Buffer.from(payload).toString("utf8") }
   if (payload instanceof ArrayBuffer) return { kind: "binary", text: Buffer.from(new Uint8Array(payload)).toString("utf8") }
   return { kind: "text", text: String(payload) }
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+function waitForPtyOutput(page: Page, match: RegExp, timeoutMs = 10_000): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let buffer = ""
+    const timeout = setTimeout(() => {
+      reject(new Error(`Timed out waiting for PTY output: ${match}`))
+    }, timeoutMs)
+
+    page.on("websocket", (ws) => {
+      if (!ws.url().includes("/api/pty/")) return
+      ws.on("framereceived", (ev) => {
+        const decoded = decodeWsPayload(ev.payload)
+        if (decoded.kind !== "binary") return
+        buffer = (buffer + decoded.text).slice(-16384)
+        if (!match.test(buffer)) return
+        clearTimeout(timeout)
+        resolve(buffer)
+      })
+    })
+  })
+}
+
+function waitForPtyOutputOutcome(
+  page: Page,
+  expected: RegExp,
+  unwanted: RegExp,
+  timeoutMs = 10_000,
+): Promise<"expected" | "unwanted"> {
+  return new Promise((resolve, reject) => {
+    let buffer = ""
+    const timeout = setTimeout(() => {
+      reject(new Error(`Timed out waiting for PTY output: expected=${expected}, unwanted=${unwanted}`))
+    }, timeoutMs)
+
+    page.on("websocket", (ws) => {
+      if (!ws.url().includes("/api/pty/")) return
+      ws.on("framereceived", (ev) => {
+        const decoded = decodeWsPayload(ev.payload)
+        if (decoded.kind !== "binary") return
+        buffer = (buffer + decoded.text).slice(-16384)
+        if (expected.test(buffer)) {
+          clearTimeout(timeout)
+          resolve("expected")
+          return
+        }
+        if (unwanted.test(buffer)) {
+          clearTimeout(timeout)
+          resolve("unwanted")
+        }
+      })
+    })
+  })
 }
 
 function parseRgb(color: string): { r: number; g: number; b: number } | null {
@@ -201,6 +258,47 @@ test("terminal backspace sends DEL input frame", async ({ page }) => {
   await terminal.click({ force: true })
   await page.keyboard.press("Backspace")
   await backspaceFrame
+})
+
+test("terminal enter executes commands", async ({ page }) => {
+  const token = `luban-e2e-enter-${Math.random().toString(16).slice(2)}`
+  const reversed = token.split("").reverse().join("")
+  const expected = new RegExp(escapeRegExp(reversed))
+  const output = waitForPtyOutput(page, expected, 20_000)
+
+  await ensureWorkspace(page)
+
+  const terminal = page.getByTestId("pty-terminal")
+  await expect
+    .poll(async () => await terminal.locator("canvas").count(), { timeout: 20_000 })
+    .toBeGreaterThan(0)
+
+  await terminal.click({ force: true })
+  await page.keyboard.type(`printf '%s\\n' ${token} | rev`)
+  await page.keyboard.press("Enter")
+
+  await output
+})
+
+test("terminal backspace edits the current command line", async ({ page }) => {
+  const token = `luban-e2e-backspace-edit-${Math.random().toString(16).slice(2)}`
+  const expected = new RegExp(escapeRegExp(token))
+  const unwanted = /command not found:\s*catX/
+  const outcome = waitForPtyOutputOutcome(page, expected, unwanted, 20_000)
+
+  await ensureWorkspace(page)
+
+  const terminal = page.getByTestId("pty-terminal")
+  await expect
+    .poll(async () => await terminal.locator("canvas").count(), { timeout: 20_000 })
+    .toBeGreaterThan(0)
+
+  await terminal.click({ force: true })
+  await page.keyboard.type(`printf '%s\\n' ${token} | catX`)
+  await page.keyboard.press("Backspace")
+  await page.keyboard.press("Enter")
+
+  expect(await outcome).toBe("expected")
 })
 
 test("terminal does not leak OSC color query replies as visible text", async ({ page }) => {

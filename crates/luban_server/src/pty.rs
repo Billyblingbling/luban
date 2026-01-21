@@ -120,6 +120,12 @@ impl PtySession {
             .unwrap_or_else(|| PathBuf::from("/bin/zsh"));
         let mut cmd = CommandBuilder::new(shell);
         cmd.cwd(cwd);
+        if std::env::var_os("TERM").is_none() {
+            cmd.env("TERM", "xterm-256color");
+        }
+        if std::env::var_os("COLORTERM").is_none() {
+            cmd.env("COLORTERM", "truecolor");
+        }
 
         let child = pair.slave.spawn_command(cmd).context("spawn pty command")?;
         let reader = pair.master.try_clone_reader().context("clone pty reader")?;
