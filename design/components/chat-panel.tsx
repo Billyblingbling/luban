@@ -340,7 +340,7 @@ struct KeyboardHandler {
         title: "cargo check --package luban_editor", 
         status: "done", 
         duration: "3s",
-        detail: "$ cargo check --package luban_editor\n    Checking luban_editor v0.1.0\n    Finished dev [unoptimized + debuginfo] target(s) in 2.84s"
+        detail: "$ cargo check --package luban_editor\n    Checking luban_editor v0.1.2\n    Finished dev [unoptimized + debuginfo] target(s) in 2.84s"
       },
       { 
         id: "s4", 
