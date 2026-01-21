@@ -20,8 +20,11 @@ export function createLubanServerEventHandler(args: {
         const wid = args.store.refs.activeWorkspaceIdRef.current
         if (wid == null || wid !== event.workspace_id) return
 
+        args.store.cacheThreads(wid, event.threads)
         args.store.setThreads(event.threads)
-        args.store.setWorkspaceTabs(normalizeWorkspaceTabsSnapshot({ tabs: event.tabs, threads: event.threads }))
+        const normalizedTabs = normalizeWorkspaceTabsSnapshot({ tabs: event.tabs, threads: event.threads })
+        args.store.cacheWorkspaceTabs(wid, normalizedTabs)
+        args.store.setWorkspaceTabs(normalizedTabs)
         const current = args.store.refs.activeThreadIdRef.current
 
         const pending = args.store.refs.pendingCreateThreadRef.current
@@ -56,6 +59,7 @@ export function createLubanServerEventHandler(args: {
       case "conversation_changed": {
         const wid = args.store.refs.activeWorkspaceIdRef.current
         const tid = args.store.refs.activeThreadIdRef.current
+        args.store.cacheConversation(event.snapshot)
         if (wid == null || tid == null) return
         if (event.snapshot.workspace_id === wid && event.snapshot.thread_id === tid) {
           args.store.setConversation(event.snapshot)

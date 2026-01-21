@@ -253,6 +253,7 @@ export function createLubanActions(args: {
 
   async function selectThreadInWorkspace(workspaceId: WorkspaceId, threadId: number) {
     store.setActiveThreadId(threadId)
+    store.setConversation(store.getCachedConversation(workspaceId, threadId))
 
     args.sendAction({
       type: "activate_workspace_thread",
@@ -262,6 +263,7 @@ export function createLubanActions(args: {
 
     try {
       const convo = await fetchConversation(workspaceId, threadId)
+      store.cacheConversation(convo)
       store.setConversation(convo)
     } catch (err) {
       console.warn("fetchConversation failed", err)
@@ -272,8 +274,11 @@ export function createLubanActions(args: {
     threadId: number | null
   }> {
     const snap = await fetchThreads(workspaceId)
+    store.cacheThreads(workspaceId, snap.threads)
     store.setThreads(snap.threads)
-    store.setWorkspaceTabs(normalizeWorkspaceTabsSnapshot({ tabs: snap.tabs, threads: snap.threads }))
+    const normalizedTabs = normalizeWorkspaceTabsSnapshot({ tabs: snap.tabs, threads: snap.threads })
+    store.cacheWorkspaceTabs(workspaceId, normalizedTabs)
+    store.setWorkspaceTabs(normalizedTabs)
 
     const current = store.refs.activeThreadIdRef.current
     const initial = pickThreadId({
@@ -288,7 +293,9 @@ export function createLubanActions(args: {
     }
 
     try {
+      store.setConversation(store.getCachedConversation(workspaceId, initial))
       const convo = await fetchConversation(workspaceId, initial)
+      store.cacheConversation(convo)
       store.setConversation(convo)
     } catch (err) {
       console.warn("fetchConversation failed", err)
@@ -317,17 +324,33 @@ export function createLubanActions(args: {
 
   async function openWorkspace(workspaceId: WorkspaceId) {
     store.setActiveWorkspaceId(workspaceId)
-    store.setActiveThreadId(null)
-    store.setThreads([])
-    store.setWorkspaceTabs(null)
-    store.setConversation(null)
+
+    const cachedThreads = store.getCachedThreads(workspaceId)
+    if (cachedThreads) store.setThreads(cachedThreads)
+
+    const cachedTabs = store.getCachedWorkspaceTabs(workspaceId)
+    if (cachedTabs) store.setWorkspaceTabs(cachedTabs)
+
+    const initialFromCache = pickThreadId({
+      threads: cachedThreads ?? [],
+      preferredThreadId: cachedTabs?.active_tab ?? null,
+    })
+    store.setActiveThreadId(initialFromCache)
+    if (initialFromCache != null) {
+      store.setConversation(store.getCachedConversation(workspaceId, initialFromCache))
+    } else {
+      store.setConversation(null)
+    }
 
     args.sendAction({ type: "open_workspace", workspace_id: workspaceId })
 
     try {
       const snap = await fetchThreads(workspaceId)
+      store.cacheThreads(workspaceId, snap.threads)
       store.setThreads(snap.threads)
-      store.setWorkspaceTabs(normalizeWorkspaceTabsSnapshot({ tabs: snap.tabs, threads: snap.threads }))
+      const normalizedTabs = normalizeWorkspaceTabsSnapshot({ tabs: snap.tabs, threads: snap.threads })
+      store.cacheWorkspaceTabs(workspaceId, normalizedTabs)
+      store.setWorkspaceTabs(normalizedTabs)
 
       const initial = pickThreadId({
         threads: snap.threads,
@@ -353,7 +376,9 @@ export function createLubanActions(args: {
         })
       }
       try {
+        store.setConversation(store.getCachedConversation(workspaceId, initial))
         const convo = await fetchConversation(workspaceId, initial)
+        store.cacheConversation(convo)
         store.setConversation(convo)
       } catch (err) {
         console.warn("fetchConversation failed", err)

@@ -4,7 +4,8 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { PNG } from "pngjs"
-import { activeWorkspaceId, ensureWorkspace, sendWsAction } from "./helpers"
+import { activeWorkspaceId, ensureWorkspace, fetchAppSnapshot, sendWsAction } from "./helpers"
+import { requireEnv } from "./env"
 
 function projectToggleByPath(page: Page, projectPath: string) {
   return page.getByTitle(projectPath, { exact: true }).locator("..")
@@ -39,6 +40,105 @@ test("worktree item shows branch name above worktree name", async ({ page }) => 
   expect(nameBox, "worktree name should be visible").not.toBeNull()
   expect(branchBox, "worktree branch name should be visible").not.toBeNull()
   expect((branchBox?.y ?? 0) < (nameBox?.y ?? 0)).toBeTruthy()
+})
+
+test("switching between worktrees keeps chat content stable (no flash)", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  const widA = await activeWorkspaceId(page)
+  const snapA = await fetchAppSnapshot(page)
+  const projectDir =
+    snapA.projects.find((p: any) => p.name === "e2e-project")?.path ??
+    requireEnv("LUBAN_E2E_PROJECT_DIR")
+  const tidA = Number(snapA?.ui?.active_thread_id ?? NaN)
+  if (!Number.isFinite(tidA)) throw new Error("missing active_thread_id")
+  const projectToggle = page.getByRole("button", { name: "e2e-project", exact: true })
+  await projectToggle.waitFor({ timeout: 15_000 })
+  const projectContainer = projectToggle.locator("..").locator("..")
+  const branchEntries = projectContainer.getByTestId("worktree-branch-name")
+  const branchCountBefore = await branchEntries.count()
+  const nameA = (() => {
+    for (const p of snapA.projects) {
+      const w = p.workspaces.find((x: any) => Number(x.id) === widA)
+      if (w) return String(w.branch_name)
+    }
+    return null
+  })()
+  if (!nameA) throw new Error("missing branch name for workspace A")
+
+  const tokenA = `e2e-stable-switch-a-${Math.random().toString(16).slice(2)}`
+  await sendWsAction(page, {
+    type: "send_agent_message",
+    workspace_id: widA,
+    thread_id: tidA,
+    text: tokenA,
+    attachments: [],
+  })
+  await expect(page.getByText(tokenA).first()).toBeVisible({ timeout: 60_000 })
+
+  await sendWsAction(page, { type: "create_workspace", project_id: projectDir })
+  await expect
+    .poll(async () => await branchEntries.count(), { timeout: 90_000 })
+    .toBe(branchCountBefore + 1)
+
+  await branchEntries.last().click()
+  const widBNum = await activeWorkspaceId(page)
+
+  const tidBNum = await (async () => {
+    const deadline = Date.now() + 60_000
+    while (Date.now() < deadline) {
+      const snap = await fetchAppSnapshot(page)
+      const tid = Number(snap?.ui?.active_thread_id ?? NaN)
+      if (Number.isFinite(tid) && tid > 0) return tid
+      await page.waitForTimeout(200)
+    }
+    throw new Error("timed out waiting for active_thread_id")
+  })()
+
+  const tokenB = `e2e-stable-switch-b-${Math.random().toString(16).slice(2)}`
+  await sendWsAction(page, {
+    type: "send_agent_message",
+    workspace_id: widBNum,
+    thread_id: tidBNum,
+    text: tokenB,
+    attachments: [],
+  })
+  await expect(page.getByText(tokenB).first()).toBeVisible({ timeout: 60_000 })
+
+  await page.evaluate(() => {
+    ;(window as any).__e2eSawChatEmptyState = false
+    const root = document.querySelector('[data-testid="chat-scroll-container"]') ?? document.body
+    const observer = new MutationObserver(() => {
+      const text = root.textContent ?? ""
+      if (text.includes("Select a thread to load conversation.")) {
+        ;(window as any).__e2eSawChatEmptyState = true
+      }
+    })
+    observer.observe(root, { subtree: true, childList: true, characterData: true })
+    ;(window as any).__e2eChatObserver?.disconnect?.()
+    ;(window as any).__e2eChatObserver = observer
+  })
+
+  await projectContainer.getByTestId("worktree-branch-name").filter({ hasText: nameA }).first().click()
+  await expect(page.getByText(tokenA).first()).toBeVisible({ timeout: 20_000 })
+
+  const nameB = await page.evaluate(async (workspaceId) => {
+    const res = await fetch("/api/app")
+    if (!res.ok) return null
+    const snap = (await res.json()) as any
+    for (const p of snap.projects ?? []) {
+      const w = (p.workspaces ?? []).find((x: any) => Number(x.id) === Number(workspaceId))
+      if (w) return String(w.branch_name)
+    }
+    return null
+  }, widBNum)
+  if (!nameB) throw new Error("missing branch name for workspace B")
+
+  await projectContainer.getByTestId("worktree-branch-name").filter({ hasText: String(nameB) }).first().click()
+  await expect(page.getByText(tokenB).first()).toBeVisible({ timeout: 20_000 })
+
+  const sawEmptyState = await page.evaluate(() => Boolean((window as any).__e2eSawChatEmptyState))
+  expect(sawEmptyState).toBe(false)
 })
 
 test("main worktree home icon is only visible on hover", async ({ page }) => {

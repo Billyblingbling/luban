@@ -38,6 +38,12 @@ export type LubanStoreRefs = {
 export type LubanStore = {
   state: LubanStoreState
   refs: LubanStoreRefs
+  getCachedThreads: (workspaceId: WorkspaceId) => ThreadMeta[] | null
+  cacheThreads: (workspaceId: WorkspaceId, threads: ThreadMeta[]) => void
+  getCachedWorkspaceTabs: (workspaceId: WorkspaceId) => WorkspaceTabsSnapshot | null
+  cacheWorkspaceTabs: (workspaceId: WorkspaceId, tabs: WorkspaceTabsSnapshot) => void
+  getCachedConversation: (workspaceId: WorkspaceId, threadId: number) => ConversationSnapshot | null
+  cacheConversation: (snapshot: ConversationSnapshot) => void
   setApp: React.Dispatch<React.SetStateAction<AppSnapshot | null>>
   setActiveWorkspaceId: React.Dispatch<React.SetStateAction<WorkspaceId | null>>
   setActiveThreadId: React.Dispatch<React.SetStateAction<number | null>>
@@ -71,6 +77,45 @@ export function useLubanStore(): LubanStore {
   const activeThreadIdRef = useRef<number | null>(null)
   const threadsRef = useRef<ThreadMeta[]>([])
   const pendingCreateThreadRef = useRef<PendingCreateThread | null>(null)
+
+  const threadsCacheRef = useRef<Map<WorkspaceId, ThreadMeta[]>>(new Map())
+  const workspaceTabsCacheRef = useRef<Map<WorkspaceId, WorkspaceTabsSnapshot>>(new Map())
+  const conversationCacheRef = useRef<Map<string, ConversationSnapshot>>(new Map())
+  const conversationCacheMaxEntries = 64
+
+  function cacheKey(workspaceId: WorkspaceId, threadId: number): string {
+    return `${workspaceId}:${threadId}`
+  }
+
+  function getCachedThreads(workspaceId: WorkspaceId): ThreadMeta[] | null {
+    return threadsCacheRef.current.get(workspaceId) ?? null
+  }
+
+  function cacheThreads(workspaceId: WorkspaceId, threads2: ThreadMeta[]) {
+    threadsCacheRef.current.set(workspaceId, threads2)
+  }
+
+  function getCachedWorkspaceTabs(workspaceId: WorkspaceId): WorkspaceTabsSnapshot | null {
+    return workspaceTabsCacheRef.current.get(workspaceId) ?? null
+  }
+
+  function cacheWorkspaceTabs(workspaceId: WorkspaceId, tabs: WorkspaceTabsSnapshot) {
+    workspaceTabsCacheRef.current.set(workspaceId, tabs)
+  }
+
+  function getCachedConversation(workspaceId: WorkspaceId, threadId: number): ConversationSnapshot | null {
+    return conversationCacheRef.current.get(cacheKey(workspaceId, threadId)) ?? null
+  }
+
+  function cacheConversation(snapshot: ConversationSnapshot) {
+    const cache = conversationCacheRef.current
+    cache.set(cacheKey(snapshot.workspace_id, snapshot.thread_id), snapshot)
+    while (cache.size > conversationCacheMaxEntries) {
+      const oldestKey = cache.keys().next().value as string | undefined
+      if (!oldestKey) break
+      cache.delete(oldestKey)
+    }
+  }
 
   function setApp(next: React.SetStateAction<AppSnapshot | null>) {
     _setApp(next)
@@ -143,6 +188,12 @@ export function useLubanStore(): LubanStore {
       threadsRef,
       pendingCreateThreadRef,
     },
+    getCachedThreads,
+    cacheThreads,
+    getCachedWorkspaceTabs,
+    cacheWorkspaceTabs,
+    getCachedConversation,
+    cacheConversation,
     setApp,
     setActiveWorkspaceId,
     setActiveThreadId,
