@@ -179,6 +179,30 @@ test("terminal ctrl+arrow sends word navigation input frames", async ({ page }) 
   await rightFrame
 })
 
+test("terminal backspace sends DEL input frame", async ({ page }) => {
+  const backspaceFrame = new Promise<void>((resolve) => {
+    page.on("websocket", (ws) => {
+      if (!ws.url().includes("/api/pty/")) return
+      ws.on("framesent", (ev) => {
+        const decoded = decodeWsPayload(ev.payload)
+        if (decoded.kind !== "binary") return
+        if (decoded.text.includes("\u007f")) resolve()
+      })
+    })
+  })
+
+  await ensureWorkspace(page)
+
+  const terminal = page.getByTestId("pty-terminal")
+  await expect
+    .poll(async () => await terminal.locator("canvas").count(), { timeout: 20_000 })
+    .toBeGreaterThan(0)
+
+  await terminal.click({ force: true })
+  await page.keyboard.press("Backspace")
+  await backspaceFrame
+})
+
 test("terminal does not leak OSC color query replies as visible text", async ({ page }) => {
   await ensureWorkspace(page)
 

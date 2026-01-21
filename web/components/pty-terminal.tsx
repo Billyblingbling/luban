@@ -372,6 +372,14 @@ export function PtyTerminal() {
     }
 
     keydownCapture = (ev: KeyboardEvent) => {
+      if (ev.key === "Backspace" && !ev.altKey && !ev.ctrlKey && !ev.metaKey) {
+        ev.preventDefault()
+        ev.stopPropagation()
+        ev.stopImmediatePropagation()
+        sendBinaryInput("\x7f")
+        return
+      }
+
       const isShortcut = ev.ctrlKey || ev.metaKey
       if (!isShortcut) return
 
