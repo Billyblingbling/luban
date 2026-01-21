@@ -1,11 +1,17 @@
 use anyhow::Context as _;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{Manager as _, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_updater::UpdaterExt as _;
 
 #[cfg(target_os = "macos")]
 mod macos_process_name;
 mod path_env;
+
+static UPDATE_CHECK_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+
+const MENU_ID_CHECK_FOR_UPDATES: &str = "check_for_updates";
 
 #[tauri::command]
 fn open_external(url: String) -> Result<(), String> {
@@ -54,15 +60,176 @@ fn webview_devtools_enabled() -> bool {
     false
 }
 
+fn install_app_menu(app: &tauri::App) -> anyhow::Result<()> {
+    let handle = app.handle();
+    let menu = tauri::menu::MenuBuilder::new(handle)
+        .item(
+            &tauri::menu::SubmenuBuilder::new(handle, "Luban")
+                .text(MENU_ID_CHECK_FOR_UPDATES, "Check for Updates...")
+                .separator()
+                .about(None)
+                .quit()
+                .build()
+                .context("build app submenu")?,
+        )
+        .build()
+        .context("build app menu")?;
+    app.set_menu(menu).context("set app menu")?;
+    Ok(())
+}
+
+fn dialog_ok(
+    app: &tauri::AppHandle,
+    title: &str,
+    description: &str,
+    level: rfd::MessageLevel,
+) -> anyhow::Result<()> {
+    use std::sync::mpsc::channel;
+    let (tx, rx) = channel();
+    let title = title.to_owned();
+    let description = description.to_owned();
+    app.run_on_main_thread(move || {
+        let _ = rfd::MessageDialog::new()
+            .set_level(level)
+            .set_title(title)
+            .set_description(description)
+            .set_buttons(rfd::MessageButtons::Ok)
+            .show();
+        let _ = tx.send(());
+    })
+    .context("run dialog on main thread")?;
+    let _ = rx.recv();
+    Ok(())
+}
+
+fn dialog_yes_no(
+    app: &tauri::AppHandle,
+    title: &str,
+    description: &str,
+    level: rfd::MessageLevel,
+) -> anyhow::Result<bool> {
+    use std::sync::mpsc::channel;
+    let (tx, rx) = channel();
+    let title = title.to_owned();
+    let description = description.to_owned();
+    app.run_on_main_thread(move || {
+        let result = rfd::MessageDialog::new()
+            .set_level(level)
+            .set_title(title)
+            .set_description(description)
+            .set_buttons(rfd::MessageButtons::YesNo)
+            .show();
+        let _ = tx.send(matches!(result, rfd::MessageDialogResult::Yes));
+    })
+    .context("run dialog on main thread")?;
+    Ok(rx.recv().unwrap_or(false))
+}
+
+async fn check_for_updates(app: tauri::AppHandle, user_initiated: bool) -> anyhow::Result<()> {
+    let updater = app.updater_builder().build().context("build updater")?;
+    let update = updater.check().await.context("check update")?;
+
+    let Some(update) = update else {
+        if user_initiated {
+            dialog_ok(
+                &app,
+                "Luban",
+                "No updates available.",
+                rfd::MessageLevel::Info,
+            )?;
+        }
+        return Ok(());
+    };
+
+    let version = update.version.clone();
+    let should_install = dialog_yes_no(
+        &app,
+        "Luban",
+        &format!("A new version is available: {version}\n\nInstall now?"),
+        rfd::MessageLevel::Info,
+    )?;
+    if !should_install {
+        return Ok(());
+    }
+
+    update
+        .download_and_install(
+            |_downloaded, _total| {},
+            || {
+                eprintln!("updater: download finished");
+            },
+        )
+        .await
+        .context("download and install update")?;
+
+    let should_restart = dialog_yes_no(
+        &app,
+        "Luban",
+        "Update installed.\n\nRestart Luban now?",
+        rfd::MessageLevel::Info,
+    )?;
+    if should_restart {
+        app.request_restart();
+    }
+
+    Ok(())
+}
+
+async fn run_update_flow(app: tauri::AppHandle, user_initiated: bool) {
+    if UPDATE_CHECK_IN_PROGRESS
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        if user_initiated {
+            let _ = dialog_ok(
+                &app,
+                "Luban",
+                "Update check is already in progress.",
+                rfd::MessageLevel::Info,
+            );
+        }
+        return;
+    }
+
+    let result = check_for_updates(app.clone(), user_initiated).await;
+    UPDATE_CHECK_IN_PROGRESS.store(false, Ordering::SeqCst);
+
+    if let Err(err) = result {
+        if user_initiated {
+            let _ = dialog_ok(
+                &app,
+                "Luban",
+                &format!("Failed to check for updates:\n{err:#}"),
+                rfd::MessageLevel::Error,
+            );
+        } else {
+            eprintln!("updater: failed to check for updates: {err:#}");
+        }
+    }
+}
+
 fn main() -> anyhow::Result<()> {
     #[cfg(target_os = "macos")]
     macos_process_name::set_process_name("Luban");
 
     tauri::Builder::default()
+        .on_menu_event(|app, event| {
+            if event.id() == MENU_ID_CHECK_FOR_UPDATES {
+                let handle = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    run_update_flow(handle, true).await;
+                });
+            }
+        })
         .invoke_handler(tauri::generate_handler![open_external])
         .setup(|app| {
             let _ = path_env::fix_path_env();
             let handle = app.handle();
+            handle
+                .plugin(tauri_plugin_updater::Builder::new().build())
+                .context("register updater plugin")?;
+            install_app_menu(app)?;
+
             let web_dist = resolve_web_dist(handle);
             unsafe {
                 std::env::set_var("LUBAN_WEB_DIST_DIR", &web_dist);
@@ -86,6 +253,11 @@ fn main() -> anyhow::Result<()> {
                 .devtools(webview_devtools_enabled())
                 .build()
                 .context("failed to build window")?;
+
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                run_update_flow(handle, false).await;
+            });
 
             Ok(())
         })
@@ -131,5 +303,22 @@ mod tests {
     #[test]
     fn desktop_webview_devtools_are_disabled() {
         assert!(!webview_devtools_enabled());
+    }
+
+    #[test]
+    fn updater_plugin_is_configured() {
+        let contents = include_str!("../tauri.conf.json");
+        assert!(
+            contents.contains("\"updater\""),
+            "tauri.conf.json must configure the updater plugin"
+        );
+        assert!(
+            contents.contains("latest.json"),
+            "updater endpoints must point to latest.json"
+        );
+        assert!(
+            contents.contains("\"pubkey\""),
+            "updater must include a public key"
+        );
     }
 }
