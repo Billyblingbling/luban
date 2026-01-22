@@ -64,7 +64,7 @@ Environment variables (overrides):
 
 Known limitations:
 
-- Amp runner forwards image attachments by injecting `@/path/to/image` references into the prompt.
+- Amp runner forwards attachments by injecting `@/path/to/file` references into the prompt.
 - Amp stream parsing is intentionally tolerant; we may need to adjust mapping once we capture more
   real-world stream variants.
 - Tool name normalization is heuristic and based on Amp built-in tool names.
@@ -103,3 +103,4 @@ Manual smoke steps:
 - 2026-01-21: Mapped Amp tool_use/tool_result to richer items (bash/web_search/file changes).
 - 2026-01-21: Persisted default runner and Amp mode; added UI controls and request-driven runner selection.
 - 2026-01-22: Enabled Amp image attachments by prompt `@path` injection.
+- 2026-01-22: Forwarded all attachment kinds to Codex and Amp via context blob paths.

@@ -33,17 +33,74 @@ use codex_cli::CodexTurnParams;
 
 const CODEX_EXECUTABLE_PATH_KEY: &str = "codex_executable_path";
 
-fn format_amp_prompt(prompt: &str, image_paths: &[PathBuf]) -> String {
-    if image_paths.is_empty() {
+#[derive(Clone, Debug)]
+struct PromptAttachment {
+    kind: AttachmentKind,
+    name: String,
+    path: PathBuf,
+}
+
+fn resolve_prompt_attachments(
+    blobs_dir: &Path,
+    attachments: &[AttachmentRef],
+) -> Vec<PromptAttachment> {
+    attachments
+        .iter()
+        .map(|attachment| PromptAttachment {
+            kind: attachment.kind,
+            name: attachment.name.clone(),
+            path: blobs_dir.join(format!("{}.{}", attachment.id, attachment.extension)),
+        })
+        .collect()
+}
+
+fn format_amp_prompt(prompt: &str, attachments: &[PromptAttachment]) -> String {
+    if attachments.is_empty() {
         return prompt.to_owned();
     }
 
-    let mut out = String::with_capacity(prompt.len() + image_paths.len() * 64);
+    let mut out = String::with_capacity(prompt.len() + attachments.len() * 96);
     out.push_str(prompt.trim_end());
-    out.push_str("\n\nAttached images:\n");
-    for path in image_paths {
-        out.push('@');
-        out.push_str(&path.to_string_lossy());
+    out.push_str("\n\nAttached files:\n");
+    for attachment in attachments {
+        out.push_str("- ");
+        if attachment.name.trim().is_empty() {
+            out.push_str(match attachment.kind {
+                AttachmentKind::Image => "image",
+                AttachmentKind::Text => "text",
+                AttachmentKind::File => "file",
+            });
+        } else {
+            out.push_str(attachment.name.trim());
+        }
+        out.push_str(": @");
+        out.push_str(&attachment.path.to_string_lossy());
+        out.push('\n');
+    }
+    out
+}
+
+fn format_codex_prompt(prompt: &str, attachments: &[PromptAttachment]) -> String {
+    if attachments.is_empty() {
+        return prompt.to_owned();
+    }
+
+    let mut out = String::with_capacity(prompt.len() + attachments.len() * 96);
+    out.push_str(prompt.trim_end());
+    out.push_str("\n\nAttached files:\n");
+    for attachment in attachments {
+        out.push_str("- ");
+        if attachment.name.trim().is_empty() {
+            out.push_str(match attachment.kind {
+                AttachmentKind::Image => "image",
+                AttachmentKind::Text => "text",
+                AttachmentKind::File => "file",
+            });
+        } else {
+            out.push_str(attachment.name.trim());
+        }
+        out.push_str(": ");
+        out.push_str(&attachment.path.to_string_lossy());
         out.push('\n');
     }
     out
@@ -1201,10 +1258,11 @@ impl ProjectWorkspaceService for GitWorkspaceService {
 
             let resolved_thread_id = thread_id.or(existing_thread_id);
             let blobs_dir = self.context_blobs_dir(&project_slug, &workspace_name);
-            let image_paths = attachments
+            let prompt_attachments = resolve_prompt_attachments(&blobs_dir, &attachments);
+            let image_paths = prompt_attachments
                 .iter()
                 .filter(|a| a.kind == AttachmentKind::Image)
-                .map(|a| blobs_dir.join(format!("{}.{}", a.id, a.extension)))
+                .map(|a| a.path.clone())
                 .collect::<Vec<_>>();
 
             let runner = std::env::var("LUBAN_AGENT_RUNNER")
@@ -1214,10 +1272,11 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                 .unwrap_or(runner);
             let use_amp = runner == luban_domain::AgentRunnerKind::Amp;
             let amp_prompt = if use_amp {
-                format_amp_prompt(&prompt, &image_paths)
+                format_amp_prompt(&prompt, &prompt_attachments)
             } else {
                 prompt.clone()
             };
+            let codex_prompt = format_codex_prompt(&prompt, &prompt_attachments);
 
             let env_amp_mode = std::env::var("LUBAN_AMP_MODE")
                 .ok()
@@ -1390,7 +1449,7 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                     CodexTurnParams {
                         thread_id: resolved_thread_id,
                         worktree_path: worktree_path.clone(),
-                        prompt: prompt.clone(),
+                        prompt: codex_prompt,
                         image_paths,
                         model: model.clone(),
                         model_reasoning_effort: model_reasoning_effort.clone(),
@@ -2487,11 +2546,45 @@ mod tests {
     #[test]
     fn amp_prompt_includes_image_paths() {
         let prompt = "Hello";
-        let images = vec![PathBuf::from("images/a.png"), PathBuf::from("/tmp/b.jpg")];
-        let formatted = format_amp_prompt(prompt, &images);
-        assert!(formatted.starts_with("Hello\n\nAttached images:\n"));
-        assert!(formatted.contains("@images/a.png\n"));
-        assert!(formatted.contains("@/tmp/b.jpg\n"));
+        let attachments = vec![
+            PromptAttachment {
+                kind: AttachmentKind::Image,
+                name: "a.png".to_owned(),
+                path: PathBuf::from("images/a.png"),
+            },
+            PromptAttachment {
+                kind: AttachmentKind::File,
+                name: "b.bin".to_owned(),
+                path: PathBuf::from("/tmp/b.bin"),
+            },
+        ];
+        let formatted = format_amp_prompt(prompt, &attachments);
+        assert!(formatted.starts_with("Hello\n\nAttached files:\n"));
+        assert!(formatted.contains("- a.png: @images/a.png\n"));
+        assert!(formatted.contains("- b.bin: @/tmp/b.bin\n"));
+    }
+
+    #[test]
+    fn codex_prompt_includes_attachment_paths_without_amp_marker() {
+        let prompt = "Hello";
+        let attachments = vec![
+            PromptAttachment {
+                kind: AttachmentKind::Text,
+                name: "notes.txt".to_owned(),
+                path: PathBuf::from("/tmp/notes.txt"),
+            },
+            PromptAttachment {
+                kind: AttachmentKind::Image,
+                name: "image.png".to_owned(),
+                path: PathBuf::from("/tmp/image.png"),
+            },
+        ];
+        let formatted = format_codex_prompt(prompt, &attachments);
+        assert!(formatted.starts_with("Hello\n\nAttached files:\n"));
+        assert!(formatted.contains("- notes.txt: /tmp/notes.txt\n"));
+        assert!(formatted.contains("- image.png: /tmp/image.png\n"));
+        assert!(!formatted.contains("@/tmp/notes.txt"));
+        assert!(!formatted.contains("@/tmp/image.png"));
     }
 
     #[test]
