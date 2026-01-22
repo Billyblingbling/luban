@@ -1,10 +1,12 @@
 "use client"
 
+import { isValidElement } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 
 import { cn } from "@/lib/utils"
 import { openExternalUrl } from "@/lib/open-external-url"
+import { MermaidDiagram } from "@/components/mermaid-diagram"
 
 function normalizeMarkdown(input: string): string {
   return input
@@ -13,7 +15,15 @@ function normalizeMarkdown(input: string): string {
     .join("\n")
 }
 
-export function Markdown({ content, className }: { content: string; className?: string }) {
+export function Markdown({
+  content,
+  className,
+  enableMermaid,
+}: {
+  content: string
+  className?: string
+  enableMermaid?: boolean
+}) {
   return (
     <div className={cn("text-[13px] leading-relaxed text-foreground/90 break-words overflow-hidden", className)}>
       <ReactMarkdown
@@ -66,15 +76,39 @@ export function Markdown({ content, className }: { content: string; className?: 
               </code>
             )
           },
-          pre: ({ className, ...props }) => (
-            <pre
-              className={cn(
-                "my-2 p-2 overflow-x-auto rounded border border-border bg-muted/30 text-[12px]",
-                className,
-              )}
-              {...props}
-            />
-          ),
+          pre: ({ className, children, ...props }) => {
+            if (!enableMermaid) {
+              return (
+                <pre
+                  className={cn(
+                    "my-2 p-2 overflow-x-auto rounded border border-border bg-muted/30 text-[12px]",
+                    className,
+                  )}
+                  {...props}
+                >
+                  {children}
+                </pre>
+              )
+            }
+
+            const first = Array.isArray(children) ? children[0] : children
+            if (isValidElement(first)) {
+              const childClassName = String(first.props?.className ?? "")
+              if (childClassName.includes("language-mermaid")) {
+                const raw = String(first.props?.children ?? "")
+                return <MermaidDiagram code={raw} />
+              }
+            }
+
+            return (
+              <pre
+                className={cn("my-2 p-2 overflow-x-auto rounded border border-border bg-muted/30 text-[12px]", className)}
+                {...props}
+              >
+                {children}
+              </pre>
+            )
+          },
         }}
       >
         {normalizeMarkdown(content)}

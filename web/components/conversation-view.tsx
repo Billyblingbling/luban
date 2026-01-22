@@ -51,7 +51,7 @@ export function ConversationMessage({
 
           {message.content && message.content.length > 0 && (
             <div className="luban-font-chat">
-              <Markdown content={message.content} />
+              <Markdown content={message.content} enableMermaid />
             </div>
           )}
 

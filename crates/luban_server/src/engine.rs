@@ -2424,6 +2424,22 @@ impl Engine {
                                 });
                             }
 
+                            if prompt.contains("e2e-mermaid") {
+                                let _ = tx.blocking_send(EngineCommand::DispatchAction {
+                                    action: Box::new(Action::AgentEventReceived {
+                                        workspace_id,
+                                        thread_id,
+                                        run_id,
+                                        event: luban_domain::CodexThreadEvent::ItemCompleted {
+                                            item: luban_domain::CodexThreadItem::AgentMessage {
+                                                id: "e2e_mermaid_1".to_owned(),
+                                                text: prompt.clone(),
+                                            },
+                                        },
+                                    }),
+                                });
+                            }
+
                             if emit_file_change {
                                 let _ = tx.blocking_send(EngineCommand::DispatchAction {
                                     action: Box::new(Action::AgentEventReceived {
