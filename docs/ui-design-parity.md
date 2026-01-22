@@ -45,3 +45,7 @@ Suggested workflow:
 - Building a standalone web backend in `luban-design`.
 - Allowing the UI to drift from `luban-design` "because it is easier" for the backend.
 - Implementing authentication/authorization for localhost-only use.
+
+## Recent Parity Updates
+
+- 2026-01-22: Ported the feedback modal UI to `web/` aligned to design revision `b59916b`.

@@ -75,6 +75,8 @@ Implemented:
 - `web/lib/luban-api.ts`: Amp config request/response types for the UI.
 - `web/lib/luban-actions.ts`: Amp config request helpers.
 - `web/lib/luban-transport.ts`: Amp config ready event routing for request responses.
+- `web/components/feedback-modal.tsx`: feedback flow can start a "Fix it" run using the default agent in the current thread.
+- `web/components/sidebar.tsx`: feedback modal entry aligned to design.
 
 Environment variables (overrides):
 
@@ -113,6 +115,7 @@ Manual smoke steps:
 6. Confirm:
    - activities appear as tool calls / reasoning
    - a final assistant message is recorded
+7. Open the feedback modal from the sidebar, paste an image, click "Fix it", and confirm a new agent run starts in the active thread.
 
 ## Next Steps
 
@@ -131,3 +134,4 @@ Manual smoke steps:
 - 2026-01-22: Forwarded all attachment kinds to Codex and Amp via context blob paths.
 - 2026-01-22: Added Amp config APIs mirroring the Codex config module.
 - 2026-01-22: Added Amp config settings UI mirroring the Codex config editor.
+- 2026-01-22: Added feedback modal aligned to design; "Fix it" uses the default agent in the active thread.
