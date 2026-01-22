@@ -8,6 +8,7 @@ import { useTheme } from "next-themes"
 
 import { useLuban } from "@/lib/luban-context"
 import { useAppearance } from "@/components/appearance-provider"
+import { isMockMode } from "@/lib/luban-mode"
 
 function escapeCssFontName(value: string): string {
   return value.replaceAll('"', '\\"')
@@ -205,7 +206,7 @@ function isValidTerminalSize(cols: number, rows: number): boolean {
 }
 
 export function PtyTerminal() {
-  const { activeWorkspaceId } = useLuban()
+  const { activeWorkspaceId, activeWorkspace } = useLuban()
   const { fonts } = useAppearance()
   const { resolvedTheme } = useTheme()
   const outerRef = useRef<HTMLDivElement | null>(null)
@@ -251,6 +252,8 @@ export function PtyTerminal() {
     const container = containerRef.current
     if (!outer || !container) return
 
+    const isMock = isMockMode()
+
     if (activeWorkspaceId == null) {
       container.textContent = "Select a workspace to start a terminal."
       return
@@ -259,6 +262,8 @@ export function PtyTerminal() {
     container.innerHTML = ""
 
     const ptyThreadId = 1
+    const mockWorkspaceLabel = activeWorkspace?.workspace_name ?? `workspace-${activeWorkspaceId}`
+    const mockCwd = activeWorkspace?.worktree_path ?? `/mock/workspaces/${activeWorkspaceId}`
 
     let disposed = false
     const fitAddon = new FitAddon()
@@ -298,6 +303,10 @@ export function PtyTerminal() {
     let pendingReconnectTimer: number | null = null
 
     function sendInput(text: string) {
+      if (isMock) {
+        mockHandleInputText(text)
+        return
+      }
       const socket = ws
       if (!socket) return
       const bytes = encoder.encode(text)
@@ -309,6 +318,10 @@ export function PtyTerminal() {
     }
 
     function sendBinaryInput(value: string) {
+      if (isMock) {
+        mockHandleInputBinary(value)
+        return
+      }
       const socket = ws
       if (!socket) return
       const bytes = encodeBinaryString(value)
@@ -349,6 +362,130 @@ export function PtyTerminal() {
     } catch (err) {
       container.textContent = `Terminal init failed: ${String(err)}`
       return
+    }
+
+    let mockLine = ""
+    let mockShownBanner = false
+
+    function writeMockPrompt() {
+      term.write(`${mockWorkspaceLabel} $ `)
+    }
+
+    function writeMockBannerIfNeeded() {
+      if (mockShownBanner) return
+      mockShownBanner = true
+      term.writeln("Mock PTY (local) - not connected to server")
+      term.writeln(`Workspace: ${mockCwd}`)
+      writeMockPrompt()
+    }
+
+    function mockWriteOutput(lines: string[]) {
+      for (const line of lines) term.writeln(line)
+    }
+
+    function mockRunCommand(commandLine: string): void {
+      const trimmed = commandLine.trim()
+      if (trimmed.length === 0) {
+        writeMockPrompt()
+        return
+      }
+
+      const [cmd, ...rest] = trimmed.split(/\s+/)
+      const arg = rest.join(" ")
+
+      if (cmd === "help") {
+        mockWriteOutput([
+          "Commands:",
+          "  help",
+          "  pwd",
+          "  ls",
+          "  echo <text>",
+          "  date",
+          "  clear",
+        ])
+        writeMockPrompt()
+        return
+      }
+
+      if (cmd === "pwd") {
+        mockWriteOutput([mockCwd])
+        writeMockPrompt()
+        return
+      }
+
+      if (cmd === "ls") {
+        mockWriteOutput(["crates/", "docs/", "web/"])
+        writeMockPrompt()
+        return
+      }
+
+      if (cmd === "echo") {
+        mockWriteOutput([arg])
+        writeMockPrompt()
+        return
+      }
+
+      if (cmd === "date") {
+        mockWriteOutput([new Date().toISOString()])
+        writeMockPrompt()
+        return
+      }
+
+      if (cmd === "clear") {
+        term.clear()
+        writeMockPrompt()
+        return
+      }
+
+      mockWriteOutput([`mock: command not found: ${cmd}`])
+      writeMockPrompt()
+    }
+
+    function mockHandleInputText(text: string): void {
+      writeMockBannerIfNeeded()
+
+      for (const ch of text) {
+        const code = ch.charCodeAt(0)
+
+        if (ch === "\r" || ch === "\n") {
+          term.write("\r\n")
+          const line = mockLine
+          mockLine = ""
+          mockRunCommand(line)
+          continue
+        }
+
+        if (code === 0x7f) {
+          if (mockLine.length > 0) {
+            mockLine = mockLine.slice(0, -1)
+            term.write("\b \b")
+          }
+          continue
+        }
+
+        if (code === 0x03) {
+          term.write("^C\r\n")
+          mockLine = ""
+          writeMockPrompt()
+          continue
+        }
+
+        if (code === 0x0c) {
+          term.clear()
+          mockLine = ""
+          writeMockPrompt()
+          continue
+        }
+
+        if (code < 0x20) continue
+
+        mockLine += ch
+        term.write(ch)
+      }
+    }
+
+    function mockHandleInputBinary(value: string): void {
+      mockHandleInputText(value)
     }
 
     // The terminal is often initialized before theme variables settle (e.g. next-themes
@@ -475,43 +612,47 @@ export function PtyTerminal() {
 
     scheduleFitAndResizeSync()
 
-    const connect = () => {
-      const url = new URL(`/api/pty/${activeWorkspaceId}/${ptyThreadId}`, window.location.href)
-      url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
+    if (isMock) {
+      writeMockBannerIfNeeded()
+    } else {
+      const connect = () => {
+        const url = new URL(`/api/pty/${activeWorkspaceId}/${ptyThreadId}`, window.location.href)
+        url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
 
-      const socket = new WebSocket(url.toString())
-      socket.binaryType = "arraybuffer"
-      ws = socket
+        const socket = new WebSocket(url.toString())
+        socket.binaryType = "arraybuffer"
+        ws = socket
 
-      socket.onmessage = (ev) => {
-        if (disposed) return
-        if (typeof ev.data === "string") return
-        const bytes = new Uint8Array(ev.data as ArrayBuffer)
-        term.write(bytes)
-      }
-
-      socket.onopen = () => {
-        if (disposed) return
-        if (pendingInput.length > 0) {
-          for (const bytes of pendingInput) socket.send(bytes)
-          pendingInput = []
-        }
-        scheduleFitAndResizeSync()
-      }
-
-      socket.onclose = () => {
-        if (disposed) return
-        if (ws !== socket) return
-        if (pendingReconnectTimer != null) return
-        pendingReconnectTimer = window.setTimeout(() => {
-          pendingReconnectTimer = null
+        socket.onmessage = (ev) => {
           if (disposed) return
-          connect()
-        }, 150)
-      }
-    }
+          if (typeof ev.data === "string") return
+          const bytes = new Uint8Array(ev.data as ArrayBuffer)
+          term.write(bytes)
+        }
 
-    connect()
+        socket.onopen = () => {
+          if (disposed) return
+          if (pendingInput.length > 0) {
+            for (const bytes of pendingInput) socket.send(bytes)
+            pendingInput = []
+          }
+          scheduleFitAndResizeSync()
+        }
+
+        socket.onclose = () => {
+          if (disposed) return
+          if (ws !== socket) return
+          if (pendingReconnectTimer != null) return
+          pendingReconnectTimer = window.setTimeout(() => {
+            pendingReconnectTimer = null
+            if (disposed) return
+            connect()
+          }, 150)
+        }
+      }
+
+      connect()
+    }
 
     dataDisposable = term.onData((data: string) => sendInput(data))
     binaryDisposable = term.onBinary((data: string) => sendBinaryInput(data))
@@ -534,7 +675,7 @@ export function PtyTerminal() {
       webglAddon.dispose()
       term.dispose()
     }
-  }, [activeWorkspaceId])
+  }, [activeWorkspaceId, activeWorkspace?.workspace_name, activeWorkspace?.worktree_path])
 
   return (
     <div

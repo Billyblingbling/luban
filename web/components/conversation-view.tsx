@@ -9,6 +9,7 @@ import type { Message } from "@/lib/conversation-ui"
 import type { AttachmentRef } from "@/lib/luban-api"
 import { Markdown } from "@/components/markdown"
 import { ActivityStream } from "@/components/activity-stream"
+import { attachmentHref } from "@/lib/attachment-href"
 
 async function copyToClipboard(text: string): Promise<void> {
   try {
@@ -24,11 +25,6 @@ async function copyToClipboard(text: string): Promise<void> {
     document.execCommand("copy")
     document.body.removeChild(el)
   }
-}
-
-function attachmentHref(workspaceId: number, attachment: AttachmentRef): string {
-  const params = new URLSearchParams({ ext: attachment.extension })
-  return `/api/workspaces/${workspaceId}/attachments/${attachment.id}?${params.toString()}`
 }
 
 export function ConversationMessage({
@@ -123,7 +119,8 @@ export function ConversationMessage({
             {message.attachments && message.attachments.length > 0 && (
               <div className="mb-2 flex flex-wrap gap-2">
                 {message.attachments.map((attachment) => {
-                  const href = workspaceId != null ? attachmentHref(workspaceId, attachment) : null
+                  const href =
+                    workspaceId != null ? attachmentHref({ workspaceId, attachment }) : null
                   return (
                     <a
                       key={`${attachment.kind}:${attachment.id}`}

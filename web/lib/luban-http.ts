@@ -10,14 +10,29 @@ import type {
   WorkspaceChangesSnapshot,
   WorkspaceDiffSnapshot,
 } from "./luban-api"
+import { isMockMode } from "./luban-mode"
+import {
+  mockDeleteContextItem,
+  mockFetchApp,
+  mockFetchCodexCustomPrompts,
+  mockFetchContext,
+  mockFetchConversation,
+  mockFetchMentionItems,
+  mockFetchThreads,
+  mockFetchWorkspaceChanges,
+  mockFetchWorkspaceDiff,
+  mockUploadAttachment,
+} from "./mock/mock-runtime"
 
 export async function fetchApp(): Promise<AppSnapshot> {
+  if (isMockMode()) return await mockFetchApp()
   const res = await fetch("/api/app")
   if (!res.ok) throw new Error(`GET /api/app failed: ${res.status}`)
   return (await res.json()) as AppSnapshot
 }
 
 export async function fetchThreads(workspaceId: number): Promise<ThreadsSnapshot> {
+  if (isMockMode()) return await mockFetchThreads(workspaceId)
   const res = await fetch(`/api/workspaces/${workspaceId}/threads`)
   if (!res.ok) throw new Error(`GET /api/workspaces/${workspaceId}/threads failed: ${res.status}`)
   return (await res.json()) as ThreadsSnapshot
@@ -28,6 +43,7 @@ export async function fetchConversation(
   threadId: number,
   args: { before?: number; limit?: number } = {},
 ): Promise<ConversationSnapshot> {
+  if (isMockMode()) return await mockFetchConversation(workspaceId, threadId, args)
   const limit = args.limit ?? 2000
   const params = new URLSearchParams({ limit: String(limit) })
   if (args.before != null) params.set("before", String(args.before))
@@ -44,6 +60,7 @@ export async function uploadAttachment(args: {
   file: File
   kind: AttachmentKind
 }): Promise<AttachmentRef> {
+  if (isMockMode()) return await mockUploadAttachment(args)
   const form = new FormData()
   form.append("kind", args.kind)
   form.append("file", args.file, args.file.name)
@@ -63,12 +80,14 @@ export async function uploadAttachment(args: {
 }
 
 export async function fetchContext(workspaceId: number): Promise<ContextSnapshot> {
+  if (isMockMode()) return await mockFetchContext(workspaceId)
   const res = await fetch(`/api/workspaces/${workspaceId}/context`)
   if (!res.ok) throw new Error(`GET /api/workspaces/${workspaceId}/context failed: ${res.status}`)
   return (await res.json()) as ContextSnapshot
 }
 
 export async function deleteContextItem(workspaceId: number, contextId: number): Promise<void> {
+  if (isMockMode()) return await mockDeleteContextItem(workspaceId, contextId)
   const res = await fetch(`/api/workspaces/${workspaceId}/context/${contextId}`, { method: "DELETE" })
   if (res.status === 204) return
   if (!res.ok) {
@@ -80,18 +99,21 @@ export async function deleteContextItem(workspaceId: number, contextId: number):
 }
 
 export async function fetchWorkspaceChanges(workspaceId: number): Promise<WorkspaceChangesSnapshot> {
+  if (isMockMode()) return await mockFetchWorkspaceChanges(workspaceId)
   const res = await fetch(`/api/workspaces/${workspaceId}/changes`)
   if (!res.ok) throw new Error(`GET /api/workspaces/${workspaceId}/changes failed: ${res.status}`)
   return (await res.json()) as WorkspaceChangesSnapshot
 }
 
 export async function fetchWorkspaceDiff(workspaceId: number): Promise<WorkspaceDiffSnapshot> {
+  if (isMockMode()) return await mockFetchWorkspaceDiff(workspaceId)
   const res = await fetch(`/api/workspaces/${workspaceId}/diff`)
   if (!res.ok) throw new Error(`GET /api/workspaces/${workspaceId}/diff failed: ${res.status}`)
   return (await res.json()) as WorkspaceDiffSnapshot
 }
 
 export async function fetchCodexCustomPrompts(): Promise<CodexCustomPromptSnapshot[]> {
+  if (isMockMode()) return await mockFetchCodexCustomPrompts()
   const res = await fetch("/api/codex/prompts")
   if (!res.ok) throw new Error(`GET /api/codex/prompts failed: ${res.status}`)
   return (await res.json()) as CodexCustomPromptSnapshot[]
@@ -101,6 +123,7 @@ export async function fetchMentionItems(args: {
   workspaceId: number
   query: string
 }): Promise<MentionItemSnapshot[]> {
+  if (isMockMode()) return await mockFetchMentionItems(args)
   const q = args.query.trim()
   if (!q) return []
   const res = await fetch(

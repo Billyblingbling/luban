@@ -20,6 +20,7 @@ import type {
   QueuedPromptSnapshot,
   ThinkingEffort,
 } from "@/lib/luban-api"
+import { attachmentHref } from "@/lib/attachment-href"
 import { onAddChatAttachments } from "@/lib/chat-attachment-events"
 import { emitContextChanged } from "@/lib/context-events"
 import {
@@ -145,8 +146,7 @@ export function ChatPanel({
       const scopeAtStart = attachmentScopeRef.current
       const items: ComposerAttachment[] = incoming.map((attachment) => {
         const isImage = attachment.kind === "image"
-        const previewUrl =
-          isImage ? `/api/workspaces/${activeWorkspaceId}/attachments/${attachment.id}?ext=${encodeURIComponent(attachment.extension)}` : undefined
+        const previewUrl = isImage ? attachmentHref({ workspaceId: activeWorkspaceId, attachment }) ?? undefined : undefined
         return {
           id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
           type: isImage ? "image" : "file",
@@ -565,9 +565,7 @@ export function ChatPanel({
     return refs.map((attachment) => {
       const isImage = attachment.kind === "image"
       const previewUrl =
-        isImage && workspaceId != null
-          ? `/api/workspaces/${workspaceId}/attachments/${attachment.id}?ext=${encodeURIComponent(attachment.extension)}`
-          : undefined
+        isImage && workspaceId != null ? attachmentHref({ workspaceId, attachment }) ?? undefined : undefined
       return {
         id: `ref-${attachment.id}`,
         type: isImage ? "image" : "file",
@@ -1209,7 +1207,7 @@ export function ChatPanel({
                     const isImage = attachment.kind === "image"
                     const previewUrl =
                       isImage && activeWorkspaceId != null
-                        ? `/api/workspaces/${activeWorkspaceId}/attachments/${attachment.id}?ext=${encodeURIComponent(attachment.extension)}`
+                        ? attachmentHref({ workspaceId: activeWorkspaceId, attachment }) ?? undefined
                         : undefined
                     setAttachments((prev) => [
                       ...prev,

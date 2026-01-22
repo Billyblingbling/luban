@@ -18,6 +18,7 @@ import { useLuban } from "@/lib/luban-context"
 import { fetchCodexCustomPrompts, fetchConversation, fetchThreads, uploadAttachment } from "@/lib/luban-http"
 import { buildMessages, type Message } from "@/lib/conversation-ui"
 import type { CodexCustomPromptSnapshot, ConversationEntry, ConversationSnapshot } from "@/lib/luban-api"
+import { attachmentHref } from "@/lib/attachment-href"
 import { ConversationView } from "@/components/conversation-view"
 import { AgentStatusIcon, PRBadge } from "@/components/shared/status-indicator"
 import { CodexAgentSelector } from "@/components/shared/agent-selector"
@@ -194,10 +195,7 @@ function WorktreePreviewPanel({
 
       void uploadAttachment({ workspaceId: worktree.workspaceId, file, kind: isImage ? "image" : "file" })
         .then((attachment) => {
-          const previewUrl =
-            isImage
-              ? `/api/workspaces/${worktree.workspaceId}/attachments/${attachment.id}?ext=${encodeURIComponent(attachment.extension)}`
-              : undefined
+          const previewUrl = isImage ? attachmentHref({ workspaceId: worktree.workspaceId, attachment }) ?? undefined : undefined
           setAttachments((prev) =>
             prev.map((a) =>
               a.id === id ? { ...a, status: "ready", attachment, name: attachment.name, previewUrl } : a,

@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react"
 
 import type { ClientAction, ServerEvent, WsClientMessage, WsServerMessage } from "./luban-api"
+import { isMockMode } from "./luban-mode"
+import { mockDispatchAction, mockRequest } from "./mock/mock-runtime"
 
 const PROTOCOL_VERSION = 1
 
@@ -41,6 +43,15 @@ export function useLubanTransport(args: {
   }, [args.onEvent, args.onError])
 
   function sendAction(action: ClientAction, requestId?: string) {
+    if (isMockMode()) {
+      try {
+        mockDispatchAction({ action, onEvent: handlersRef.current.onEvent })
+      } catch (err) {
+        handlersRef.current.onError(err instanceof Error ? err.message : String(err))
+      }
+      return
+    }
+
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       const queue = pendingActionsRef.current
@@ -57,6 +68,10 @@ export function useLubanTransport(args: {
   }
 
   function request<T>(action: ClientAction): Promise<T> {
+    if (isMockMode()) {
+      return mockRequest<T>(action)
+    }
+
     const requestId = randomRequestId()
     return new Promise<T>((resolve, reject) => {
       pendingResponsesRef.current.set(requestId, {
@@ -68,6 +83,19 @@ export function useLubanTransport(args: {
   }
 
   useEffect(() => {
+    if (isMockMode()) {
+      setWsConnected(true)
+      const pending = pendingActionsRef.current.splice(0, pendingActionsRef.current.length)
+      for (const action of pending) {
+        try {
+          mockDispatchAction({ action, onEvent: handlersRef.current.onEvent })
+        } catch (err) {
+          handlersRef.current.onError(err instanceof Error ? err.message : String(err))
+        }
+      }
+      return
+    }
+
     const ws = new WebSocket(wsUrl("/api/events"))
     wsRef.current = ws
 
