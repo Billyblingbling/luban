@@ -14,7 +14,9 @@ Integrate `amp` as an agent runner alongside Codex, with a single attachment mod
   3. Detect from Amp config files under the Amp config root (`LUBAN_AMP_ROOT` or OS default)
 - The agent picker supports selecting the runner for a single message:
   - Agent: Codex / Amp (the default agent is preselected when opening the picker)
-  - Amp mode: Default / Smart / Rush (only when Amp is selected)
+  - Amp mode: Smart / Rush (only when Amp is selected)
+    - The default mode is indicated by a hover `default` overlay on the corresponding mode row.
+    - Selecting the default mode clears the per-turn override.
   - The default agent is marked with a `default` badge and a settings shortcut.
 
 ## Progress
