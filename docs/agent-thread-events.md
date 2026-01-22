@@ -107,7 +107,7 @@ Manual smoke steps:
 2. Open the web UI, then open Settings -> Agent.
 3. Set Default Runner to Amp (optional).
 4. Send a message in a workspace thread, then use the agent picker to:
-   - select Amp
+   - select Amp (the Agent column is preselected to the default runner)
    - select mode: Default / Smart / Rush
 5. Confirm:
    - activities appear as tool calls / reasoning

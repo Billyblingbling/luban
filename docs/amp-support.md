@@ -13,8 +13,9 @@ Integrate `amp` as an agent runner alongside Codex, with a single attachment mod
   2. Per-turn override from the agent picker (`smart` / `rush`)
   3. Detect from Amp config files under the Amp config root (`LUBAN_AMP_ROOT` or OS default)
 - The agent picker supports selecting the runner for a single message:
-  - Runner: Default / Codex / Amp
-  - Amp mode: Default / Smart / Rush (only when runner resolves to Amp)
+  - Agent: Codex / Amp (the default agent is preselected when opening the picker)
+  - Amp mode: Default / Smart / Rush (only when Amp is selected)
+  - The default agent is marked with a `default` badge and a settings shortcut.
 
 ## Progress
 
@@ -31,4 +32,3 @@ Integrate `amp` as an agent runner alongside Codex, with a single attachment mod
   2. Open Settings -> Agent and set Default Runner to Amp (optional).
   3. Send a message and select `Amp` + `Smart` (or `Rush`) from the agent picker.
   4. Verify the run starts and produces agent events and a final response.
-
