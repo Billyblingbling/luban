@@ -41,6 +41,7 @@ export function useThreadTabs(args: {
     if (
       args.activeThreadId != null &&
       threadsById.has(args.activeThreadId) &&
+      !archivedFromTabs.includes(args.activeThreadId) &&
       !open.includes(args.activeThreadId)
     ) {
       open.push(args.activeThreadId)
@@ -80,4 +81,3 @@ export function useThreadTabs(args: {
 
   return { tabs, archivedTabs, openThreadIds, closedThreadIds, activeTabId }
 }
-

@@ -198,6 +198,34 @@ test("new tab is appended to the end", async ({ page }) => {
   expect(afterLast).not.toBe(beforeLast)
 })
 
+test("closing the active tab removes it from the strip", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  const tabs = page.locator('[data-testid="thread-tab-title"]')
+  const beforeCount = await tabs.count()
+  expect(beforeCount).toBeGreaterThan(0)
+  const beforeLast = (await tabs.last().textContent())?.trim()
+
+  await page.getByTitle("New tab").click()
+  await expect(tabs).toHaveCount(beforeCount + 1, { timeout: 20_000 })
+
+  const closingTitle = (await tabs.last().textContent())?.trim()
+  expect(closingTitle).toBeTruthy()
+  expect(closingTitle).not.toBe(beforeLast)
+
+  const closingTab = tabs.last().locator("..")
+  await closingTab.hover()
+  await closingTab.locator("button").click()
+
+  await expect(tabs).toHaveCount(beforeCount, { timeout: 20_000 })
+  const titles = (await tabs.allTextContents()).map((t) => t.trim()).filter(Boolean)
+  expect(titles).not.toContain(String(closingTitle))
+
+  await page.getByTitle("All tabs").click()
+  const closedSection = page.getByText("Recently Closed", { exact: true }).locator("..").locator("..")
+  await expect(closedSection.getByRole("button", { name: String(closingTitle) })).toHaveCount(1)
+})
+
 test("archived tabs list does not hide older threads", async ({ page }) => {
   await ensureWorkspace(page)
 
