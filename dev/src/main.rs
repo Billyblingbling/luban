@@ -150,6 +150,28 @@ fn run_cmd_capture_stdout(mut cmd: ProcessCommand, context: &str) -> Result<Stri
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
+fn cmd_capture_stdout_if_ok(mut cmd: ProcessCommand) -> Option<String> {
+    cmd.stdin(Stdio::null());
+    let output = cmd.output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if stdout.is_empty() { None } else { Some(stdout) }
+}
+
+fn git_rev_parse_head() -> String {
+    let mut cmd = ProcessCommand::new("git");
+    cmd.args(["rev-parse", "HEAD"]);
+    cmd_capture_stdout_if_ok(cmd).unwrap_or_else(|| "unknown".to_owned())
+}
+
+fn git_exact_tag() -> Option<String> {
+    let mut cmd = ProcessCommand::new("git");
+    cmd.args(["describe", "--tags", "--exact-match"]);
+    cmd_capture_stdout_if_ok(cmd)
+}
+
 #[derive(Deserialize)]
 struct CargoMetadata {
     packages: Vec<CargoPackage>,
@@ -196,7 +218,23 @@ fn find_first_app_dir(bundle_macos: &Path) -> Result<Option<PathBuf>> {
     Ok(None)
 }
 
-fn build_web(profile: &str) -> Result<()> {
+fn resolve_web_version() -> Result<String> {
+    let raw = std::fs::read_to_string("web/package.json").context("read web/package.json")?;
+    let value: serde_json::Value = serde_json::from_str(&raw).context("parse web/package.json")?;
+    value
+        .get("version")
+        .and_then(|v| v.as_str())
+        .map(|v| v.to_owned())
+        .context("missing web package.json version")
+}
+
+fn build_web(
+    profile: &str,
+    build_channel: &str,
+    git_hash: &str,
+    git_tag: &str,
+    build_time: &str,
+) -> Result<()> {
     if !ProcessCommand::new("pnpm").arg("--version").output().is_ok() {
         anyhow::bail!("pnpm not found; install pnpm to build the web UI");
     }
@@ -205,9 +243,17 @@ fn build_web(profile: &str) -> Result<()> {
     install.current_dir("web").arg("install");
     run_cmd(install, "pnpm install")?;
 
+    let web_version = resolve_web_version()?;
     let build_script = if profile == "release" { "build" } else { "build" };
     let mut build = ProcessCommand::new("pnpm");
-    build.current_dir("web").arg(build_script);
+    build
+        .current_dir("web")
+        .arg(build_script)
+        .env("NEXT_PUBLIC_LUBAN_VERSION", web_version)
+        .env("NEXT_PUBLIC_LUBAN_BUILD_CHANNEL", build_channel)
+        .env("NEXT_PUBLIC_LUBAN_COMMIT", git_hash)
+        .env("NEXT_PUBLIC_LUBAN_GIT_TAG", git_tag)
+        .env("NEXT_PUBLIC_LUBAN_BUILD_TIME", build_time);
     run_cmd(build, "pnpm build")?;
 
     std::fs::create_dir_all("web/out").context("create web/out")?;
@@ -341,7 +387,16 @@ fn run_package(target: String, profile: String, out_dir: PathBuf) -> Result<()> 
         other => anyhow::bail!("unsupported profile: {}; supported: release, debug", other),
     };
 
-    build_web(&profile)?;
+    let build_channel = if profile == "release" { "release" } else { "dev" };
+    let git_hash = git_rev_parse_head();
+    let git_tag = if build_channel == "release" {
+        git_exact_tag().unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let build_time = now_rfc3339_utc()?;
+
+    build_web(&profile, build_channel, &git_hash, &git_tag, &build_time)?;
 
     let mut tauri_build = ProcessCommand::new("cargo");
     tauri_build
@@ -356,6 +411,11 @@ fn run_package(target: String, profile: String, out_dir: PathBuf) -> Result<()> 
         .args(build_flags)
         .arg("--target")
         .arg(target_triple);
+    tauri_build
+        .env("LUBAN_BUILD_CHANNEL", build_channel)
+        .env("LUBAN_GIT_HASH", &git_hash)
+        .env("LUBAN_GIT_TAG", &git_tag)
+        .env("LUBAN_BUILD_TIME", &build_time);
     apply_updater_signing_env(&mut tauri_build);
     run_cmd(tauri_build, "cargo tauri build")?;
 

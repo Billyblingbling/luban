@@ -23,7 +23,14 @@ web cmd profile="debug":
     fi; \
     if [ -d web ]; then \
       (cd web && pnpm install); \
-      (cd web && pnpm build); \
+      (cd web && \
+        channel="$([ "{{profile}}" = "release" ] && echo release || echo dev)" && \
+        NEXT_PUBLIC_LUBAN_VERSION="$(node -p 'require("./package.json").version')" \
+        NEXT_PUBLIC_LUBAN_BUILD_CHANNEL="$channel" \
+        NEXT_PUBLIC_LUBAN_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo unknown)" \
+        NEXT_PUBLIC_LUBAN_GIT_TAG="$( [ "$channel" = "release" ] && git describe --tags --exact-match 2>/dev/null || true )" \
+        NEXT_PUBLIC_LUBAN_BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date)" \
+        pnpm build); \
       mkdir -p web/out; \
       printf '\n' > web/out/.gitkeep; \
     fi; \
@@ -44,7 +51,14 @@ web cmd profile="debug":
     if [ ! -d web/node_modules ]; then \
       (cd web && pnpm install); \
     fi; \
-    (cd web && pnpm dev); \
+    (cd web && \
+      channel="$([ "{{profile}}" = "release" ] && echo release || echo dev)" && \
+      NEXT_PUBLIC_LUBAN_VERSION="$(node -p 'require("./package.json").version')" \
+      NEXT_PUBLIC_LUBAN_BUILD_CHANNEL="$channel" \
+      NEXT_PUBLIC_LUBAN_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo unknown)" \
+      NEXT_PUBLIC_LUBAN_GIT_TAG="$( [ "$channel" = "release" ] && git describe --tags --exact-match 2>/dev/null || true )" \
+      NEXT_PUBLIC_LUBAN_BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date)" \
+      pnpm dev); \
   elif [ "{{cmd}}" = "dev-mock" ]; then \
     if ! command -v pnpm >/dev/null 2>&1; then \
       echo "pnpm not found; install pnpm to run the web dev server"; \
@@ -53,7 +67,15 @@ web cmd profile="debug":
     if [ ! -d web/node_modules ]; then \
       (cd web && pnpm install); \
     fi; \
-    (cd web && NEXT_PUBLIC_LUBAN_MODE=mock pnpm dev); \
+    (cd web && \
+      NEXT_PUBLIC_LUBAN_MODE=mock \
+      channel="$([ "{{profile}}" = "release" ] && echo release || echo dev)" && \
+      NEXT_PUBLIC_LUBAN_VERSION="$(node -p 'require("./package.json").version')" \
+      NEXT_PUBLIC_LUBAN_BUILD_CHANNEL="$channel" \
+      NEXT_PUBLIC_LUBAN_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo unknown)" \
+      NEXT_PUBLIC_LUBAN_GIT_TAG="$( [ "$channel" = "release" ] && git describe --tags --exact-match 2>/dev/null || true )" \
+      NEXT_PUBLIC_LUBAN_BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date)" \
+      pnpm dev); \
   else \
     echo "usage: just web {build|run|dev|dev-mock} [release]"; \
     exit 2; \

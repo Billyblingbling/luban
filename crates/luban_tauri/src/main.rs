@@ -13,6 +13,37 @@ static UPDATE_CHECK_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 
 const MENU_ID_CHECK_FOR_UPDATES: &str = "check_for_updates";
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BuildChannel {
+    Dev,
+    Release,
+}
+
+fn parse_build_channel(raw: &str) -> BuildChannel {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "release" => BuildChannel::Release,
+        _ => BuildChannel::Dev,
+    }
+}
+
+fn build_channel() -> BuildChannel {
+    if let Ok(raw) = std::env::var("LUBAN_BUILD_CHANNEL")
+        && !raw.trim().is_empty()
+    {
+        return parse_build_channel(&raw);
+    }
+    if let Some(raw) = option_env!("LUBAN_BUILD_CHANNEL")
+        && !raw.trim().is_empty()
+    {
+        return parse_build_channel(raw);
+    }
+    BuildChannel::Dev
+}
+
+fn auto_update_enabled() -> bool {
+    matches!(build_channel(), BuildChannel::Release)
+}
+
 #[tauri::command]
 fn open_external(url: String) -> Result<(), String> {
     if !(url.starts_with("http://") || url.starts_with("https://")) {
@@ -206,6 +237,9 @@ async fn check_for_updates(app: tauri::AppHandle, user_initiated: bool) -> anyho
 }
 
 async fn run_update_flow(app: tauri::AppHandle, user_initiated: bool) {
+    if !user_initiated && !auto_update_enabled() {
+        return;
+    }
     if UPDATE_CHECK_IN_PROGRESS
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_err()
@@ -284,10 +318,12 @@ fn main() -> anyhow::Result<()> {
                 .build()
                 .context("failed to build window")?;
 
-            let handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                run_update_flow(handle, false).await;
-            });
+            if auto_update_enabled() {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    run_update_flow(handle, false).await;
+                });
+            }
 
             Ok(())
         })
@@ -300,6 +336,7 @@ fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
 
     // `muda` requires creating menu items on the macOS main thread.
     // Rust's test harness runs `#[test]` functions on worker threads, so these
@@ -420,5 +457,39 @@ mod tests {
             contents.contains("\"pubkey\""),
             "updater must include a public key"
         );
+    }
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn with_env_var<T>(key: &str, value: &str, f: impl FnOnce() -> T) -> T {
+        let _guard = ENV_LOCK.lock().expect("lock env");
+        let prev = std::env::var_os(key);
+        unsafe {
+            std::env::set_var(key, value);
+        }
+        let out = f();
+        match prev {
+            Some(prev) => unsafe {
+                std::env::set_var(key, prev);
+            },
+            None => unsafe {
+                std::env::remove_var(key);
+            },
+        }
+        out
+    }
+
+    #[test]
+    fn auto_update_is_disabled_on_dev_channel() {
+        with_env_var("LUBAN_BUILD_CHANNEL", "dev", || {
+            assert!(!auto_update_enabled());
+        });
+    }
+
+    #[test]
+    fn auto_update_is_enabled_on_release_channel() {
+        with_env_var("LUBAN_BUILD_CHANNEL", "release", || {
+            assert!(auto_update_enabled());
+        });
     }
 }

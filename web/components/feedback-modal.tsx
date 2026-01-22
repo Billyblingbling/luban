@@ -22,11 +22,16 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
+import { getBuildInfo } from "@/lib/build-info"
 
 type Stage = "input" | "review"
 
 interface SystemInfo {
   version: string
+  commit: string
+  tag: string
+  buildTime: string
+  channel: string
   os: string
   runtime: string
 }
@@ -47,13 +52,18 @@ interface Attachment {
 }
 
 function getSystemInfo(): SystemInfo {
+  const build = getBuildInfo()
   const runtime =
     typeof window !== "undefined" && typeof (window as unknown as { __TAURI__?: unknown }).__TAURI__ !== "undefined"
       ? "Tauri"
       : "Web"
   const os = typeof navigator !== "undefined" ? `${navigator.platform} (${navigator.userAgent})` : "Unknown"
   return {
-    version: "0.1.3",
+    version: build.version,
+    commit: build.commit,
+    tag: build.tag,
+    buildTime: build.buildTime,
+    channel: build.channel,
     os,
     runtime,
   }
@@ -118,6 +128,7 @@ function analyzeFeedback(args: { input: string; systemInfo: SystemInfo; attachme
   const inputTrimmed = args.input.trim()
   const detectedType = detectFeedbackType(inputTrimmed)
   const titleBase = summarizeForTitle(inputTrimmed)
+  const tagLine = args.systemInfo.tag ? `- Tag: ${args.systemInfo.tag}\n` : ""
 
   if (detectedType === "bug") {
     return {
@@ -143,6 +154,9 @@ ${args.attachmentCount > 0 ? `${args.attachmentCount} image(s) attached via Luba
 
 ## System Information
 - Version: ${args.systemInfo.version}
+- Channel: ${args.systemInfo.channel}
+- Commit: ${args.systemInfo.commit}
+${tagLine}- Build Time: ${args.systemInfo.buildTime}
 - OS: ${args.systemInfo.os}
 - Runtime: ${args.systemInfo.runtime}`,
     }
@@ -164,6 +178,9 @@ ${inputTrimmed}
 
 ## System Information
 - Version: ${args.systemInfo.version}
+- Channel: ${args.systemInfo.channel}
+- Commit: ${args.systemInfo.commit}
+${tagLine}- Build Time: ${args.systemInfo.buildTime}
 - OS: ${args.systemInfo.os}
 - Runtime: ${args.systemInfo.runtime}`,
     }
@@ -178,6 +195,9 @@ ${inputTrimmed}
 
 ## System Information
 - Version: ${args.systemInfo.version}
+- Channel: ${args.systemInfo.channel}
+- Commit: ${args.systemInfo.commit}
+${tagLine}- Build Time: ${args.systemInfo.buildTime}
 - OS: ${args.systemInfo.os}
 - Runtime: ${args.systemInfo.runtime}`,
   }
