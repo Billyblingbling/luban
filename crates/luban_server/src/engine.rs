@@ -392,17 +392,17 @@ impl Engine {
         })
         .await;
 
-	        if mode == luban_api::TaskExecuteMode::Start {
-	            self.process_action_queue(Action::SendAgentMessage {
-	                workspace_id,
-	                thread_id,
-	                text: draft.prompt.clone(),
-	                attachments: Vec::new(),
-	                runner: None,
-	                amp_mode: None,
-	            })
-	            .await;
-	        }
+        if mode == luban_api::TaskExecuteMode::Start {
+            self.process_action_queue(Action::SendAgentMessage {
+                workspace_id,
+                thread_id,
+                text: draft.prompt.clone(),
+                attachments: Vec::new(),
+                runner: None,
+                amp_mode: None,
+            })
+            .await;
+        }
 
         let worktree_path = self
             .state
@@ -1367,7 +1367,7 @@ impl Engine {
                             thread_id: tid,
                         })
                         .await;
-	                        let runner = runner.map(map_api_agent_runner_kind);
+                        let runner = runner.map(map_api_agent_runner_kind);
                         let amp_mode = match runner {
                             Some(luban_domain::AgentRunnerKind::Codex) => None,
                             _ => amp_mode.clone(),
