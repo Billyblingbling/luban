@@ -237,10 +237,21 @@ let globalDefaultConfigs: Record<string, Record<string, string>> = {
   "opencode": { model: "claude-4-sonnet", reasoning: "standard" },
 }
 
+let globalDefaultAgentId = "codex"
+
 let globalDefaultConfigListeners: Set<() => void> = new Set()
 
 export function getDefaultConfig(agentId: string): Record<string, string> {
   return globalDefaultConfigs[agentId] ?? {}
+}
+
+export function getDefaultAgentId(): string {
+  return globalDefaultAgentId
+}
+
+export function setDefaultAgentId(agentId: string) {
+  globalDefaultAgentId = agentId
+  globalDefaultConfigListeners.forEach((listener) => listener())
 }
 
 export function setDefaultConfig(agentId: string, columnId: string, value: string) {
@@ -316,9 +327,9 @@ export interface UseAgentSelectorReturn {
 }
 
 export function useAgentSelector(initialAgentId?: string): UseAgentSelectorReturn {
-  const [selectedAgentId, setSelectedAgentId] = useState(initialAgentId ?? agentConfigs[0].id)
+  const [selectedAgentId, setSelectedAgentId] = useState(initialAgentId ?? getDefaultAgentId())
   const [selections, setSelections] = useState<Record<string, string>>(() =>
-    getAgentDefaults(getAgentConfig(initialAgentId ?? agentConfigs[0].id) ?? agentConfigs[0])
+    getAgentDefaults(getAgentConfig(initialAgentId ?? getDefaultAgentId()) ?? agentConfigs[0])
   )
   const [showSelector, setShowSelector] = useState(false)
   const [tempAgentId, setTempAgentId] = useState<string | null>(null)
@@ -560,19 +571,40 @@ export function AgentSelector({ className, dropdownPosition = "bottom", onOpenAg
                 </div>
                 {agentConfigs.map((agent) => {
                   const isSelected = tempAgentId ? agent.id === tempAgentId : agent.id === selectedAgentId
+                  const isDefault = agent.id === getDefaultAgentId()
                   return (
-                    <button
-                      key={agent.id}
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => handleAgentClick(agent.id)}
-                      className={cn(
-                        "w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-xs transition-colors rounded-md whitespace-nowrap",
-                        isSelected ? "bg-primary/10 text-primary" : "text-foreground hover:bg-accent"
+                    <div key={agent.id} className="relative group">
+                      <button
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => handleAgentClick(agent.id)}
+                        className={cn(
+                          "w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-xs transition-colors rounded-md whitespace-nowrap",
+                          isSelected ? "bg-primary/10 text-primary" : "text-foreground hover:bg-accent",
+                        )}
+                      >
+                        <AgentIcon agentId={agent.id} className="w-3.5 h-3.5 flex-shrink-0" />
+                        <span className="pr-10">{agent.name}</span>
+                      </button>
+                      {isDefault && (
+                        <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 px-1.5 py-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity bg-popover/95 rounded">
+                          <span className="text-[10px] text-muted-foreground pointer-events-none select-none">default</span>
+                          {onOpenAgentSettings && (
+                            <button
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                closeSelector()
+                                onOpenAgentSettings(agent.id)
+                              }}
+                              className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                              title={`Edit ${agent.name} defaults`}
+                            >
+                              <Settings className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
                       )}
-                    >
-                      <AgentIcon agentId={agent.id} className="w-3.5 h-3.5 flex-shrink-0" />
-                      {agent.name}
-                    </button>
+                    </div>
                   )
                 })}
               </div>
