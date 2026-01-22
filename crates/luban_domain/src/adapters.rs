@@ -184,6 +184,20 @@ pub struct CodexConfigEntry {
     pub children: Vec<CodexConfigEntry>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AmpConfigEntryKind {
+    File,
+    Folder,
+}
+
+#[derive(Clone, Debug)]
+pub struct AmpConfigEntry {
+    pub path: String,
+    pub name: String,
+    pub kind: AmpConfigEntryKind,
+    pub children: Vec<AmpConfigEntry>,
+}
+
 pub trait ProjectWorkspaceService: Send + Sync {
     fn load_app_state(&self) -> Result<PersistedAppState, String>;
 
@@ -396,6 +410,26 @@ pub trait ProjectWorkspaceService: Send + Sync {
     }
 
     fn codex_config_write_file(&self, _path: String, _contents: String) -> Result<(), String> {
+        Err("unimplemented".to_owned())
+    }
+
+    fn amp_check(&self) -> Result<(), String> {
+        Err("unimplemented".to_owned())
+    }
+
+    fn amp_config_tree(&self) -> Result<Vec<AmpConfigEntry>, String> {
+        Err("unimplemented".to_owned())
+    }
+
+    fn amp_config_list_dir(&self, _path: String) -> Result<Vec<AmpConfigEntry>, String> {
+        Err("unimplemented".to_owned())
+    }
+
+    fn amp_config_read_file(&self, _path: String) -> Result<String, String> {
+        Err("unimplemented".to_owned())
+    }
+
+    fn amp_config_write_file(&self, _path: String, _contents: String) -> Result<(), String> {
         Err("unimplemented".to_owned())
     }
 

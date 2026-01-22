@@ -876,6 +876,36 @@ impl Engine {
                     return;
                 }
 
+                if matches!(action, luban_api::ClientAction::AmpCheck) {
+                    let services = self.services.clone();
+                    let events = self.events.clone();
+                    let request_id = request_id.clone();
+                    let rev = self.rev;
+                    tokio::spawn(async move {
+                        let result = tokio::task::spawn_blocking(move || services.amp_check())
+                            .await
+                            .ok()
+                            .unwrap_or_else(|| Err("failed to join amp check task".to_owned()));
+
+                        let (ok, message) = match result {
+                            Ok(()) => (true, None),
+                            Err(message) => (false, Some(message)),
+                        };
+
+                        let _ = events.send(WsServerMessage::Event {
+                            rev,
+                            event: Box::new(luban_api::ServerEvent::AmpCheckReady {
+                                request_id,
+                                ok,
+                                message,
+                            }),
+                        });
+                    });
+
+                    let _ = reply.send(Ok(self.rev));
+                    return;
+                }
+
                 if matches!(action, luban_api::ClientAction::CodexConfigTree) {
                     fn map_entry(
                         entry: luban_domain::CodexConfigEntry,
@@ -914,6 +944,62 @@ impl Engine {
                                 let _ = events.send(WsServerMessage::Event {
                                     rev,
                                     event: Box::new(luban_api::ServerEvent::CodexConfigTreeReady {
+                                        request_id,
+                                        tree,
+                                    }),
+                                });
+                            }
+                            Err(message) => {
+                                let _ = events.send(WsServerMessage::Error {
+                                    request_id: Some(request_id),
+                                    message,
+                                });
+                            }
+                        }
+                    });
+
+                    let _ = reply.send(Ok(self.rev));
+                    return;
+                }
+
+                if matches!(action, luban_api::ClientAction::AmpConfigTree) {
+                    fn map_entry(
+                        entry: luban_domain::AmpConfigEntry,
+                    ) -> luban_api::AmpConfigEntrySnapshot {
+                        luban_api::AmpConfigEntrySnapshot {
+                            path: entry.path,
+                            name: entry.name,
+                            kind: match entry.kind {
+                                luban_domain::AmpConfigEntryKind::File => {
+                                    luban_api::AmpConfigEntryKind::File
+                                }
+                                luban_domain::AmpConfigEntryKind::Folder => {
+                                    luban_api::AmpConfigEntryKind::Folder
+                                }
+                            },
+                            children: entry.children.into_iter().map(map_entry).collect(),
+                        }
+                    }
+
+                    let services = self.services.clone();
+                    let events = self.events.clone();
+                    let request_id = request_id.clone();
+                    let rev = self.rev;
+                    tokio::spawn(async move {
+                        let result =
+                            tokio::task::spawn_blocking(move || services.amp_config_tree())
+                                .await
+                                .ok()
+                                .unwrap_or_else(|| {
+                                    Err("failed to join amp config tree task".to_owned())
+                                });
+
+                        match result {
+                            Ok(tree) => {
+                                let tree = tree.into_iter().map(map_entry).collect();
+                                let _ = events.send(WsServerMessage::Event {
+                                    rev,
+                                    event: Box::new(luban_api::ServerEvent::AmpConfigTreeReady {
                                         request_id,
                                         tree,
                                     }),
@@ -994,6 +1080,66 @@ impl Engine {
                     return;
                 }
 
+                if let luban_api::ClientAction::AmpConfigListDir { path } = &action {
+                    fn map_entry(
+                        entry: luban_domain::AmpConfigEntry,
+                    ) -> luban_api::AmpConfigEntrySnapshot {
+                        luban_api::AmpConfigEntrySnapshot {
+                            path: entry.path,
+                            name: entry.name,
+                            kind: match entry.kind {
+                                luban_domain::AmpConfigEntryKind::File => {
+                                    luban_api::AmpConfigEntryKind::File
+                                }
+                                luban_domain::AmpConfigEntryKind::Folder => {
+                                    luban_api::AmpConfigEntryKind::Folder
+                                }
+                            },
+                            children: entry.children.into_iter().map(map_entry).collect(),
+                        }
+                    }
+
+                    let services = self.services.clone();
+                    let events = self.events.clone();
+                    let request_id = request_id.clone();
+                    let rev = self.rev;
+                    let path = path.clone();
+                    tokio::spawn(async move {
+                        let path_for_task = path.clone();
+                        let result = tokio::task::spawn_blocking(move || {
+                            services.amp_config_list_dir(path_for_task)
+                        })
+                        .await
+                        .ok()
+                        .unwrap_or_else(|| Err("failed to join amp config list task".to_owned()));
+
+                        match result {
+                            Ok(entries) => {
+                                let entries = entries.into_iter().map(map_entry).collect();
+                                let _ = events.send(WsServerMessage::Event {
+                                    rev,
+                                    event: Box::new(
+                                        luban_api::ServerEvent::AmpConfigListDirReady {
+                                            request_id,
+                                            path,
+                                            entries,
+                                        },
+                                    ),
+                                });
+                            }
+                            Err(message) => {
+                                let _ = events.send(WsServerMessage::Error {
+                                    request_id: Some(request_id),
+                                    message,
+                                });
+                            }
+                        }
+                    });
+
+                    let _ = reply.send(Ok(self.rev));
+                    return;
+                }
+
                 if let luban_api::ClientAction::CodexConfigReadFile { path } = &action {
                     let services = self.services.clone();
                     let events = self.events.clone();
@@ -1014,6 +1160,45 @@ impl Engine {
                                 let _ = events.send(WsServerMessage::Event {
                                     rev,
                                     event: Box::new(luban_api::ServerEvent::CodexConfigFileReady {
+                                        request_id,
+                                        path,
+                                        contents,
+                                    }),
+                                });
+                            }
+                            Err(message) => {
+                                let _ = events.send(WsServerMessage::Error {
+                                    request_id: Some(request_id),
+                                    message,
+                                });
+                            }
+                        }
+                    });
+
+                    let _ = reply.send(Ok(self.rev));
+                    return;
+                }
+
+                if let luban_api::ClientAction::AmpConfigReadFile { path } = &action {
+                    let services = self.services.clone();
+                    let events = self.events.clone();
+                    let request_id = request_id.clone();
+                    let rev = self.rev;
+                    let path = path.clone();
+                    tokio::spawn(async move {
+                        let path_for_task = path.clone();
+                        let result = tokio::task::spawn_blocking(move || {
+                            services.amp_config_read_file(path_for_task)
+                        })
+                        .await
+                        .ok()
+                        .unwrap_or_else(|| Err("failed to join amp config read task".to_owned()));
+
+                        match result {
+                            Ok(contents) => {
+                                let _ = events.send(WsServerMessage::Event {
+                                    rev,
+                                    event: Box::new(luban_api::ServerEvent::AmpConfigFileReady {
                                         request_id,
                                         path,
                                         contents,
@@ -1056,6 +1241,45 @@ impl Engine {
                                 let _ = events.send(WsServerMessage::Event {
                                     rev,
                                     event: Box::new(luban_api::ServerEvent::CodexConfigFileSaved {
+                                        request_id,
+                                        path,
+                                    }),
+                                });
+                            }
+                            Err(message) => {
+                                let _ = events.send(WsServerMessage::Error {
+                                    request_id: Some(request_id),
+                                    message,
+                                });
+                            }
+                        }
+                    });
+
+                    let _ = reply.send(Ok(self.rev));
+                    return;
+                }
+
+                if let luban_api::ClientAction::AmpConfigWriteFile { path, contents } = &action {
+                    let services = self.services.clone();
+                    let events = self.events.clone();
+                    let request_id = request_id.clone();
+                    let rev = self.rev;
+                    let path = path.clone();
+                    let contents = contents.clone();
+                    tokio::spawn(async move {
+                        let path_for_task = path.clone();
+                        let result = tokio::task::spawn_blocking(move || {
+                            services.amp_config_write_file(path_for_task, contents)
+                        })
+                        .await
+                        .ok()
+                        .unwrap_or_else(|| Err("failed to join amp config write task".to_owned()));
+
+                        match result {
+                            Ok(()) => {
+                                let _ = events.send(WsServerMessage::Event {
+                                    rev,
+                                    event: Box::new(luban_api::ServerEvent::AmpConfigFileSaved {
                                         request_id,
                                         path,
                                     }),
@@ -3611,7 +3835,12 @@ fn map_client_action(action: luban_api::ClientAction) -> Option<Action> {
         | luban_api::ClientAction::CodexConfigTree
         | luban_api::ClientAction::CodexConfigListDir { .. }
         | luban_api::ClientAction::CodexConfigReadFile { .. }
-        | luban_api::ClientAction::CodexConfigWriteFile { .. } => None,
+        | luban_api::ClientAction::CodexConfigWriteFile { .. }
+        | luban_api::ClientAction::AmpCheck
+        | luban_api::ClientAction::AmpConfigTree
+        | luban_api::ClientAction::AmpConfigListDir { .. }
+        | luban_api::ClientAction::AmpConfigReadFile { .. }
+        | luban_api::ClientAction::AmpConfigWriteFile { .. } => None,
     }
 }
 

@@ -43,7 +43,20 @@ For server stability:
 - Amp is run with `--no-notifications --no-ide --no-jetbrains` to avoid interactive/IDE coupling.
 - Amp is run with `--dangerously-allow-all` so the server never blocks on interactive approvals.
 
-## Current Status (2026-01-21)
+### 3) Amp config root follows XDG conventions
+
+The Amp configuration root is resolved using the following precedence:
+
+1. `LUBAN_AMP_ROOT` (explicit override)
+2. `$XDG_CONFIG_HOME/amp`
+3. `$HOME/.config/amp`
+
+For tests, the default root is `.amp` to keep filesystem fixtures local.
+
+All config file operations are restricted to a relative path under the resolved root, and the
+backend ignores symlinks in directory listings.
+
+## Current Status (2026-01-22)
 
 Implemented:
 
@@ -55,12 +68,16 @@ Implemented:
 - `crates/luban_backend/src/sqlite_store.rs`: stored default runner and Amp mode in `app_settings_text`.
 - `crates/luban_backend/src/services.rs`: runner selection driven by request config (with env overrides).
 - `web/components/settings-panel.tsx`: UI controls to select default runner and Amp mode.
+- `crates/luban_backend/src/services.rs`: Amp config root resolution and file operations (`amp_check`, `amp_config_*`).
+- `crates/luban_api/src/lib.rs`: Amp config protocol (`AmpConfigEntrySnapshot` and request/ready events).
+- `crates/luban_server/src/engine.rs`: Amp config action routing over WebSocket.
 
 Environment variables (overrides):
 
 - `LUBAN_AGENT_RUNNER`: `codex` (default) or `amp`.
 - `LUBAN_AMP_BIN`: optional absolute path to the `amp` executable (defaults to `amp` on `PATH`).
 - `LUBAN_AMP_MODE`: optional Amp mode value passed via `--mode` (e.g., `smart`, `free`).
+- `LUBAN_AMP_ROOT`: optional override for the Amp config root directory.
 
 Known limitations:
 
@@ -104,3 +121,4 @@ Manual smoke steps:
 - 2026-01-21: Persisted default runner and Amp mode; added UI controls and request-driven runner selection.
 - 2026-01-22: Enabled Amp image attachments by prompt `@path` injection.
 - 2026-01-22: Forwarded all attachment kinds to Codex and Amp via context blob paths.
+- 2026-01-22: Added Amp config APIs mirroring the Codex config module.

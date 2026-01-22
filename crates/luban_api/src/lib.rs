@@ -130,6 +130,22 @@ pub struct CodexConfigEntrySnapshot {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum AmpConfigEntryKind {
+    File,
+    Folder,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AmpConfigEntrySnapshot {
+    pub path: String,
+    pub name: String,
+    pub kind: AmpConfigEntryKind,
+    #[serde(default)]
+    pub children: Vec<AmpConfigEntrySnapshot>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum AppearanceTheme {
     Light,
     Dark,
@@ -757,6 +773,18 @@ pub enum ClientAction {
         path: String,
         contents: String,
     },
+    AmpCheck,
+    AmpConfigTree,
+    AmpConfigListDir {
+        path: String,
+    },
+    AmpConfigReadFile {
+        path: String,
+    },
+    AmpConfigWriteFile {
+        path: String,
+        contents: String,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -804,6 +832,11 @@ pub enum ServerEvent {
         ok: bool,
         message: Option<String>,
     },
+    AmpCheckReady {
+        request_id: String,
+        ok: bool,
+        message: Option<String>,
+    },
     CodexConfigTreeReady {
         request_id: String,
         tree: Vec<CodexConfigEntrySnapshot>,
@@ -819,6 +852,24 @@ pub enum ServerEvent {
         contents: String,
     },
     CodexConfigFileSaved {
+        request_id: String,
+        path: String,
+    },
+    AmpConfigTreeReady {
+        request_id: String,
+        tree: Vec<AmpConfigEntrySnapshot>,
+    },
+    AmpConfigListDirReady {
+        request_id: String,
+        path: String,
+        entries: Vec<AmpConfigEntrySnapshot>,
+    },
+    AmpConfigFileReady {
+        request_id: String,
+        path: String,
+        contents: String,
+    },
+    AmpConfigFileSaved {
         request_id: String,
         path: String,
     },

@@ -293,6 +293,32 @@ fn resolve_codex_root() -> anyhow::Result<PathBuf> {
     Ok(PathBuf::from(home).join(".codex"))
 }
 
+fn resolve_amp_root() -> anyhow::Result<PathBuf> {
+    if let Some(root) = std::env::var_os(paths::LUBAN_AMP_ROOT_ENV) {
+        let root = root.to_string_lossy();
+        let trimmed = root.trim();
+        if trimmed.is_empty() {
+            return Err(anyhow!("{} is set but empty", paths::LUBAN_AMP_ROOT_ENV));
+        }
+        return Ok(PathBuf::from(trimmed));
+    }
+
+    if cfg!(test) {
+        return Ok(PathBuf::from(".amp"));
+    }
+
+    if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME") {
+        let xdg = xdg.to_string_lossy();
+        let trimmed = xdg.trim();
+        if !trimmed.is_empty() {
+            return Ok(PathBuf::from(trimmed).join("amp"));
+        }
+    }
+
+    let home = std::env::var_os("HOME").ok_or_else(|| anyhow!("HOME is not set"))?;
+    Ok(PathBuf::from(home).join(".config").join("amp"))
+}
+
 #[derive(Clone)]
 pub struct GitWorkspaceService {
     worktrees_root: PathBuf,
@@ -2382,6 +2408,296 @@ impl ProjectWorkspaceService for GitWorkspaceService {
         result.map_err(|e| format!("{e:#}"))
     }
 
+    fn amp_check(&self) -> Result<(), String> {
+        let result: anyhow::Result<()> = (|| {
+            let amp = std::env::var_os("LUBAN_AMP_BIN")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("amp"));
+            let output = Command::new(&amp)
+                .args(["--version"])
+                .output()
+                .with_context(|| format!("failed to spawn {}", amp.display()))?;
+
+            if output.status.success() {
+                return Ok(());
+            }
+
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+            if !stderr.is_empty() {
+                return Err(anyhow!("{stderr}"));
+            }
+            if !stdout.is_empty() {
+                return Err(anyhow!("{stdout}"));
+            }
+            Err(anyhow!("amp exited with status {}", output.status))
+        })();
+
+        result.map_err(|e| format!("{e:#}"))
+    }
+
+    fn amp_config_tree(&self) -> Result<Vec<luban_domain::AmpConfigEntry>, String> {
+        let result: anyhow::Result<Vec<luban_domain::AmpConfigEntry>> = (|| {
+            let root = resolve_amp_root()?;
+
+            if !root.exists() {
+                return Ok(Vec::new());
+            }
+
+            let meta = std::fs::metadata(&root).context("failed to stat amp config root")?;
+            if !meta.is_dir() {
+                return Err(anyhow!(
+                    "amp config root is not a directory: {}",
+                    root.display()
+                ));
+            }
+
+            fn rel_to_string(rel: &std::path::Path) -> String {
+                rel.to_string_lossy()
+                    .replace(std::path::MAIN_SEPARATOR, "/")
+            }
+
+            let mut entries = std::fs::read_dir(&root)
+                .with_context(|| format!("failed to read directory {}", root.display()))?
+                .filter_map(|entry| entry.ok())
+                .collect::<Vec<_>>();
+
+            entries.sort_by_key(|entry| entry.file_name());
+
+            let mut out = Vec::new();
+            for entry in entries {
+                let file_type = entry.file_type().context("failed to stat entry")?;
+                if file_type.is_symlink() {
+                    continue;
+                }
+
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.is_empty() {
+                    continue;
+                }
+
+                let rel_child = std::path::Path::new("").join(&name);
+                let path = rel_to_string(&rel_child);
+
+                if file_type.is_dir() {
+                    out.push(luban_domain::AmpConfigEntry {
+                        path,
+                        name,
+                        kind: luban_domain::AmpConfigEntryKind::Folder,
+                        children: Vec::new(),
+                    });
+                } else if file_type.is_file() {
+                    out.push(luban_domain::AmpConfigEntry {
+                        path,
+                        name,
+                        kind: luban_domain::AmpConfigEntryKind::File,
+                        children: Vec::new(),
+                    });
+                }
+            }
+
+            out.sort_by(|a, b| match (a.kind, b.kind) {
+                (
+                    luban_domain::AmpConfigEntryKind::Folder,
+                    luban_domain::AmpConfigEntryKind::File,
+                ) => std::cmp::Ordering::Less,
+                (
+                    luban_domain::AmpConfigEntryKind::File,
+                    luban_domain::AmpConfigEntryKind::Folder,
+                ) => std::cmp::Ordering::Greater,
+                _ => a.name.cmp(&b.name),
+            });
+
+            Ok(out)
+        })();
+
+        result.map_err(|e| format!("{e:#}"))
+    }
+
+    fn amp_config_list_dir(
+        &self,
+        path: String,
+    ) -> Result<Vec<luban_domain::AmpConfigEntry>, String> {
+        let result: anyhow::Result<Vec<luban_domain::AmpConfigEntry>> = (|| {
+            let root = resolve_amp_root()?;
+
+            if !root.exists() {
+                return Ok(Vec::new());
+            }
+
+            let rel = path.trim();
+            if rel.starts_with('/') {
+                return Err(anyhow!("path must be relative"));
+            }
+            if rel.contains('\\') {
+                return Err(anyhow!("invalid path separator"));
+            }
+
+            let mut rel_path = PathBuf::new();
+            if !rel.is_empty() {
+                for segment in rel.split('/') {
+                    if segment.is_empty() || segment == "." || segment == ".." {
+                        return Err(anyhow!("invalid path segment"));
+                    }
+                    rel_path.push(segment);
+                }
+            }
+
+            let abs = root.join(&rel_path);
+            let meta = std::fs::metadata(&abs)
+                .with_context(|| format!("failed to stat {}", abs.display()))?;
+            if !meta.is_dir() {
+                return Err(anyhow!("not a directory: {}", abs.display()));
+            }
+
+            fn rel_to_string(rel: &std::path::Path) -> String {
+                rel.to_string_lossy()
+                    .replace(std::path::MAIN_SEPARATOR, "/")
+            }
+
+            let mut out = Vec::new();
+            let entries = std::fs::read_dir(&abs)
+                .with_context(|| format!("failed to read directory {}", abs.display()))?;
+            for entry in entries {
+                let entry = match entry {
+                    Ok(entry) => entry,
+                    Err(_) => continue,
+                };
+
+                let file_type = entry.file_type().context("failed to stat entry")?;
+                if file_type.is_symlink() {
+                    continue;
+                }
+
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.is_empty() {
+                    continue;
+                }
+
+                let is_visible = file_type.is_dir() || file_type.is_file();
+                if !is_visible {
+                    continue;
+                }
+
+                let rel_child = rel_path.join(&name);
+                let child_path = rel_to_string(&rel_child);
+
+                if file_type.is_dir() {
+                    out.push(luban_domain::AmpConfigEntry {
+                        path: child_path,
+                        name,
+                        kind: luban_domain::AmpConfigEntryKind::Folder,
+                        children: Vec::new(),
+                    });
+                } else if file_type.is_file() {
+                    out.push(luban_domain::AmpConfigEntry {
+                        path: child_path,
+                        name,
+                        kind: luban_domain::AmpConfigEntryKind::File,
+                        children: Vec::new(),
+                    });
+                }
+            }
+
+            out.sort_by(|a, b| match (a.kind, b.kind) {
+                (
+                    luban_domain::AmpConfigEntryKind::Folder,
+                    luban_domain::AmpConfigEntryKind::File,
+                ) => std::cmp::Ordering::Less,
+                (
+                    luban_domain::AmpConfigEntryKind::File,
+                    luban_domain::AmpConfigEntryKind::Folder,
+                ) => std::cmp::Ordering::Greater,
+                _ => a.name.cmp(&b.name),
+            });
+
+            Ok(out)
+        })();
+
+        result.map_err(|e| format!("{e:#}"))
+    }
+
+    fn amp_config_read_file(&self, path: String) -> Result<String, String> {
+        let result: anyhow::Result<String> = (|| {
+            let root = resolve_amp_root()?;
+
+            let rel = path.trim();
+            if rel.is_empty() {
+                return Err(anyhow!("path is empty"));
+            }
+            if rel.starts_with('/') {
+                return Err(anyhow!("path must be relative"));
+            }
+            if rel.contains('\\') {
+                return Err(anyhow!("invalid path separator"));
+            }
+
+            let mut rel_path = PathBuf::new();
+            for segment in rel.split('/') {
+                if segment.is_empty() || segment == "." || segment == ".." {
+                    return Err(anyhow!("invalid path segment"));
+                }
+                rel_path.push(segment);
+            }
+
+            let abs = root.join(rel_path);
+            let meta = std::fs::metadata(&abs)
+                .with_context(|| format!("failed to stat {}", abs.display()))?;
+            if !meta.is_file() {
+                return Err(anyhow!("not a file: {}", abs.display()));
+            }
+            if meta.len() > 2 * 1024 * 1024 {
+                return Err(anyhow!("file is too large to edit"));
+            }
+
+            let bytes =
+                std::fs::read(&abs).with_context(|| format!("failed to read {}", abs.display()))?;
+            let text = String::from_utf8(bytes).context("file is not valid UTF-8")?;
+            Ok(text)
+        })();
+
+        result.map_err(|e| format!("{e:#}"))
+    }
+
+    fn amp_config_write_file(&self, path: String, contents: String) -> Result<(), String> {
+        let result: anyhow::Result<()> = (|| {
+            let root = resolve_amp_root()?;
+
+            let rel = path.trim();
+            if rel.is_empty() {
+                return Err(anyhow!("path is empty"));
+            }
+            if rel.starts_with('/') {
+                return Err(anyhow!("path must be relative"));
+            }
+            if rel.contains('\\') {
+                return Err(anyhow!("invalid path separator"));
+            }
+
+            let mut rel_path = PathBuf::new();
+            for segment in rel.split('/') {
+                if segment.is_empty() || segment == "." || segment == ".." {
+                    return Err(anyhow!("invalid path segment"));
+                }
+                rel_path.push(segment);
+            }
+
+            let abs = root.join(rel_path);
+            let parent = abs
+                .parent()
+                .ok_or_else(|| anyhow!("invalid path"))?
+                .to_path_buf();
+            std::fs::create_dir_all(&parent)
+                .with_context(|| format!("failed to create directory {}", parent.display()))?;
+
+            std::fs::write(&abs, contents.as_bytes())
+                .with_context(|| format!("failed to write {}", abs.display()))?;
+            Ok(())
+        })();
+
+        result.map_err(|e| format!("{e:#}"))
+    }
+
     fn project_identity(&self, path: PathBuf) -> Result<luban_domain::ProjectIdentity, String> {
         let result: anyhow::Result<luban_domain::ProjectIdentity> = (|| {
             if !path.exists() {
@@ -2711,6 +3027,119 @@ mod tests {
         assert!(
             paths.iter().any(|p| p == "config.toml"),
             "tree should include config.toml"
+        );
+        assert!(
+            paths.iter().any(|p| p == "prompts"),
+            "tree should include prompts dir"
+        );
+        assert!(
+            paths.iter().any(|p| p == "cache"),
+            "tree should include cache directory (shallow listing)"
+        );
+
+        drop(service);
+        let _ = std::fs::remove_dir_all(&base_dir);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn amp_config_tree_is_shallow_and_amp_config_list_dir_supports_root_listing() {
+        let _guard = lock_env();
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be valid")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "luban-amp-config-tree-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&root).expect("temp dir should be created");
+
+        let cache_dir = root.join("cache");
+        std::fs::create_dir_all(&cache_dir).expect("cache dir should be created");
+        for i in 0..3000 {
+            std::fs::write(cache_dir.join(format!("blob-{i}.bin")), b"x")
+                .expect("write cache file");
+        }
+
+        std::fs::write(root.join("config.yaml"), "model: claude\n").expect("write config.yaml");
+        let prompts_dir = root.join("prompts");
+        std::fs::create_dir_all(&prompts_dir).expect("prompts dir should be created");
+        std::fs::write(prompts_dir.join("hello.md"), "# Hello\n").expect("write prompt");
+
+        let prev = std::env::var_os(paths::LUBAN_AMP_ROOT_ENV);
+        unsafe {
+            std::env::set_var(paths::LUBAN_AMP_ROOT_ENV, &root);
+        }
+
+        let base_dir =
+            std::env::temp_dir().join(format!("luban-services-{}-{}", std::process::id(), unique));
+        std::fs::create_dir_all(&base_dir).expect("luban root should exist");
+        let sqlite =
+            SqliteStore::new(paths::sqlite_path(&base_dir)).expect("sqlite init should work");
+        let service = GitWorkspaceService {
+            worktrees_root: paths::worktrees_root(&base_dir),
+            conversations_root: paths::conversations_root(&base_dir),
+            task_prompts_root: paths::task_prompts_root(&base_dir),
+            sqlite,
+            codex_executable_cache: Arc::new(OnceLock::new()),
+        };
+
+        let tree = ProjectWorkspaceService::amp_config_tree(&service)
+            .expect("amp_config_tree should succeed");
+
+        let entries = ProjectWorkspaceService::amp_config_list_dir(&service, "cache".to_owned())
+            .expect("amp_config_list_dir should succeed");
+        assert!(
+            entries.len() >= 3000,
+            "expected list_dir to include all files (got {})",
+            entries.len()
+        );
+
+        let root_entries = ProjectWorkspaceService::amp_config_list_dir(&service, "".to_owned())
+            .expect("amp_config_list_dir root should succeed");
+        assert!(
+            root_entries.iter().any(|e| e.path == "config.yaml"),
+            "root list_dir should include config.yaml"
+        );
+
+        ProjectWorkspaceService::amp_config_write_file(
+            &service,
+            "nested/example.txt".to_owned(),
+            "hello".to_owned(),
+        )
+        .expect("amp_config_write_file should succeed");
+        let loaded = ProjectWorkspaceService::amp_config_read_file(
+            &service,
+            "nested/example.txt".to_owned(),
+        )
+        .expect("amp_config_read_file should succeed");
+        assert_eq!(loaded, "hello");
+
+        if let Some(value) = prev {
+            unsafe {
+                std::env::set_var(paths::LUBAN_AMP_ROOT_ENV, value);
+            }
+        } else {
+            unsafe {
+                std::env::remove_var(paths::LUBAN_AMP_ROOT_ENV);
+            }
+        }
+
+        let mut paths = Vec::new();
+        fn collect(out: &mut Vec<String>, entries: &[luban_domain::AmpConfigEntry]) {
+            for entry in entries {
+                out.push(entry.path.clone());
+                collect(out, &entry.children);
+            }
+        }
+        collect(&mut paths, &tree);
+
+        assert!(
+            paths.iter().any(|p| p == "config.yaml"),
+            "tree should include config.yaml"
         );
         assert!(
             paths.iter().any(|p| p == "prompts"),
