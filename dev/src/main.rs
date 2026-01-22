@@ -616,7 +616,7 @@ mod tests {
     #[test]
     fn build_archive_spec_uses_bsdtar_flags() {
         let app_dir = Path::new("/tmp/Luban.app");
-        let archive_path = Path::new("/tmp/Luban_0.1.2_darwin-aarch64.app.tar.gz");
+        let archive_path = Path::new("/tmp/Luban_0.1.3_darwin-aarch64.app.tar.gz");
         let spec = build_archive_spec(app_dir, archive_path, true).expect("must build spec");
         assert_eq!(spec.program, "bsdtar");
         assert!(spec.args.iter().any(|arg| arg == "--no-xattrs"));

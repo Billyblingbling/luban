@@ -53,7 +53,7 @@ function getSystemInfo(): SystemInfo {
       : "Web"
   const os = typeof navigator !== "undefined" ? `${navigator.platform} (${navigator.userAgent})` : "Unknown"
   return {
-    version: "0.1.2",
+    version: "0.1.3",
     os,
     runtime,
   }
