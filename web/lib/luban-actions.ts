@@ -3,6 +3,7 @@
 import type {
   AgentRunConfigSnapshot,
   AgentRunnerKind,
+  AmpConfigEntrySnapshot,
   AppearanceFontsSnapshot,
   AppearanceTheme,
   AttachmentRef,
@@ -52,6 +53,11 @@ export type LubanActions = {
   listCodexConfigDir: (path: string) => Promise<{ path: string; entries: CodexConfigEntrySnapshot[] }>
   readCodexConfigFile: (path: string) => Promise<string>
   writeCodexConfigFile: (path: string, contents: string) => Promise<void>
+  checkAmp: () => Promise<{ ok: boolean; message: string | null }>
+  getAmpConfigTree: () => Promise<AmpConfigEntrySnapshot[]>
+  listAmpConfigDir: (path: string) => Promise<{ path: string; entries: AmpConfigEntrySnapshot[] }>
+  readAmpConfigFile: (path: string) => Promise<string>
+  writeAmpConfigFile: (path: string, contents: string) => Promise<void>
 
   previewTask: (input: string) => Promise<TaskDraft>
   executeTask: (draft: TaskDraft, mode: TaskExecuteMode) => Promise<TaskExecuteResult>
@@ -262,6 +268,29 @@ export function createLubanActions(args: {
 
   async function writeCodexConfigFile(path: string, contents: string): Promise<void> {
     await args.request<null>({ type: "codex_config_write_file", path, contents })
+  }
+
+  function checkAmp(): Promise<{ ok: boolean; message: string | null }> {
+    return args.request<{ ok: boolean; message: string | null }>({ type: "amp_check" })
+  }
+
+  function getAmpConfigTree(): Promise<AmpConfigEntrySnapshot[]> {
+    return args.request<AmpConfigEntrySnapshot[]>({ type: "amp_config_tree" })
+  }
+
+  function listAmpConfigDir(path: string): Promise<{ path: string; entries: AmpConfigEntrySnapshot[] }> {
+    return args.request<{ path: string; entries: AmpConfigEntrySnapshot[] }>({
+      type: "amp_config_list_dir",
+      path,
+    })
+  }
+
+  function readAmpConfigFile(path: string): Promise<string> {
+    return args.request<string>({ type: "amp_config_read_file", path })
+  }
+
+  async function writeAmpConfigFile(path: string, contents: string): Promise<void> {
+    await args.request<null>({ type: "amp_config_write_file", path, contents })
   }
 
   function previewTask(input: string): Promise<TaskDraft> {
@@ -681,6 +710,11 @@ export function createLubanActions(args: {
     listCodexConfigDir,
     readCodexConfigFile,
     writeCodexConfigFile,
+    checkAmp,
+    getAmpConfigTree,
+    listAmpConfigDir,
+    readAmpConfigFile,
+    writeAmpConfigFile,
     previewTask,
     executeTask,
     submitFeedback,

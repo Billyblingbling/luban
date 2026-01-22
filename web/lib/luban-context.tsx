@@ -6,6 +6,7 @@ import { createContext, useContext, useEffect, useRef } from "react"
 import { toast } from "sonner"
 
 import type {
+  AmpConfigEntrySnapshot,
   AppSnapshot,
   AppearanceFontsSnapshot,
   AppearanceTheme,
@@ -127,6 +128,11 @@ type LubanContextValue = {
   listCodexConfigDir: (path: string) => Promise<{ path: string; entries: CodexConfigEntrySnapshot[] }>
   readCodexConfigFile: (path: string) => Promise<string>
   writeCodexConfigFile: (path: string, contents: string) => Promise<void>
+  checkAmp: () => Promise<{ ok: boolean; message: string | null }>
+  getAmpConfigTree: () => Promise<AmpConfigEntrySnapshot[]>
+  listAmpConfigDir: (path: string) => Promise<{ path: string; entries: AmpConfigEntrySnapshot[] }>
+  readAmpConfigFile: (path: string) => Promise<string>
+  writeAmpConfigFile: (path: string, contents: string) => Promise<void>
 }
 
 const LubanContext = createContext<LubanContextValue | null>(null)
@@ -299,6 +305,11 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     listCodexConfigDir: actions.listCodexConfigDir,
     readCodexConfigFile: actions.readCodexConfigFile,
     writeCodexConfigFile: actions.writeCodexConfigFile,
+    checkAmp: actions.checkAmp,
+    getAmpConfigTree: actions.getAmpConfigTree,
+    listAmpConfigDir: actions.listAmpConfigDir,
+    readAmpConfigFile: actions.readAmpConfigFile,
+    writeAmpConfigFile: actions.writeAmpConfigFile,
   }
 
   return <LubanContext.Provider value={value}>{children}</LubanContext.Provider>

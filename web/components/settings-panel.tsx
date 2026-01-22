@@ -45,7 +45,13 @@ import { toast } from "sonner"
 import { useAppearance } from "@/components/appearance-provider"
 import { useLuban } from "@/lib/luban-context"
 import { cn } from "@/lib/utils"
-import type { AppearanceTheme, CodexConfigEntrySnapshot, SystemTaskKind, TaskIntentKind } from "@/lib/luban-api"
+import type {
+  AmpConfigEntrySnapshot,
+  AppearanceTheme,
+  CodexConfigEntrySnapshot,
+  SystemTaskKind,
+  TaskIntentKind,
+} from "@/lib/luban-api"
 import { addProjectAndOpen } from "@/lib/add-project-and-open"
 
 interface SettingsPanelProps {
@@ -174,7 +180,7 @@ function getHighlighter(): Promise<Highlighter> {
   if (!highlighterPromise) {
     highlighterPromise = createHighlighter({
       themes: ["github-light", "github-dark"],
-      langs: ["markdown", "toml"],
+      langs: ["markdown", "toml", "yaml", "json"],
     })
   }
   return highlighterPromise
@@ -978,7 +984,7 @@ type CodexSelectedFile = {
   name: string
 }
 
-function codexEntryIcon(entry: CodexConfigEntrySnapshot): { icon: ElementType; className: string } {
+function configEntryIcon(entry: { kind: "file" | "folder"; name: string }): { icon: ElementType; className: string } {
   if (entry.kind === "folder") {
     return { icon: Folder, className: "text-yellow-500" }
   }
@@ -1017,7 +1023,7 @@ function CodexConfigTree({
         const isLoading = isFolder && loadingDirs.has(entry.path)
         const children = isFolder ? childrenForPath(entry.path) : []
         const isSelected = selectedPath === entry.path
-        const { icon: Icon, className } = codexEntryIcon(entry)
+        const { icon: Icon, className } = configEntryIcon(entry)
 
         return (
           <div key={entry.path}>
@@ -1072,6 +1078,101 @@ function CodexConfigTree({
               </div>
             )}
 
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+type AmpSelectedFile = {
+  path: string
+  name: string
+}
+
+function AmpConfigTree({
+  entries,
+  level = 0,
+  selectedPath,
+  expandedFolders,
+  loadingDirs,
+  childrenForPath,
+  onSelectFile,
+  onToggleFolder,
+}: {
+  entries: AmpConfigEntrySnapshot[]
+  level?: number
+  selectedPath: string | null
+  expandedFolders: Set<string>
+  loadingDirs: Set<string>
+  childrenForPath: (path: string) => AmpConfigEntrySnapshot[]
+  onSelectFile: (file: AmpSelectedFile) => void
+  onToggleFolder: (path: string) => void
+}) {
+  return (
+    <div className="space-y-0.5">
+      {entries.map((entry) => {
+        const isFolder = entry.kind === "folder"
+        const isExpanded = isFolder && expandedFolders.has(entry.path)
+        const isLoading = isFolder && loadingDirs.has(entry.path)
+        const children = isFolder ? childrenForPath(entry.path) : []
+        const isSelected = selectedPath === entry.path
+        const { icon: Icon, className } = configEntryIcon(entry)
+
+        return (
+          <div key={entry.path}>
+            <button
+              onClick={() => {
+                if (isFolder) {
+                  onToggleFolder(entry.path)
+                } else {
+                  onSelectFile({ path: entry.path, name: entry.name })
+                }
+              }}
+              className={cn(
+                "w-full flex items-center gap-1.5 px-2 py-1 rounded text-left transition-colors text-xs",
+                isSelected
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:text-foreground hover:bg-accent",
+              )}
+              style={{ paddingLeft: `${8 + level * 12}px` }}
+            >
+              {isFolder ? (
+                <ChevronRight
+                  className={cn(
+                    "w-3 h-3 text-muted-foreground transition-transform flex-shrink-0",
+                    isExpanded && "rotate-90",
+                  )}
+                />
+              ) : (
+                <div className="w-3" />
+              )}
+              <Icon className={cn("w-3.5 h-3.5 flex-shrink-0", className)} />
+              <span className="truncate">{entry.name}</span>
+            </button>
+
+            {isFolder && isExpanded && (
+              <AmpConfigTree
+                entries={children}
+                level={level + 1}
+                selectedPath={selectedPath}
+                expandedFolders={expandedFolders}
+                loadingDirs={loadingDirs}
+                childrenForPath={childrenForPath}
+                onSelectFile={onSelectFile}
+                onToggleFolder={onToggleFolder}
+              />
+            )}
+
+            {isFolder && isExpanded && isLoading && children.length === 0 && (
+              <div
+                className="w-full flex items-center gap-1.5 px-2 py-1 rounded text-left text-xs text-muted-foreground"
+                style={{ paddingLeft: `${8 + (level + 1) * 12}px` }}
+              >
+                <Loader2 className="w-3 h-3 animate-spin" />
+                <span>Loading…</span>
+              </div>
+            )}
           </div>
         )
       })}
@@ -1213,6 +1314,8 @@ function CodexSettings({
   const getFileLanguage = (fileName: string): string => {
     if (fileName.endsWith(".md")) return "markdown"
     if (fileName.endsWith(".toml")) return "toml"
+    if (fileName.endsWith(".yaml") || fileName.endsWith(".yml")) return "yaml"
+    if (fileName.endsWith(".json")) return "json"
     return "markdown"
   }
 
@@ -1283,7 +1386,7 @@ function CodexSettings({
 
   const currentContent = selectedFile ? (fileContents[selectedFile.path] ?? "") : ""
   const selectedFileIcon = selectedFile
-    ? codexEntryIcon({ kind: "file", path: selectedFile.path, name: selectedFile.name, children: [] })
+    ? configEntryIcon({ kind: "file", name: selectedFile.name })
     : null
 
   return (
@@ -1426,6 +1529,358 @@ function CodexSettings({
                   <textarea
                     ref={editorRef}
                     data-testid="settings-codex-editor"
+                    value={currentContent}
+                    onChange={(e) => handleContentChange(e.target.value)}
+                    onScroll={handleEditorScroll}
+                    className="absolute inset-0 p-4 bg-transparent text-sm font-mono text-transparent caret-foreground leading-relaxed resize-none focus:outline-none"
+                    spellCheck={false}
+                  />
+                </>
+              ) : (
+                <div className="flex-1 h-full flex items-center justify-center text-muted-foreground">
+                  <div className="text-center">
+                    <FileText className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                    <p className="text-xs">Select a file to edit</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function AmpSettings({
+  initialSelectedFilePath,
+  autoFocusEditor = false,
+}: {
+  initialSelectedFilePath?: string | null
+  autoFocusEditor?: boolean
+}) {
+  const { checkAmp, listAmpConfigDir, readAmpConfigFile, writeAmpConfigFile } = useLuban()
+  const [enabled, setEnabled] = useState(true)
+  const [checkStatus, setCheckStatus] = useState<CheckStatus>("idle")
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle")
+  const [selectedFile, setSelectedFile] = useState<AmpSelectedFile | null>(null)
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set())
+  const [dirEntries, setDirEntries] = useState<Record<string, AmpConfigEntrySnapshot[]>>({})
+  const [loadingDirs, setLoadingDirs] = useState<Set<string>>(() => new Set())
+  const [fileContents, setFileContents] = useState<Record<string, string>>({})
+  const saveTimeoutRef = useRef<number | null>(null)
+  const saveIdleTimeoutRef = useRef<number | null>(null)
+  const initialSelectionRef = useRef<string | null>(null)
+  const editorRef = useRef<HTMLTextAreaElement>(null)
+  const highlightRef = useRef<HTMLDivElement>(null)
+  const highlighter = useShikiHighlighter()
+
+  const loadDir = useCallback(
+    async (path: string): Promise<AmpConfigEntrySnapshot[]> => {
+      setLoadingDirs((prev) => {
+        const next = new Set(prev)
+        next.add(path)
+        return next
+      })
+      try {
+        const res = await listAmpConfigDir(path)
+        setDirEntries((prev) => {
+          return { ...prev, [path]: res.entries }
+        })
+        return res.entries
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : String(err))
+        return []
+      } finally {
+        setLoadingDirs((prev) => {
+          const next = new Set(prev)
+          next.delete(path)
+          return next
+        })
+      }
+    },
+    [listAmpConfigDir],
+  )
+
+  useEffect(() => {
+    if (!enabled) return
+    void loadDir("")
+  }, [enabled, loadDir])
+
+  const handleSelectFile = useCallback(
+    async (file: AmpSelectedFile) => {
+      setSelectedFile(file)
+      if (fileContents[file.path] != null) return
+      try {
+        const contents = await readAmpConfigFile(file.path)
+        setFileContents((prev) => ({ ...prev, [file.path]: contents }))
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : String(err))
+      }
+    },
+    [fileContents, readAmpConfigFile],
+  )
+
+  useEffect(() => {
+    if (!enabled) return
+    const target = initialSelectedFilePath?.trim()
+    if (!target) return
+    if (selectedFile?.path === target) return
+    if (initialSelectionRef.current === target) return
+    if (!dirEntries[""]) return
+
+    initialSelectionRef.current = target
+    void (async () => {
+      const segments = target.split("/").filter(Boolean)
+      let parent = ""
+
+      for (const segment of segments.slice(0, -1)) {
+        parent = parent ? `${parent}/${segment}` : segment
+        setExpandedFolders((prev) => {
+          const next = new Set(prev)
+          next.add(parent)
+          return next
+        })
+        if (!dirEntries[parent] && !loadingDirs.has(parent)) {
+          await loadDir(parent)
+        }
+      }
+
+      const container = parent || ""
+      const entries = dirEntries[container] ?? []
+      const entry = entries.find((e) => e.kind === "file" && e.path === target)
+
+      if (entry) {
+        await handleSelectFile({ path: entry.path, name: entry.name })
+      }
+    })()
+  }, [dirEntries, enabled, handleSelectFile, initialSelectedFilePath, loadDir, loadingDirs, selectedFile?.path])
+
+  useEffect(() => {
+    if (!autoFocusEditor) return
+    const target = initialSelectionRef.current
+    if (!target) return
+    if (!selectedFile || selectedFile.path !== target) return
+    if (fileContents[selectedFile.path] == null) return
+    editorRef.current?.focus()
+  }, [autoFocusEditor, fileContents, selectedFile])
+
+  useEffect(() => {
+    return () => {
+      if (saveTimeoutRef.current != null) window.clearTimeout(saveTimeoutRef.current)
+      if (saveIdleTimeoutRef.current != null) window.clearTimeout(saveIdleTimeoutRef.current)
+    }
+  }, [])
+
+  const handleEditorScroll = () => {
+    if (!editorRef.current || !highlightRef.current) return
+    highlightRef.current.scrollTop = editorRef.current.scrollTop
+    highlightRef.current.scrollLeft = editorRef.current.scrollLeft
+  }
+
+  const getFileLanguage = (fileName: string): string => {
+    if (fileName.endsWith(".md")) return "markdown"
+    if (fileName.endsWith(".toml")) return "toml"
+    if (fileName.endsWith(".yaml") || fileName.endsWith(".yml")) return "yaml"
+    if (fileName.endsWith(".json")) return "json"
+    return "markdown"
+  }
+
+  const handleCheck = async (e: MouseEvent) => {
+    e.stopPropagation()
+    setCheckStatus("checking")
+    try {
+      const res = await checkAmp()
+      setCheckStatus(res.ok ? "success" : "error")
+      if (res.message) toast(res.message)
+    } catch (err) {
+      setCheckStatus("error")
+      toast.error(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  const handleToggleEnabled = (e: MouseEvent) => {
+    e.stopPropagation()
+    const next = !enabled
+    setEnabled(next)
+  }
+
+  const handleEditInLuban = (e: MouseEvent) => {
+    e.stopPropagation()
+    addProjectAndOpen("~/.config/amp")
+  }
+
+  const handleToggleFolder = (path: string) => {
+    const willExpand = !expandedFolders.has(path)
+    setExpandedFolders((prev) => {
+      const next = new Set(prev)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      return next
+    })
+
+    if (willExpand && !dirEntries[path] && !loadingDirs.has(path)) {
+      void loadDir(path)
+    }
+  }
+
+  const handleContentChange = (content: string) => {
+    if (!selectedFile) return
+
+    setFileContents((prev) => ({ ...prev, [selectedFile.path]: content }))
+    setSaveStatus("unsaved")
+
+    if (saveTimeoutRef.current != null) window.clearTimeout(saveTimeoutRef.current)
+    if (saveIdleTimeoutRef.current != null) window.clearTimeout(saveIdleTimeoutRef.current)
+
+    saveTimeoutRef.current = window.setTimeout(() => {
+      setSaveStatus("saving")
+      const path = selectedFile.path
+      void writeAmpConfigFile(path, content)
+        .then(() => {
+          setSaveStatus("saved")
+          saveIdleTimeoutRef.current = window.setTimeout(() => {
+            setSaveStatus("idle")
+          }, 1500)
+        })
+        .catch((err) => {
+          setSaveStatus("unsaved")
+          toast.error(err instanceof Error ? err.message : String(err))
+        })
+    }, 800)
+  }
+
+  const currentContent = selectedFile ? (fileContents[selectedFile.path] ?? "") : ""
+  const selectedFileIcon = selectedFile ? configEntryIcon({ kind: "file", name: selectedFile.name }) : null
+
+  return (
+    <div className={cn("rounded-xl border border-border bg-card overflow-hidden shadow-sm", !enabled && "w-44")}>
+      <div className={cn("flex", enabled ? "h-[320px]" : "h-11")}>
+        <div className={cn("w-44 flex flex-col bg-sidebar", enabled && "border-r border-border", !enabled && "opacity-60")}>
+          <div className={cn("flex items-center justify-between h-11 px-3", enabled && "border-b border-border")}>
+            <div className="flex items-center gap-2">
+              <Sparkle className="w-4 h-4 text-primary" />
+              <span className="text-sm font-medium">Amp</span>
+            </div>
+            <button
+              data-testid="settings-amp-toggle"
+              onClick={handleToggleEnabled}
+              className={cn("relative w-9 h-5 rounded-full transition-colors", enabled ? "bg-primary" : "bg-muted")}
+              title={enabled ? "Collapse Amp settings" : "Expand Amp settings"}
+            >
+              <div
+                className={cn(
+                  "absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform",
+                  enabled ? "translate-x-4" : "translate-x-0.5",
+                )}
+              />
+            </button>
+          </div>
+
+          {enabled && (
+            <div className="flex-1 overflow-y-auto py-1.5">
+              {(dirEntries[""] ?? []).length === 0 ? (
+                <div className="px-2 py-1.5 text-xs text-muted-foreground">No config found.</div>
+              ) : (
+                <AmpConfigTree
+                  entries={dirEntries[""] ?? []}
+                  selectedPath={selectedFile?.path ?? null}
+                  expandedFolders={expandedFolders}
+                  loadingDirs={loadingDirs}
+                  childrenForPath={(path) => dirEntries[path] ?? []}
+                  onSelectFile={handleSelectFile}
+                  onToggleFolder={handleToggleFolder}
+                />
+              )}
+            </div>
+          )}
+        </div>
+
+        {enabled && (
+          <div className="flex-1 flex flex-col min-w-0 bg-background">
+            <div className="flex items-center justify-between h-11 px-3 border-b border-border">
+              <div className="flex items-center gap-2">
+                {selectedFile && selectedFileIcon ? (
+                  <>
+                    <selectedFileIcon.icon className={cn("w-4 h-4", selectedFileIcon.className)} />
+                    <span className="text-sm font-medium">{selectedFile.name}</span>
+                  </>
+                ) : (
+                  <span className="text-sm text-muted-foreground">Select a file</span>
+                )}
+                {saveStatus !== "idle" && (
+                  <span
+                    className={cn(
+                      "flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px]",
+                      saveStatus === "saved"
+                        ? "bg-green-500/10 text-green-600 dark:text-green-400"
+                        : "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+                    )}
+                  >
+                    {saveStatus === "saving" && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
+                    {saveStatus === "saved" && <CheckCircle2 className="w-2.5 h-2.5" />}
+                    {saveStatus === "saving" ? "Saving..." : saveStatus === "unsaved" ? "Unsaved" : "Saved"}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  data-testid="settings-amp-check"
+                  onClick={handleCheck}
+                  disabled={checkStatus === "checking"}
+                  className={cn(
+                    "flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-all",
+                    checkStatus === "checking"
+                      ? "text-muted-foreground cursor-not-allowed"
+                      : "text-muted-foreground hover:text-foreground hover:bg-accent",
+                  )}
+                >
+                  {checkStatus === "checking" ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      Checking...
+                    </>
+                  ) : checkStatus === "success" ? (
+                    <>
+                      <CheckCircle2 className="w-3.5 h-3.5 text-green-600 dark:text-green-400" />
+                      Connected
+                    </>
+                  ) : checkStatus === "error" ? (
+                    <>
+                      <XCircle className="w-3.5 h-3.5 text-red-600 dark:text-red-400" />
+                      Failed
+                    </>
+                  ) : (
+                    <>
+                      <Play className="w-3.5 h-3.5" />
+                      Check
+                    </>
+                  )}
+                </button>
+                <button
+                  data-testid="settings-amp-edit-in-luban"
+                  onClick={handleEditInLuban}
+                  className="flex items-center gap-1.5 px-2 py-1 rounded text-xs bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                  Edit in Luban
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 relative overflow-hidden">
+              {selectedFile ? (
+                <>
+                  <div
+                    ref={highlightRef}
+                    className="absolute inset-0 p-4 text-sm font-mono leading-relaxed whitespace-pre-wrap break-words overflow-hidden pointer-events-none"
+                    aria-hidden="true"
+                  >
+                    <MarkdownHighlight text={currentContent} highlighter={highlighter} lang={getFileLanguage(selectedFile.name)} />
+                  </div>
+                  <textarea
+                    ref={editorRef}
+                    data-testid="settings-amp-editor"
                     value={currentContent}
                     onChange={(e) => handleContentChange(e.target.value)}
                     onScroll={handleEditorScroll}
@@ -1627,6 +2082,10 @@ function AllSettings({
           <CodexSettings
             initialSelectedFilePath={initialAgentId === "codex" ? initialAgentFilePath : null}
             autoFocusEditor={initialAgentId === "codex" && initialAgentFilePath != null}
+          />
+          <AmpSettings
+            initialSelectedFilePath={initialAgentId === "amp" ? initialAgentFilePath : null}
+            autoFocusEditor={initialAgentId === "amp" && initialAgentFilePath != null}
           />
         </div>
       </section>

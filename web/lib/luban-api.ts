@@ -289,6 +289,15 @@ export type CodexConfigEntrySnapshot = {
   children: CodexConfigEntrySnapshot[]
 }
 
+export type AmpConfigEntryKind = "file" | "folder"
+
+export type AmpConfigEntrySnapshot = {
+  path: string
+  name: string
+  kind: AmpConfigEntryKind
+  children: AmpConfigEntrySnapshot[]
+}
+
 export type AgentItemKind =
   | "agent_message"
   | "reasoning"
@@ -404,6 +413,11 @@ export type ClientAction =
   | { type: "codex_config_list_dir"; path: string }
   | { type: "codex_config_read_file"; path: string }
   | { type: "codex_config_write_file"; path: string; contents: string }
+  | { type: "amp_check" }
+  | { type: "amp_config_tree" }
+  | { type: "amp_config_list_dir"; path: string }
+  | { type: "amp_config_read_file"; path: string }
+  | { type: "amp_config_write_file"; path: string; contents: string }
 
 export type ServerEvent =
   | { type: "app_changed"; rev: number; snapshot: AppSnapshot }
@@ -425,6 +439,11 @@ export type ServerEvent =
     }
   | { type: "codex_config_file_ready"; request_id: string; path: string; contents: string }
   | { type: "codex_config_file_saved"; request_id: string; path: string }
+  | { type: "amp_check_ready"; request_id: string; ok: boolean; message: string | null }
+  | { type: "amp_config_tree_ready"; request_id: string; tree: AmpConfigEntrySnapshot[] }
+  | { type: "amp_config_list_dir_ready"; request_id: string; path: string; entries: AmpConfigEntrySnapshot[] }
+  | { type: "amp_config_file_ready"; request_id: string; path: string; contents: string }
+  | { type: "amp_config_file_saved"; request_id: string; path: string }
 
 export type WsClientMessage =
   | { type: "hello"; protocol_version: number; last_seen_rev: number | null }

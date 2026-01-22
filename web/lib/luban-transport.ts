@@ -111,7 +111,12 @@ export function useLubanTransport(args: {
           event.type === "codex_config_tree_ready" ||
           event.type === "codex_config_list_dir_ready" ||
           event.type === "codex_config_file_ready" ||
-          event.type === "codex_config_file_saved"
+          event.type === "codex_config_file_saved" ||
+          event.type === "amp_check_ready" ||
+          event.type === "amp_config_tree_ready" ||
+          event.type === "amp_config_list_dir_ready" ||
+          event.type === "amp_config_file_ready" ||
+          event.type === "amp_config_file_saved"
         ) {
           const pending = pendingResponsesRef.current.get(event.request_id)
           if (pending) {
@@ -128,6 +133,11 @@ export function useLubanTransport(args: {
               pending.resolve({ path: event.path, entries: event.entries })
             if (event.type === "codex_config_file_ready") pending.resolve(event.contents)
             if (event.type === "codex_config_file_saved") pending.resolve(null)
+            if (event.type === "amp_check_ready") pending.resolve({ ok: event.ok, message: event.message })
+            if (event.type === "amp_config_tree_ready") pending.resolve(event.tree)
+            if (event.type === "amp_config_list_dir_ready") pending.resolve({ path: event.path, entries: event.entries })
+            if (event.type === "amp_config_file_ready") pending.resolve(event.contents)
+            if (event.type === "amp_config_file_saved") pending.resolve(null)
           }
           return
         }
