@@ -71,6 +71,10 @@ Implemented:
 - `crates/luban_backend/src/services.rs`: Amp config root resolution and file operations (`amp_check`, `amp_config_*`).
 - `crates/luban_api/src/lib.rs`: Amp config protocol (`AmpConfigEntrySnapshot` and request/ready events).
 - `crates/luban_server/src/engine.rs`: Amp config action routing over WebSocket.
+- `web/components/settings-panel.tsx`: Amp config editor UI (check, browse tree, read/write).
+- `web/lib/luban-api.ts`: Amp config request/response types for the UI.
+- `web/lib/luban-actions.ts`: Amp config request helpers.
+- `web/lib/luban-transport.ts`: Amp config ready event routing for request responses.
 
 Environment variables (overrides):
 
@@ -101,8 +105,12 @@ Manual smoke steps:
 3. In Settings -> Agent:
    - set Default Runner to Amp
    - optionally set Amp Mode
-4. Send a message in a workspace thread.
-5. Confirm:
+4. In Settings -> Agent:
+   - expand Amp settings
+   - click "Check" to validate `amp --version`
+   - open and edit a config file, confirm it is saved
+5. Send a message in a workspace thread.
+6. Confirm:
    - activities appear as tool calls / reasoning
    - a final assistant message is recorded
 
@@ -122,3 +130,4 @@ Manual smoke steps:
 - 2026-01-22: Enabled Amp image attachments by prompt `@path` injection.
 - 2026-01-22: Forwarded all attachment kinds to Codex and Amp via context blob paths.
 - 2026-01-22: Added Amp config APIs mirroring the Codex config module.
+- 2026-01-22: Added Amp config settings UI mirroring the Codex config editor.
