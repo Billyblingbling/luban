@@ -1559,10 +1559,11 @@ function AmpSettings({
   initialSelectedFilePath?: string | null
   autoFocusEditor?: boolean
 }) {
-  const { checkAmp, listAmpConfigDir, readAmpConfigFile, writeAmpConfigFile } = useLuban()
+  const { app, checkAmp, listAmpConfigDir, readAmpConfigFile, setAgentAmpMode, writeAmpConfigFile } = useLuban()
   const [enabled, setEnabled] = useState(true)
   const [checkStatus, setCheckStatus] = useState<CheckStatus>("idle")
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle")
+  const [ampModeDraft, setAmpModeDraft] = useState("smart")
   const [selectedFile, setSelectedFile] = useState<AmpSelectedFile | null>(null)
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set())
   const [dirEntries, setDirEntries] = useState<Record<string, AmpConfigEntrySnapshot[]>>({})
@@ -1574,6 +1575,10 @@ function AmpSettings({
   const editorRef = useRef<HTMLTextAreaElement>(null)
   const highlightRef = useRef<HTMLDivElement>(null)
   const highlighter = useShikiHighlighter()
+
+  useEffect(() => {
+    setAmpModeDraft(app?.agent?.amp_mode ?? "smart")
+  }, [app?.agent?.amp_mode])
 
   const loadDir = useCallback(
     async (path: string): Promise<AmpConfigEntrySnapshot[]> => {
@@ -1753,9 +1758,9 @@ function AmpSettings({
   const currentContent = selectedFile ? (fileContents[selectedFile.path] ?? "") : ""
   const selectedFileIcon = selectedFile ? configEntryIcon({ kind: "file", name: selectedFile.name }) : null
 
-  return (
-    <div className={cn("rounded-xl border border-border bg-card overflow-hidden shadow-sm", !enabled && "w-44")}>
-      <div className={cn("flex", enabled ? "h-[320px]" : "h-11")}>
+	  return (
+	    <div className={cn("rounded-xl border border-border bg-card overflow-hidden shadow-sm", !enabled && "w-44")}>
+	      <div className={cn("flex", enabled ? "h-[320px]" : "h-11")}>
         <div className={cn("w-44 flex flex-col bg-sidebar", enabled && "border-r border-border", !enabled && "opacity-60")}>
           <div className={cn("flex items-center justify-between h-11 px-3", enabled && "border-b border-border")}>
             <div className="flex items-center gap-2">
@@ -1796,10 +1801,10 @@ function AmpSettings({
           )}
         </div>
 
-        {enabled && (
-          <div className="flex-1 flex flex-col min-w-0 bg-background">
-            <div className="flex items-center justify-between h-11 px-3 border-b border-border">
-              <div className="flex items-center gap-2">
+	        {enabled && (
+	          <div className="flex-1 flex flex-col min-w-0 bg-background">
+	            <div className="flex items-center justify-between h-11 px-3 border-b border-border">
+	              <div className="flex items-center gap-2">
                 {selectedFile && selectedFileIcon ? (
                   <>
                     <selectedFileIcon.icon className={cn("w-4 h-4", selectedFileIcon.className)} />
@@ -1821,13 +1826,37 @@ function AmpSettings({
                     {saveStatus === "saved" && <CheckCircle2 className="w-2.5 h-2.5" />}
                     {saveStatus === "saving" ? "Saving..." : saveStatus === "unsaved" ? "Unsaved" : "Saved"}
                   </span>
-                )}
-              </div>
-              <div className="flex items-center gap-1">
-                <button
-                  data-testid="settings-amp-check"
-                  onClick={handleCheck}
-                  disabled={checkStatus === "checking"}
+	                )}
+	              </div>
+	              <div className="flex items-center gap-2">
+	                <div className="flex items-center gap-1">
+	                  <span className="text-xs text-muted-foreground">Mode</span>
+	                  <input
+	                    data-testid="settings-agent-amp-mode"
+	                    type="text"
+	                    value={ampModeDraft}
+	                    maxLength={32}
+	                    onChange={(e) => setAmpModeDraft(e.target.value)}
+	                    onBlur={() => setAgentAmpMode(ampModeDraft)}
+	                    onKeyDown={(e) => {
+	                      if (e.key !== "Enter") return
+	                      e.preventDefault()
+	                      setAgentAmpMode(ampModeDraft)
+	                      e.currentTarget.blur()
+	                    }}
+	                    className={cn(
+	                      "w-28 h-7 px-2 rounded-md border border-border bg-background text-xs",
+	                      "focus:outline-none focus:ring-2 focus:ring-primary/40",
+	                    )}
+	                    placeholder="smart"
+	                  />
+	                </div>
+	
+	                <div className="flex items-center gap-1">
+	                <button
+	                  data-testid="settings-amp-check"
+	                  onClick={handleCheck}
+	                  disabled={checkStatus === "checking"}
                   className={cn(
                     "flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-all",
                     checkStatus === "checking"
@@ -1856,17 +1885,18 @@ function AmpSettings({
                       Check
                     </>
                   )}
-                </button>
-                <button
-                  data-testid="settings-amp-edit-in-luban"
-                  onClick={handleEditInLuban}
-                  className="flex items-center gap-1.5 px-2 py-1 rounded text-xs bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
-                >
-                  <Pencil className="w-3.5 h-3.5" />
-                  Edit in Luban
-                </button>
-              </div>
-            </div>
+	                </button>
+	                <button
+	                  data-testid="settings-amp-edit-in-luban"
+	                  onClick={handleEditInLuban}
+	                  className="flex items-center gap-1.5 px-2 py-1 rounded text-xs bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+	                >
+	                  <Pencil className="w-3.5 h-3.5" />
+	                  Edit in Luban
+	                </button>
+	                </div>
+	              </div>
+	            </div>
 
             <div className="flex-1 relative overflow-hidden">
               {selectedFile ? (
@@ -1905,15 +1935,8 @@ function AmpSettings({
 }
 
 function AgentRunnerSettings() {
-  const { app, setAgentRunner, setAgentAmpMode } = useLuban()
+  const { app, setAgentRunner } = useLuban()
   const runner = app?.agent?.default_runner ?? "codex"
-  const [ampModeDraft, setAmpModeDraft] = useState("smart")
-
-  useEffect(() => {
-    setAmpModeDraft(app?.agent?.amp_mode ?? "smart")
-  }, [app?.rev])
-
-  const isAmp = runner === "amp"
 
   return (
     <div className="rounded-lg border border-border bg-secondary/20 p-4 space-y-4">
@@ -1945,39 +1968,6 @@ function AgentRunnerSettings() {
           </button>
         </div>
       </div>
-
-      <div className={cn("flex items-start justify-between gap-4", !isAmp && "opacity-60")}>
-        <div className="space-y-1">
-          <div className="text-sm font-medium">Amp Mode</div>
-          <div className="text-xs text-muted-foreground">Example values: smart, rush.</div>
-        </div>
-        <input
-          data-testid="settings-agent-amp-mode"
-          type="text"
-          value={ampModeDraft}
-          maxLength={32}
-          disabled={!isAmp}
-          onChange={(e) => setAmpModeDraft(e.target.value)}
-          onBlur={() => setAgentAmpMode(ampModeDraft)}
-          onKeyDown={(e) => {
-            if (e.key !== "Enter") return
-            e.preventDefault()
-            setAgentAmpMode(ampModeDraft)
-            e.currentTarget.blur()
-          }}
-          className={cn(
-            "w-44 h-9 px-2.5 rounded-md border border-border bg-background text-sm",
-            "focus:outline-none focus:ring-2 focus:ring-primary/40",
-          )}
-        />
-      </div>
-
-      {isAmp && (
-        <div className="flex items-start gap-2 text-xs text-muted-foreground">
-          <AlertTriangle className="w-4 h-4 mt-0.5 text-amber-500" />
-          <div>Amp does not support image attachments yet.</div>
-        </div>
-      )}
     </div>
   )
 }
