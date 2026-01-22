@@ -2318,9 +2318,6 @@ impl ProjectWorkspaceService for GitWorkspaceService {
             let mut out = Vec::new();
             for entry in entries {
                 let file_type = entry.file_type().context("failed to stat entry")?;
-                if file_type.is_symlink() {
-                    continue;
-                }
 
                 let name = entry.file_name().to_string_lossy().to_string();
                 if name.is_empty() {
@@ -2330,14 +2327,23 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                 let rel_child = std::path::Path::new("").join(&name);
                 let path = rel_to_string(&rel_child);
 
-                if file_type.is_dir() {
+                let (is_dir, is_file) = if file_type.is_symlink() {
+                    match std::fs::metadata(entry.path()) {
+                        Ok(meta) => (meta.is_dir(), meta.is_file()),
+                        Err(_) => (false, true),
+                    }
+                } else {
+                    (file_type.is_dir(), file_type.is_file())
+                };
+
+                if is_dir {
                     out.push(CodexConfigEntry {
                         path,
                         name,
                         kind: CodexConfigEntryKind::Folder,
                         children: Vec::new(),
                     });
-                } else if file_type.is_file() {
+                } else if is_file {
                     out.push(CodexConfigEntry {
                         path,
                         name,
@@ -2411,31 +2417,35 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                 };
 
                 let file_type = entry.file_type().context("failed to stat entry")?;
-                if file_type.is_symlink() {
-                    continue;
-                }
-
                 let name = entry.file_name().to_string_lossy().to_string();
                 if name.is_empty() {
                     continue;
                 }
 
-                let is_visible = file_type.is_dir() || file_type.is_file();
-                if !is_visible {
+                let (is_dir, is_file) = if file_type.is_symlink() {
+                    match std::fs::metadata(entry.path()) {
+                        Ok(meta) => (meta.is_dir(), meta.is_file()),
+                        Err(_) => (false, true),
+                    }
+                } else {
+                    (file_type.is_dir(), file_type.is_file())
+                };
+
+                if !(is_dir || is_file) {
                     continue;
                 }
 
                 let rel_child = rel_path.join(&name);
                 let child_path = rel_to_string(&rel_child);
 
-                if file_type.is_dir() {
+                if is_dir {
                     out.push(CodexConfigEntry {
                         path: child_path,
                         name,
                         kind: CodexConfigEntryKind::Folder,
                         children: Vec::new(),
                     });
-                } else if file_type.is_file() {
+                } else if is_file {
                     out.push(CodexConfigEntry {
                         path: child_path,
                         name,
@@ -2601,9 +2611,6 @@ impl ProjectWorkspaceService for GitWorkspaceService {
             let mut out = Vec::new();
             for entry in entries {
                 let file_type = entry.file_type().context("failed to stat entry")?;
-                if file_type.is_symlink() {
-                    continue;
-                }
 
                 let name = entry.file_name().to_string_lossy().to_string();
                 if name.is_empty() {
@@ -2613,14 +2620,23 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                 let rel_child = std::path::Path::new("").join(&name);
                 let path = rel_to_string(&rel_child);
 
-                if file_type.is_dir() {
+                let (is_dir, is_file) = if file_type.is_symlink() {
+                    match std::fs::metadata(entry.path()) {
+                        Ok(meta) => (meta.is_dir(), meta.is_file()),
+                        Err(_) => (false, true),
+                    }
+                } else {
+                    (file_type.is_dir(), file_type.is_file())
+                };
+
+                if is_dir {
                     out.push(luban_domain::AmpConfigEntry {
                         path,
                         name,
                         kind: luban_domain::AmpConfigEntryKind::Folder,
                         children: Vec::new(),
                     });
-                } else if file_type.is_file() {
+                } else if is_file {
                     out.push(luban_domain::AmpConfigEntry {
                         path,
                         name,
@@ -2699,31 +2715,35 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                 };
 
                 let file_type = entry.file_type().context("failed to stat entry")?;
-                if file_type.is_symlink() {
-                    continue;
-                }
-
                 let name = entry.file_name().to_string_lossy().to_string();
                 if name.is_empty() {
                     continue;
                 }
 
-                let is_visible = file_type.is_dir() || file_type.is_file();
-                if !is_visible {
+                let (is_dir, is_file) = if file_type.is_symlink() {
+                    match std::fs::metadata(entry.path()) {
+                        Ok(meta) => (meta.is_dir(), meta.is_file()),
+                        Err(_) => (false, true),
+                    }
+                } else {
+                    (file_type.is_dir(), file_type.is_file())
+                };
+
+                if !(is_dir || is_file) {
                     continue;
                 }
 
                 let rel_child = rel_path.join(&name);
                 let child_path = rel_to_string(&rel_child);
 
-                if file_type.is_dir() {
+                if is_dir {
                     out.push(luban_domain::AmpConfigEntry {
                         path: child_path,
                         name,
                         kind: luban_domain::AmpConfigEntryKind::Folder,
                         children: Vec::new(),
                     });
-                } else if file_type.is_file() {
+                } else if is_file {
                     out.push(luban_domain::AmpConfigEntry {
                         path: child_path,
                         name,
@@ -3202,6 +3222,81 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
+    fn codex_config_tree_includes_symlink_files() {
+        use std::os::unix::fs::symlink;
+
+        let _guard = lock_env();
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be valid")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "luban-codex-config-symlink-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&root).expect("temp dir should be created");
+
+        std::fs::write(root.join("AGENTS-target.md"), "hello").expect("write target");
+        symlink("AGENTS-target.md", root.join("AGENTS.md")).expect("symlink should be created");
+
+        let prev = std::env::var_os(paths::LUBAN_CODEX_ROOT_ENV);
+        unsafe {
+            std::env::set_var(paths::LUBAN_CODEX_ROOT_ENV, &root);
+        }
+
+        let base_dir =
+            std::env::temp_dir().join(format!("luban-services-{}-{}", std::process::id(), unique));
+        std::fs::create_dir_all(&base_dir).expect("luban root should exist");
+        let sqlite =
+            SqliteStore::new(paths::sqlite_path(&base_dir)).expect("sqlite init should work");
+        let service = GitWorkspaceService {
+            worktrees_root: paths::worktrees_root(&base_dir),
+            conversations_root: paths::conversations_root(&base_dir),
+            task_prompts_root: paths::task_prompts_root(&base_dir),
+            sqlite,
+            codex_executable_cache: Arc::new(OnceLock::new()),
+        };
+
+        let tree = ProjectWorkspaceService::codex_config_tree(&service)
+            .expect("codex_config_tree should succeed");
+
+        let mut paths = Vec::new();
+        fn collect(out: &mut Vec<String>, entries: &[CodexConfigEntry]) {
+            for entry in entries {
+                out.push(entry.path.clone());
+                collect(out, &entry.children);
+            }
+        }
+        collect(&mut paths, &tree);
+        assert!(
+            paths.iter().any(|p| p == "AGENTS.md"),
+            "tree should include AGENTS.md symlink"
+        );
+
+        let contents =
+            ProjectWorkspaceService::codex_config_read_file(&service, "AGENTS.md".to_owned())
+                .expect("read should succeed");
+        assert_eq!(contents, "hello");
+
+        if let Some(value) = prev {
+            unsafe {
+                std::env::set_var(paths::LUBAN_CODEX_ROOT_ENV, value);
+            }
+        } else {
+            unsafe {
+                std::env::remove_var(paths::LUBAN_CODEX_ROOT_ENV);
+            }
+        }
+
+        drop(service);
+        let _ = std::fs::remove_dir_all(&base_dir);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn amp_config_tree_is_shallow_and_amp_config_list_dir_supports_root_listing() {
         let _guard = lock_env();
 
@@ -3308,6 +3403,81 @@ mod tests {
             paths.iter().any(|p| p == "cache"),
             "tree should include cache directory (shallow listing)"
         );
+
+        drop(service);
+        let _ = std::fs::remove_dir_all(&base_dir);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn amp_config_tree_includes_symlink_files() {
+        use std::os::unix::fs::symlink;
+
+        let _guard = lock_env();
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be valid")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "luban-amp-config-symlink-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&root).expect("temp dir should be created");
+
+        std::fs::write(root.join("config-target.yaml"), "model: amp\n").expect("write target");
+        symlink("config-target.yaml", root.join("config.yaml")).expect("symlink should be created");
+
+        let prev = std::env::var_os(paths::LUBAN_AMP_ROOT_ENV);
+        unsafe {
+            std::env::set_var(paths::LUBAN_AMP_ROOT_ENV, &root);
+        }
+
+        let base_dir =
+            std::env::temp_dir().join(format!("luban-services-{}-{}", std::process::id(), unique));
+        std::fs::create_dir_all(&base_dir).expect("luban root should exist");
+        let sqlite =
+            SqliteStore::new(paths::sqlite_path(&base_dir)).expect("sqlite init should work");
+        let service = GitWorkspaceService {
+            worktrees_root: paths::worktrees_root(&base_dir),
+            conversations_root: paths::conversations_root(&base_dir),
+            task_prompts_root: paths::task_prompts_root(&base_dir),
+            sqlite,
+            codex_executable_cache: Arc::new(OnceLock::new()),
+        };
+
+        let tree = ProjectWorkspaceService::amp_config_tree(&service)
+            .expect("amp_config_tree should succeed");
+
+        let mut paths = Vec::new();
+        fn collect(out: &mut Vec<String>, entries: &[luban_domain::AmpConfigEntry]) {
+            for entry in entries {
+                out.push(entry.path.clone());
+                collect(out, &entry.children);
+            }
+        }
+        collect(&mut paths, &tree);
+        assert!(
+            paths.iter().any(|p| p == "config.yaml"),
+            "tree should include config.yaml symlink"
+        );
+
+        let contents =
+            ProjectWorkspaceService::amp_config_read_file(&service, "config.yaml".to_owned())
+                .expect("read should succeed");
+        assert_eq!(contents, "model: amp\n");
+
+        if let Some(value) = prev {
+            unsafe {
+                std::env::set_var(paths::LUBAN_AMP_ROOT_ENV, value);
+            }
+        } else {
+            unsafe {
+                std::env::remove_var(paths::LUBAN_AMP_ROOT_ENV);
+            }
+        }
 
         drop(service);
         let _ = std::fs::remove_dir_all(&base_dir);

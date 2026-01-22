@@ -40,6 +40,21 @@ See `crates/luban_api`:
 
 - `web/lib/luban-transport.ts` `useLubanTransport()`
 
+## Config filesystem semantics
+
+The following actions expose a filesystem-backed config tree to the UI:
+
+- `CodexConfigTree`, `CodexConfigListDir`, `CodexConfigReadFile`, `CodexConfigWriteFile`
+- `AmpConfigTree`, `AmpConfigListDir`, `AmpConfigReadFile`, `AmpConfigWriteFile`
+
+Rules:
+
+- Entries may be `file` or `folder` (see `CodexConfigEntryKind` / `AmpConfigEntryKind`).
+- Symbolic links are included in listings. The entry kind is derived by following the link target:
+  - Symlink to a directory is reported as `folder`.
+  - Symlink to a regular file is reported as `file`.
+  - If the link target cannot be stat'ed, the entry is treated as `file` (and reads may fail).
+
 ## Action inventory (tracked)
 
 All `ClientAction` variants are part of this contract surface. For reviewability, new actions must
