@@ -25,6 +25,7 @@ export function ChatComposer({
   agentThinkingEffort,
   defaultModelId,
   defaultThinkingEffort,
+  defaultAmpMode,
   onOpenAgentSettings,
   onChangeModelId,
   onChangeThinkingEffort,
@@ -52,6 +53,7 @@ export function ChatComposer({
   agentThinkingEffort: ThinkingEffort | null | undefined
   defaultModelId: string | null
   defaultThinkingEffort: ThinkingEffort | null
+  defaultAmpMode: string | null
   onOpenAgentSettings: (agentId: string, agentFilePath?: string) => void
   onChangeModelId: (modelId: string) => void
   onChangeThinkingEffort: (effort: ThinkingEffort) => void
@@ -88,6 +90,7 @@ export function ChatComposer({
               thinkingEffort={agentThinkingEffort}
               defaultModelId={defaultModelId}
               defaultThinkingEffort={defaultThinkingEffort}
+              defaultAmpMode={defaultAmpMode}
               onOpenAgentSettings={onOpenAgentSettings}
               onChangeModelId={onChangeModelId}
               onChangeThinkingEffort={onChangeThinkingEffort}

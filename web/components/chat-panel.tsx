@@ -1233,6 +1233,7 @@ export function ChatPanel({
                   agentThinkingEffort={conversation?.thinking_effort}
                   defaultModelId={app?.agent.default_model_id ?? null}
                   defaultThinkingEffort={app?.agent.default_thinking_effort ?? null}
+                  defaultAmpMode={app?.agent.amp_mode ?? null}
                   defaultRunner={app?.agent.default_runner ?? null}
                   runnerOverride={runnerOverride}
                   ampModeOverride={ampModeOverride}

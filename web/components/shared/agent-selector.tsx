@@ -135,7 +135,7 @@ export function CodexAgentSelector({
                         <span className="pr-10">{m.label}</span>
                       </button>
                       {isDefault && (
-                        <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 px-1.5 py-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity bg-popover/95 rounded">
+                        <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 px-1.5 py-0.5 opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity bg-popover/95 rounded">
                           <span className="text-[10px] text-muted-foreground pointer-events-none select-none">
                             default
                           </span>
@@ -147,7 +147,7 @@ export function CodexAgentSelector({
                                 close()
                                 onOpenAgentSettings("codex", "config.toml")
                               }}
-                              className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                              className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors pointer-events-auto"
                               title="Edit Codex defaults"
                             >
                               <Settings className="w-3 h-3" />
@@ -180,7 +180,7 @@ export function CodexAgentSelector({
                         <span className="pr-10">{thinkingEffortLabel(effort)}</span>
                       </button>
                       {isDefault && (
-                        <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 px-1.5 py-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity bg-popover/95 rounded">
+                        <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 px-1.5 py-0.5 opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity bg-popover/95 rounded">
                           <span className="text-[10px] text-muted-foreground pointer-events-none select-none">
                             default
                           </span>
@@ -192,7 +192,7 @@ export function CodexAgentSelector({
                                 close()
                                 onOpenAgentSettings("codex", "config.toml")
                               }}
-                              className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                              className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors pointer-events-auto"
                               title="Edit Codex defaults"
                             >
                               <Settings className="w-3 h-3" />
@@ -229,6 +229,7 @@ export function AgentSelector({
   dropdownPosition = "bottom",
   className,
   defaultRunner,
+  defaultAmpMode,
   runnerOverride,
   onChangeRunnerOverride,
   ampModeOverride,
@@ -246,6 +247,7 @@ export function AgentSelector({
   dropdownPosition?: "top" | "bottom"
   className?: string
   defaultRunner: AgentRunnerKind | null | undefined
+  defaultAmpMode: string | null | undefined
   runnerOverride: AgentRunnerOverride
   onChangeRunnerOverride: (runner: AgentRunnerOverride) => void
   ampModeOverride: AmpModeOverride
@@ -254,6 +256,7 @@ export function AgentSelector({
   const resolvedDefaultRunner: AgentRunnerKind = defaultRunner ?? "codex"
   const resolvedRunner: AgentRunnerKind = runnerOverride ?? resolvedDefaultRunner
   const isAmp = resolvedRunner === "amp"
+  const resolvedDefaultAmpMode: AmpModeOverride = defaultAmpMode === "rush" ? "rush" : defaultAmpMode === "smart" ? "smart" : null
 
   const displayName = useMemo(() => {
     if (isAmp) {
@@ -368,7 +371,7 @@ export function AgentSelector({
                         <span className="pr-10">{opt.label}</span>
                       </button>
                       {isDefault && (
-                        <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 px-1.5 py-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity bg-popover/95 rounded">
+                        <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 px-1.5 py-0.5 opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity bg-popover/95 rounded">
                           <span className="text-[10px] text-muted-foreground pointer-events-none select-none">default</span>
                           {onOpenAgentSettings && (
                             <button
@@ -378,7 +381,7 @@ export function AgentSelector({
                                 close()
                                 onOpenAgentSettings(resolvedDefaultRunner)
                               }}
-                              className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                              className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors pointer-events-auto"
                               title="Edit default agent"
                             >
                               <Settings className="w-3 h-3" />
@@ -413,7 +416,7 @@ export function AgentSelector({
                             <span className="pr-10">{m.label}</span>
                           </button>
                           {isDefault && (
-                            <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 px-1.5 py-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity bg-popover/95 rounded">
+                            <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 px-1.5 py-0.5 opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity bg-popover/95 rounded">
                               <span className="text-[10px] text-muted-foreground pointer-events-none select-none">
                                 default
                               </span>
@@ -425,7 +428,7 @@ export function AgentSelector({
                                     close()
                                     onOpenAgentSettings("codex", "config.toml")
                                   }}
-                                  className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                                  className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors pointer-events-auto"
                                   title="Edit Codex defaults"
                                 >
                                   <Settings className="w-3 h-3" />
@@ -458,7 +461,7 @@ export function AgentSelector({
                             <span className="pr-10">{thinkingEffortLabel(effort)}</span>
                           </button>
                           {isDefault && (
-                            <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 px-1.5 py-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity bg-popover/95 rounded">
+                            <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 px-1.5 py-0.5 opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity bg-popover/95 rounded">
                               <span className="text-[10px] text-muted-foreground pointer-events-none select-none">
                                 default
                               </span>
@@ -470,7 +473,7 @@ export function AgentSelector({
                                     close()
                                     onOpenAgentSettings("codex", "config.toml")
                                   }}
-                                  className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                                  className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors pointer-events-auto"
                                   title="Edit Codex defaults"
                                 >
                                   <Settings className="w-3 h-3" />
@@ -489,26 +492,52 @@ export function AgentSelector({
                     Mode
                   </div>
                   {([
-                    { id: null, label: "Default" },
                     { id: "smart" as const, label: "Smart" },
                     { id: "rush" as const, label: "Rush" },
                   ] as const).map((opt) => {
-                    const selected = opt.id === ampModeOverride
+                    const selected = opt.id === (ampModeOverride ?? resolvedDefaultAmpMode)
+                    const isDefault = resolvedDefaultAmpMode != null && opt.id === resolvedDefaultAmpMode
                     return (
-                      <button
-                        key={opt.label}
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => {
-                          onChangeAmpModeOverride(opt.id)
-                          close()
-                        }}
-                        className={cn(
-                          "w-full flex items-center px-2.5 py-1.5 text-left text-xs transition-colors rounded-md whitespace-nowrap",
-                          selected ? "bg-primary/10 text-primary" : "text-foreground hover:bg-accent",
+                      <div key={opt.id} className="relative group">
+                        <button
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => {
+                            if (resolvedDefaultAmpMode != null && opt.id === resolvedDefaultAmpMode) {
+                              onChangeAmpModeOverride(null)
+                            } else {
+                              onChangeAmpModeOverride(opt.id)
+                            }
+                            close()
+                          }}
+                          className={cn(
+                            "w-full flex items-center px-2.5 py-1.5 text-left text-xs transition-colors rounded-md whitespace-nowrap",
+                            selected ? "bg-primary/10 text-primary" : "text-foreground hover:bg-accent",
+                          )}
+                        >
+                          <span className="pr-10">{opt.label}</span>
+                        </button>
+                        {isDefault && (
+                          <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 px-1.5 py-0.5 opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity bg-popover/95 rounded">
+                            <span className="text-[10px] text-muted-foreground pointer-events-none select-none">
+                              default
+                            </span>
+                            {onOpenAgentSettings && (
+                              <button
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  close()
+                                  onOpenAgentSettings("amp")
+                                }}
+                                className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors pointer-events-auto"
+                                title="Edit Amp defaults"
+                              >
+                                <Settings className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
                         )}
-                      >
-                        <span>{opt.label}</span>
-                      </button>
+                      </div>
                     )
                   })}
                 </div>
