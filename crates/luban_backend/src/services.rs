@@ -33,6 +33,22 @@ use codex_cli::CodexTurnParams;
 
 const CODEX_EXECUTABLE_PATH_KEY: &str = "codex_executable_path";
 
+fn format_amp_prompt(prompt: &str, image_paths: &[PathBuf]) -> String {
+    if image_paths.is_empty() {
+        return prompt.to_owned();
+    }
+
+    let mut out = String::with_capacity(prompt.len() + image_paths.len() * 64);
+    out.push_str(prompt.trim_end());
+    out.push_str("\n\nAttached images:\n");
+    for path in image_paths {
+        out.push('@');
+        out.push_str(&path.to_string_lossy());
+        out.push('\n');
+    }
+    out
+}
+
 fn contains_attempt_fraction(text: &str) -> bool {
     let mut chars = text.chars().peekable();
     while let Some(ch) = chars.next() {
@@ -1197,9 +1213,11 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                 .and_then(luban_domain::parse_agent_runner_kind)
                 .unwrap_or(runner);
             let use_amp = runner == luban_domain::AgentRunnerKind::Amp;
-            if use_amp && !image_paths.is_empty() {
-                return Err(anyhow!("amp runner does not support image attachments yet"));
-            }
+            let amp_prompt = if use_amp {
+                format_amp_prompt(&prompt, &image_paths)
+            } else {
+                prompt.clone()
+            };
 
             let env_amp_mode = std::env::var("LUBAN_AMP_MODE")
                 .ok()
@@ -1216,7 +1234,7 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                     AmpTurnParams {
                         thread_id: resolved_thread_id,
                         worktree_path: worktree_path.clone(),
-                        prompt: prompt.clone(),
+                        prompt: amp_prompt,
                         mode: resolved_amp_mode.clone(),
                     },
                     cancel.clone(),
@@ -2464,6 +2482,16 @@ mod tests {
         assert!(!is_transient_reconnect_notice("retry/reconnect"));
         assert!(!is_transient_reconnect_notice("connection failed"));
         assert!(!is_transient_reconnect_notice("reconnecting soon"));
+    }
+
+    #[test]
+    fn amp_prompt_includes_image_paths() {
+        let prompt = "Hello";
+        let images = vec![PathBuf::from("images/a.png"), PathBuf::from("/tmp/b.jpg")];
+        let formatted = format_amp_prompt(prompt, &images);
+        assert!(formatted.starts_with("Hello\n\nAttached images:\n"));
+        assert!(formatted.contains("@images/a.png\n"));
+        assert!(formatted.contains("@/tmp/b.jpg\n"));
     }
 
     #[test]
