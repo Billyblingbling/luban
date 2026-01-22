@@ -20,7 +20,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Package a signed macOS update artifact and generate `latest.json`.
+    /// Package macOS updater artifacts + a DMG installer and generate `latest.json`.
     Package {
         /// `darwin-aarch64`, `darwin-x86_64`, or `darwin-universal`.
         target: String,
@@ -218,6 +218,23 @@ fn find_first_app_dir(bundle_macos: &Path) -> Result<Option<PathBuf>> {
     Ok(None)
 }
 
+fn find_first_file_with_extension(dir: &Path, ext: &str) -> Result<Option<PathBuf>> {
+    if !dir.exists() {
+        return Ok(None);
+    }
+
+    let mut matches = Vec::new();
+    for entry in std::fs::read_dir(dir).with_context(|| format!("read_dir {}", dir.display()))? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some(ext) {
+            matches.push(path);
+        }
+    }
+    matches.sort_by(|a, b| a.as_os_str().cmp(b.as_os_str()));
+    Ok(matches.into_iter().next())
+}
+
 fn resolve_web_version() -> Result<String> {
     let raw = std::fs::read_to_string("web/package.json").context("read web/package.json")?;
     let value: serde_json::Value = serde_json::from_str(&raw).context("parse web/package.json")?;
@@ -407,7 +424,7 @@ fn run_package(target: String, profile: String, out_dir: PathBuf) -> Result<()> 
         // TODO: Skip stapling until the app passes notarization.
         .arg("--skip-stapling")
         .arg("--bundles")
-        .arg("app")
+        .arg("app,dmg")
         .args(build_flags)
         .arg("--target")
         .arg(target_triple);
@@ -421,11 +438,20 @@ fn run_package(target: String, profile: String, out_dir: PathBuf) -> Result<()> 
 
     let version = resolve_luban_tauri_version()?;
     let bundle_macos = PathBuf::from(format!("target/{target_triple}/{build_dir}/bundle/macos"));
+    let bundle_dmg = PathBuf::from(format!("target/{target_triple}/{build_dir}/bundle/dmg"));
 
     let app_dir = find_first_app_dir(&bundle_macos)?
         .with_context(|| format!("macOS bundle not found under: {}", bundle_macos.display()))?;
 
     std::fs::create_dir_all(&out_dir).with_context(|| format!("create {}", out_dir.display()))?;
+
+    let dmg_path = find_first_file_with_extension(&bundle_dmg, "dmg")?
+        .with_context(|| format!("DMG bundle not found under: {}", bundle_dmg.display()))?;
+
+    let installer_name = format!("Luban_{version}_{platform_key}.dmg");
+    let installer_path = out_dir.join(&installer_name);
+    std::fs::copy(&dmg_path, &installer_path)
+        .with_context(|| format!("copy {} to {}", dmg_path.display(), installer_path.display()))?;
 
     let archive_name = format!("Luban_{version}_{platform_key}.app.tar.gz");
     let archive_path = out_dir.join(&archive_name);
@@ -470,15 +496,17 @@ fn run_package(target: String, profile: String, out_dir: PathBuf) -> Result<()> 
 
     let env_path = out_dir.join("package.env");
     let env_contents = format!(
-        "LUBAN_PACKAGE_VERSION={}\nLUBAN_PACKAGE_PLATFORM_KEY={}\nLUBAN_PACKAGE_ARCHIVE={}\nLUBAN_PACKAGE_SIGNATURE={}\nLUBAN_PACKAGE_MANIFEST={}\n",
+        "LUBAN_PACKAGE_VERSION={}\nLUBAN_PACKAGE_PLATFORM_KEY={}\nLUBAN_PACKAGE_ARCHIVE={}\nLUBAN_PACKAGE_SIGNATURE={}\nLUBAN_PACKAGE_MANIFEST={}\nLUBAN_PACKAGE_INSTALLER={}\n",
         version,
         platform_key,
         archive_path.display(),
         sig_path.display(),
         manifest_path.display(),
+        installer_path.display(),
     );
     std::fs::write(&env_path, env_contents).with_context(|| format!("write {}", env_path.display()))?;
 
+    println!("installer: {}", installer_path.display());
     println!("packaged: {}", archive_path.display());
     println!("manifest: {}", manifest_path.display());
     println!("next: just upload");
@@ -563,6 +591,11 @@ async fn run_upload(package_env: PathBuf) -> Result<()> {
         .context("LUBAN_PACKAGE_VERSION missing from package.env")?
         .trim()
         .to_owned();
+    let platform_key = kv
+        .get("LUBAN_PACKAGE_PLATFORM_KEY")
+        .context("LUBAN_PACKAGE_PLATFORM_KEY missing from package.env")?
+        .trim()
+        .to_owned();
     let archive_path = PathBuf::from(
         kv.get("LUBAN_PACKAGE_ARCHIVE")
             .context("LUBAN_PACKAGE_ARCHIVE missing from package.env")?,
@@ -575,6 +608,11 @@ async fn run_upload(package_env: PathBuf) -> Result<()> {
         kv.get("LUBAN_PACKAGE_MANIFEST")
             .context("LUBAN_PACKAGE_MANIFEST missing from package.env")?,
     );
+    let installer_path = kv
+        .get("LUBAN_PACKAGE_INSTALLER")
+        .map(|p| p.trim())
+        .filter(|p| !p.is_empty())
+        .map(PathBuf::from);
 
     let archive_name = file_name(&archive_path)?;
     let archive_key = format!("{version}/{archive_name}");
@@ -618,6 +656,31 @@ async fn run_upload(package_env: PathBuf) -> Result<()> {
         "no-cache",
     )
     .await?;
+
+    if let Some(installer_path) = installer_path {
+        let installer_name = file_name(&installer_path)?;
+        let installer_key = format!("{version}/{installer_name}");
+        upload_file(
+            &op,
+            &r2_bucket,
+            &installer_key,
+            &installer_path,
+            "application/x-apple-diskimage",
+            "public, max-age=31536000, immutable",
+        )
+        .await?;
+
+        let installer_latest_key = format!("Luban_latest_{platform_key}.dmg");
+        upload_file(
+            &op,
+            &r2_bucket,
+            &installer_latest_key,
+            &installer_path,
+            "application/x-apple-diskimage",
+            "no-cache",
+        )
+        .await?;
+    }
 
     let base = env_var_opt("LUBAN_RELEASE_BASE_URL").unwrap_or_else(|| "https://releases.luban.dev".to_owned());
     println!("uploaded: {}/latest.json", base.trim_end_matches('/'));
@@ -683,5 +746,32 @@ mod tests {
         assert!(spec.args.iter().any(|arg| arg == "--no-acls"));
         assert!(spec.args.iter().any(|arg| arg == "--no-fflags"));
         assert!(spec.args.iter().any(|arg| arg == "--no-mac-metadata"));
+    }
+
+    #[test]
+    fn find_first_file_with_extension_returns_sorted_match() {
+        let unique = format!(
+            "luban-dev-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("must get time")
+                .as_nanos()
+        );
+        let root = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(&root).expect("must create root dir");
+
+        let a = root.join("a.dmg");
+        let b = root.join("b.dmg");
+        std::fs::write(&b, b"b").expect("must write b");
+        std::fs::write(&a, b"a").expect("must write a");
+        std::fs::write(root.join("c.txt"), b"c").expect("must write c");
+
+        let found = find_first_file_with_extension(&root, "dmg")
+            .expect("must scan")
+            .expect("must find dmg");
+        assert_eq!(found, a);
+
+        std::fs::remove_dir_all(&root).expect("must cleanup");
     }
 }

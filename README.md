@@ -42,6 +42,8 @@ consumer-driven contracts under `docs/contracts/`.
 
 Prebuilt macOS artifacts are published under `https://releases.luban.dev/`.
 
+- Installer (recommended for first install): `https://releases.luban.dev/Luban_latest_darwin-universal.dmg`
+  - Also available as per-platform aliases: `https://releases.luban.dev/Luban_latest_<platform>.dmg`
 - Latest manifest (recommended): `https://releases.luban.dev/latest.json`
   - It contains the exact per-platform archive URL.
 - Archive naming convention:
