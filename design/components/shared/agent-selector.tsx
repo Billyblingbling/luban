@@ -156,7 +156,7 @@ export const agentConfigs: AgentConfig[] = [
         label: "Mode",
         options: [
           { id: "smart", label: "Smart" },
-          { id: "free", label: "Free" },
+          { id: "rush", label: "Rush" },
         ],
         defaultValue: "smart",
       },
