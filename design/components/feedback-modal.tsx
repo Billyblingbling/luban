@@ -45,7 +45,7 @@ interface Attachment {
 
 function getMockSystemInfo(): SystemInfo {
   return {
-    version: "0.1.4",
+    version: "0.1.5",
     os: "macOS 15.2 (Darwin arm64)",
     runtime: "Tauri WebView",
     currentProject: "xuanwo/luban",

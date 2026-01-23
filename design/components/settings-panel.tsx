@@ -2066,11 +2066,11 @@ export function SettingsPanel({ open, onOpenChange }: SettingsPanelProps) {
         </div>
 
         {/* Footer */}
-        <div className="border-t border-border p-2">
-          <div className="px-3 py-1.5 text-xs text-muted-foreground">
-            Luban v0.1.4
-          </div>
-        </div>
+	        <div className="border-t border-border p-2">
+	          <div className="px-3 py-1.5 text-xs text-muted-foreground">
+	            Luban v0.1.5
+	          </div>
+	        </div>
       </div>
 
       {/* Main content */}

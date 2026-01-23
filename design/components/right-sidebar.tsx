@@ -176,7 +176,7 @@ function TerminalContent() {
           <span className="text-muted-foreground">on</span>
           <span className="text-accent">main</span>
           <span className="text-muted-foreground">is</span>
-          <span className="text-chart-4">v0.1.4</span>
+          <span className="text-chart-4">v0.1.5</span>
           <span className="text-muted-foreground">via</span>
           <span className="text-destructive">v1.92.0</span>
         </div>
