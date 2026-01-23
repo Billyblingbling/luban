@@ -34,9 +34,10 @@ export function MermaidDiagramViewer({
 }: {
   svg: string
   className?: string
-  initialMode?: "fit" | "reset"
+  initialMode?: "fit" | "fitWidth" | "reset"
 }): React.ReactElement {
   const viewportRef = useRef<HTMLDivElement | null>(null)
+  const hasInteractedRef = useRef(false)
 
   const intrinsic = useMemo(() => parseSvgViewBox(svg), [svg])
 
@@ -69,6 +70,29 @@ export function MermaidDiagramViewer({
     setTranslate({ x, y })
   }, [intrinsic])
 
+  const fitToWidth = useCallback(() => {
+    const viewport = viewportRef.current
+    if (!viewport) return
+
+    const rect = viewport.getBoundingClientRect()
+    const width = rect.width
+    const height = rect.height
+    if (width <= 1 || height <= 1) return
+
+    const target = intrinsic
+    if (!target) {
+      setScale(1)
+      setTranslate({ x: 0, y: 0 })
+      return
+    }
+
+    const s = clamp((width / target.width) * 0.95, minScale, maxScale)
+    const x = (width - target.width * s) / 2
+    const y = Math.max((height - target.height * s) / 2, 8)
+    setScale(s)
+    setTranslate({ x, y })
+  }, [intrinsic])
+
   const resetView = useCallback(() => {
     setScale(1)
     setTranslate({ x: 0, y: 0 })
@@ -79,14 +103,43 @@ export function MermaidDiagramViewer({
       const id = window.requestAnimationFrame(() => fitToViewport())
       return () => window.cancelAnimationFrame(id)
     }
+    if (initialMode === "fitWidth") {
+      const id = window.requestAnimationFrame(() => fitToWidth())
+      return () => window.cancelAnimationFrame(id)
+    }
     resetView()
-  }, [fitToViewport, initialMode, resetView, svg])
+  }, [fitToViewport, fitToWidth, initialMode, resetView, svg])
 
   useEffect(() => {
-    const handleResize = () => fitToViewport()
+    const handleResize = () => {
+      if (initialMode === "fitWidth") {
+        fitToWidth()
+        return
+      }
+      fitToViewport()
+    }
     window.addEventListener("resize", handleResize)
     return () => window.removeEventListener("resize", handleResize)
-  }, [fitToViewport])
+  }, [fitToViewport, fitToWidth, initialMode])
+
+  useEffect(() => {
+    const viewport = viewportRef.current
+    if (!viewport) return
+    if (typeof ResizeObserver === "undefined") return
+    if (initialMode !== "fit" && initialMode !== "fitWidth") return
+
+    const observer = new ResizeObserver(() => {
+      if (hasInteractedRef.current) return
+      if (initialMode === "fitWidth") {
+        fitToWidth()
+        return
+      }
+      fitToViewport()
+    })
+
+    observer.observe(viewport)
+    return () => observer.disconnect()
+  }, [fitToViewport, fitToWidth, initialMode])
 
   const draggingRef = useRef<{
     pointerId: number
@@ -99,6 +152,7 @@ export function MermaidDiagramViewer({
     if (!viewport) return
 
     if (ev.button !== 0) return
+    hasInteractedRef.current = true
     viewport.setPointerCapture(ev.pointerId)
     draggingRef.current = {
       pointerId: ev.pointerId,
@@ -148,6 +202,7 @@ export function MermaidDiagramViewer({
       const viewport = viewportRef.current
       if (!viewport) return
       ev.preventDefault()
+      hasInteractedRef.current = true
 
       const delta = ev.deltaY
       const factor = delta > 0 ? 0.9 : 1.1
@@ -162,6 +217,7 @@ export function MermaidDiagramViewer({
   const zoomIn = useCallback(() => {
     const viewport = viewportRef.current
     if (!viewport) return
+    hasInteractedRef.current = true
     const rect = viewport.getBoundingClientRect()
     const nextScale = clamp(scale * 1.2, minScale, maxScale)
     zoomAt(nextScale, { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 })
@@ -170,6 +226,7 @@ export function MermaidDiagramViewer({
   const zoomOut = useCallback(() => {
     const viewport = viewportRef.current
     if (!viewport) return
+    hasInteractedRef.current = true
     const rect = viewport.getBoundingClientRect()
     const nextScale = clamp(scale / 1.2, minScale, maxScale)
     zoomAt(nextScale, { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 })
@@ -196,6 +253,7 @@ export function MermaidDiagramViewer({
       <div
         ref={viewportRef}
         className="relative mx-3 mb-3 flex-1 select-none overflow-hidden rounded border bg-muted/10"
+        data-testid="mermaid-diagram-viewport"
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}

@@ -102,7 +102,7 @@ export function MermaidDiagram({ code, className }: { code: string; className?: 
           className="h-[85vh] max-h-[85vh] w-[90vw] max-w-[90vw] gap-0 p-0 sm:max-w-[90vw]"
           data-testid="mermaid-diagram-dialog"
         >
-          <MermaidDiagramViewer svg={svg} initialMode="fit" />
+          <MermaidDiagramViewer svg={svg} initialMode="fitWidth" />
         </DialogContent>
       </Dialog>
     )
