@@ -385,6 +385,36 @@ fn bsdtar_available() -> bool {
         .is_ok()
 }
 
+fn build_tauri_build_command(
+    target_triple: &str,
+    build_flags: &[&str],
+    build_channel: &str,
+    git_hash: &str,
+    git_tag: &str,
+    build_time: &str,
+) -> ProcessCommand {
+    let mut cmd = ProcessCommand::new("cargo");
+    cmd.current_dir("crates/luban_tauri")
+        .arg("tauri")
+        .arg("build")
+        .arg("--ci")
+        // TODO: Skip stapling until the app passes notarization.
+        .arg("--skip-stapling")
+        .arg("--bundles")
+        .arg("app,dmg")
+        .args(build_flags)
+        .arg("--target")
+        .arg(target_triple)
+        // Always avoid Finder-driven DMG "aesthetics" because it can pop UI windows (osascript/Finder).
+        // Tauri bundler enables `--skip-jenkins` when `CI=true`, which skips the AppleScript step.
+        .env("CI", "true")
+        .env("LUBAN_BUILD_CHANNEL", build_channel)
+        .env("LUBAN_GIT_HASH", git_hash)
+        .env("LUBAN_GIT_TAG", git_tag)
+        .env("LUBAN_BUILD_TIME", build_time);
+    cmd
+}
+
 fn run_package(target: String, profile: String, out_dir: PathBuf) -> Result<()> {
     package_env_required()?;
 
@@ -415,24 +445,8 @@ fn run_package(target: String, profile: String, out_dir: PathBuf) -> Result<()> 
 
     build_web(&profile, build_channel, &git_hash, &git_tag, &build_time)?;
 
-    let mut tauri_build = ProcessCommand::new("cargo");
-    tauri_build
-        .current_dir("crates/luban_tauri")
-        .arg("tauri")
-        .arg("build")
-        .arg("--ci")
-        // TODO: Skip stapling until the app passes notarization.
-        .arg("--skip-stapling")
-        .arg("--bundles")
-        .arg("app,dmg")
-        .args(build_flags)
-        .arg("--target")
-        .arg(target_triple);
-    tauri_build
-        .env("LUBAN_BUILD_CHANNEL", build_channel)
-        .env("LUBAN_GIT_HASH", &git_hash)
-        .env("LUBAN_GIT_TAG", &git_tag)
-        .env("LUBAN_BUILD_TIME", &build_time);
+    let mut tauri_build =
+        build_tauri_build_command(target_triple, &build_flags, build_channel, &git_hash, &git_tag, &build_time);
     apply_updater_signing_env(&mut tauri_build);
     run_cmd(tauri_build, "cargo tauri build")?;
 
@@ -700,6 +714,7 @@ async fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsStr;
 
     #[test]
     fn expand_kv_value_uses_prior_kv_entries() {
@@ -773,5 +788,21 @@ mod tests {
         assert_eq!(found, a);
 
         std::fs::remove_dir_all(&root).expect("must cleanup");
+    }
+
+    #[test]
+    fn tauri_build_always_sets_ci_true() {
+        let cmd = build_tauri_build_command(
+            "aarch64-apple-darwin",
+            &[],
+            "release",
+            "deadbeef",
+            "v0.0.0",
+            "2026-01-23T00:00:00Z",
+        );
+        let ci = cmd
+            .get_envs()
+            .find_map(|(key, value)| if key == OsStr::new("CI") { value } else { None });
+        assert_eq!(ci, Some(OsStr::new("true")));
     }
 }
