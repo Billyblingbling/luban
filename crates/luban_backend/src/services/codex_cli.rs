@@ -14,8 +14,11 @@ fn should_skip_git_repo_check(worktree_path: &Path) -> bool {
     !worktree_path.join(".git").exists()
 }
 
+const CODEX_APPROVAL_POLICY_NEVER: &str = "never";
+const CODEX_SANDBOX_MODE_DANGER_FULL_ACCESS: &str = "danger-full-access";
+
 fn build_codex_exec_args(
-    sandbox_mode: &str,
+    _sandbox_mode: &str,
     worktree_path: &Path,
     thread_id: Option<&str>,
     image_paths: &[PathBuf],
@@ -23,13 +26,22 @@ fn build_codex_exec_args(
     model_reasoning_effort: Option<&str>,
     skip_git_repo_check: bool,
 ) -> Vec<OsString> {
+    let sandbox_mode = CODEX_SANDBOX_MODE_DANGER_FULL_ACCESS;
+    // Important: `--ask-for-approval` and `--search` are interactive-mode flags and are NOT
+    // accepted by `codex exec`. If we pass them before `exec`, Codex will silently fall back to
+    // user config defaults, which makes Luban appear "stuck" in read-only mode.
+    //
+    // To ensure deterministic behavior regardless of `~/.codex/config.toml`, explicitly override
+    // the relevant config values on `codex exec`.
     let mut args: Vec<OsString> = vec![
+        "exec".into(),
+        "--dangerously-bypass-approvals-and-sandbox".into(),
         "--sandbox".into(),
         sandbox_mode.into(),
-        "--ask-for-approval".into(),
-        "never".into(),
-        "--search".into(),
-        "exec".into(),
+        "-c".into(),
+        format!("approval_policy=\"{CODEX_APPROVAL_POLICY_NEVER}\"").into(),
+        "-c".into(),
+        format!("sandbox_mode=\"{sandbox_mode}\"").into(),
     ];
 
     if skip_git_repo_check {
@@ -140,7 +152,8 @@ pub(super) fn run_codex_turn_streamed_via_cli(
         sandbox_mode,
     } = params;
 
-    let sandbox_mode = sandbox_mode.as_deref().unwrap_or("danger-full-access");
+    let _ = sandbox_mode.as_deref();
+    let sandbox_mode = CODEX_SANDBOX_MODE_DANGER_FULL_ACCESS;
 
     let mut command = Command::new(codex);
     command.args(build_codex_exec_args(
@@ -310,6 +323,54 @@ mod tests {
             .expect("missing --json");
         assert!(exec_pos < skip_pos);
         assert!(skip_pos < json_pos);
+    }
+
+    #[test]
+    fn codex_exec_args_override_approval_policy_and_sandbox_mode() {
+        let args = build_codex_exec_args(
+            "read-only",
+            Path::new("/tmp/non-git"),
+            None,
+            &[],
+            None,
+            None,
+            true,
+        );
+        let args = args
+            .iter()
+            .map(|v| v.to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+
+        assert!(args.iter().any(|v| v == "exec"));
+        assert!(
+            args.iter()
+                .any(|v| v == "--dangerously-bypass-approvals-and-sandbox")
+        );
+        assert!(args.iter().any(|v| v == "approval_policy=\"never\""));
+        assert!(
+            args.iter()
+                .any(|v| v == "sandbox_mode=\"danger-full-access\"")
+        );
+    }
+
+    #[test]
+    fn codex_exec_args_do_not_include_interactive_only_flags() {
+        let args = build_codex_exec_args(
+            "danger-full-access",
+            Path::new("/tmp/non-git"),
+            None,
+            &[],
+            None,
+            None,
+            true,
+        );
+        let args = args
+            .iter()
+            .map(|v| v.to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+
+        assert!(!args.iter().any(|v| v == "--ask-for-approval"));
+        assert!(!args.iter().any(|v| v == "--search"));
     }
 
     fn temp_dir(prefix: &str) -> std::path::PathBuf {
