@@ -17,7 +17,7 @@ import {
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import { Dialog, DialogContent } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { useLuban } from "@/lib/luban-context"
 import type { TaskDraft, TaskExecuteMode, TaskIntentKind } from "@/lib/luban-api"
@@ -177,10 +177,10 @@ export function NewTaskModal({ open, onOpenChange }: NewTaskModalProps) {
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent data-testid="new-task-modal" className="sm:max-w-[560px] p-0 gap-0 bg-background border-border overflow-hidden">
         <div className="px-5 py-4 border-b border-border">
-          <h2 className="text-base font-medium flex items-center gap-2">
+          <DialogTitle className="text-base font-medium flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-primary" />
             New Task
-          </h2>
+          </DialogTitle>
         </div>
 
         <div className="p-5 space-y-4">

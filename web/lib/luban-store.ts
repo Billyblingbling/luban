@@ -122,27 +122,24 @@ export function useLubanStore(): LubanStore {
   }
 
   function setActiveWorkspaceId(next: React.SetStateAction<WorkspaceId | null>) {
-    _setActiveWorkspaceId((prev) => {
-      const resolved = typeof next === "function" ? next(prev) : next
-      activeWorkspaceIdRef.current = resolved
-      return resolved
-    })
+    const prev = activeWorkspaceIdRef.current
+    const resolved = typeof next === "function" ? next(prev) : next
+    activeWorkspaceIdRef.current = resolved
+    _setActiveWorkspaceId(resolved)
   }
 
   function setActiveThreadId(next: React.SetStateAction<number | null>) {
-    _setActiveThreadId((prev) => {
-      const resolved = typeof next === "function" ? next(prev) : next
-      activeThreadIdRef.current = resolved
-      return resolved
-    })
+    const prev = activeThreadIdRef.current
+    const resolved = typeof next === "function" ? next(prev) : next
+    activeThreadIdRef.current = resolved
+    _setActiveThreadId(resolved)
   }
 
   function setThreads(next: React.SetStateAction<ThreadMeta[]>) {
-    _setThreads((prev) => {
-      const resolved = typeof next === "function" ? next(prev) : next
-      threadsRef.current = resolved
-      return resolved
-    })
+    const prev = threadsRef.current
+    const resolved = typeof next === "function" ? next(prev) : next
+    threadsRef.current = resolved
+    _setThreads(resolved)
   }
 
   function setWorkspaceTabs(next: React.SetStateAction<WorkspaceTabsSnapshot | null>) {

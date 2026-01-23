@@ -23,9 +23,16 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode
 }>) {
+  const lubanModeValue = process.env.NEXT_PUBLIC_LUBAN_MODE === "mock" ? "mock" : "real"
+
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={`font-sans antialiased`}>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `window.__LUBAN_MODE__=${JSON.stringify(lubanModeValue)};`,
+          }}
+        />
         <Providers>{children}</Providers>
         <Toaster position="top-right" richColors closeButton />
         <Analytics />

@@ -1,6 +1,6 @@
 "use client"
 
-import type { AppSnapshot, OperationStatus } from "./luban-api"
+import type { AppSnapshot, OperationStatus, ProjectId } from "./luban-api"
 import { agentStatusFromWorkspace, prStatusFromWorkspace, type AgentStatus, type PRStatus } from "./worktree-ui"
 import { computeProjectDisplayNames } from "./project-display-names"
 
@@ -18,7 +18,7 @@ export type SidebarWorktreeVm = {
 }
 
 export type SidebarProjectVm = {
-  id: string
+  id: ProjectId
   displayName: string
   path: string
   isGit: boolean
@@ -39,7 +39,7 @@ export function buildSidebarProjects(
   const displayNames = computeProjectDisplayNames(app.projects.map((p) => ({ path: p.path, name: p.name })))
 
   return app.projects.map((p) => ({
-    id: p.path,
+    id: p.id,
     displayName: displayNames.get(p.path) ?? p.slug,
     path: p.path,
     isGit: p.is_git,

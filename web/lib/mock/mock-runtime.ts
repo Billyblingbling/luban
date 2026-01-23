@@ -61,6 +61,7 @@ type MockRuntimeState = {
   nextThreadId: number
   pendingAgentTimersByKey: Map<string, number>
   pendingAgentSeqByKey: Map<string, number>
+  pendingWorkspaceCreateTimersByProjectId: Map<ProjectId, number>
 }
 
 let runtime: MockRuntimeState | null = null
@@ -163,6 +164,7 @@ function initRuntime(): MockRuntimeState {
     nextThreadId,
     pendingAgentTimersByKey: new Map(),
     pendingAgentSeqByKey: new Map(),
+    pendingWorkspaceCreateTimersByProjectId: new Map(),
   }
 }
 
@@ -428,6 +430,14 @@ function startMockAgentRun(args: {
   args.state.pendingAgentTimersByKey.set(conversationKey, timer)
 }
 
+function cancelPendingWorkspaceCreate(state: MockRuntimeState, projectId: ProjectId) {
+  const t = state.pendingWorkspaceCreateTimersByProjectId.get(projectId)
+  if (t != null) {
+    window.clearTimeout(t)
+    state.pendingWorkspaceCreateTimersByProjectId.delete(projectId)
+  }
+}
+
 export function mockDispatchAction(args: {
   action: ClientAction
   onEvent: (event: ServerEvent) => void
@@ -501,28 +511,47 @@ export function mockDispatchAction(args: {
   if (a.type === "create_workspace") {
     for (const p of state.app.projects) {
       if (p.id !== a.project_id) continue
-      const workspaceId = Math.max(0, ...state.app.projects.flatMap((x) => x.workspaces.map((w) => w.id))) + 1
-      const name = `ws-${workspaceId}`
-      p.workspaces.push({
-        id: workspaceId,
-        short_id: `W${workspaceId}`,
-        workspace_name: name,
-        branch_name: p.is_git ? name : "",
-        worktree_path: `${p.path}-${name}`,
-        status: "active",
-        archive_status: "idle",
-        branch_rename_status: "idle",
-        agent_run_status: "idle",
-        has_unread_completion: false,
-        pull_request: null,
-      })
-      state.threadsByWorkspace.set(workspaceId, {
-        rev: state.rev,
-        workspace_id: workspaceId,
-        tabs: { open_tabs: [], archived_tabs: [], active_tab: 1 },
-        threads: [],
-      })
+
+      if (p.create_workspace_status === "running") return
+      cancelPendingWorkspaceCreate(state, p.id)
+
+      p.create_workspace_status = "running"
       emitAppChanged({ state, onEvent: args.onEvent })
+
+      const timer = window.setTimeout(() => {
+        const p2 = state.app.projects.find((x) => x.id === a.project_id) ?? null
+        if (!p2 || p2.create_workspace_status !== "running") return
+
+        const workspaceId = Math.max(0, ...state.app.projects.flatMap((x) => x.workspaces.map((w) => w.id))) + 1
+        const name = `ws-${workspaceId}`
+        p2.workspaces.push({
+          id: workspaceId,
+          short_id: `W${workspaceId}`,
+          workspace_name: name,
+          branch_name: p2.is_git ? name : "",
+          worktree_path: `${p2.path}-${name}`,
+          status: "active",
+          archive_status: "idle",
+          branch_rename_status: "idle",
+          agent_run_status: "idle",
+          has_unread_completion: false,
+          pull_request: null,
+        })
+
+        const nextRev = state.rev + 1
+        state.threadsByWorkspace.set(workspaceId, {
+          rev: nextRev,
+          workspace_id: workspaceId,
+          tabs: { open_tabs: [], archived_tabs: [], active_tab: 1 },
+          threads: [],
+        })
+
+        p2.create_workspace_status = "idle"
+        cancelPendingWorkspaceCreate(state, p2.id)
+        emitAppChanged({ state, onEvent: args.onEvent })
+      }, 450)
+
+      state.pendingWorkspaceCreateTimersByProjectId.set(p.id, timer)
       return
     }
     return
@@ -957,9 +986,14 @@ export async function mockRequest<T>(action: ClientAction): Promise<T> {
   }
 
   if (action.type === "task_preview") {
+    const defaultProjectPath =
+      state.app.projects.find((p) => p.workspaces.some((w) => w.id === state.app.ui.active_workspace_id))?.path ??
+      state.app.projects[0]?.path ??
+      "/mock/project"
+
     const draft: TaskDraft = {
       input: action.input,
-      project: { type: "unspecified" },
+      project: { type: "local_path", path: defaultProjectPath },
       intent_kind: "other",
       summary: "Mock preview",
       prompt: action.input,
@@ -971,11 +1005,113 @@ export async function mockRequest<T>(action: ClientAction): Promise<T> {
   }
 
   if (action.type === "task_execute") {
+    const ensureProjectByPath = (path: string): ProjectId => {
+      const existing = state.app.projects.find((p) => p.path === path) ?? null
+      if (existing) return existing.id
+
+      const projectId: ProjectId = `mock_project_${Math.random().toString(16).slice(2)}`
+      state.app.projects.push({
+        id: projectId,
+        name: path.split("/").slice(-1)[0] || "Project",
+        slug: projectId,
+        path,
+        is_git: true,
+        expanded: true,
+        create_workspace_status: "idle",
+        workspaces: [],
+      })
+      return projectId
+    }
+
+    const resolveProjectId = (): ProjectId => {
+      const spec = action.draft.project
+      if (spec.type === "local_path") return ensureProjectByPath(spec.path)
+      if (spec.type === "git_hub_repo") return ensureProjectByPath(`/mock/github/${spec.full_name}`)
+      return state.app.projects[0]?.id ?? ensureProjectByPath("/mock/project")
+    }
+
+    const projectId = resolveProjectId()
+    const project = state.app.projects.find((p) => p.id === projectId) ?? null
+    if (!project) throw new Error(`mock: project not found: ${projectId}`)
+
+    if (action.mode === "create") {
+      const workspaceId = Math.max(0, ...state.app.projects.flatMap((p) => p.workspaces.map((w) => w.id))) + 1
+      const threadId: WorkspaceThreadId = 1
+      const name = `task-${workspaceId}`
+      const worktreePath = `${project.path}-${name}`
+
+      project.workspaces.push({
+        id: workspaceId,
+        short_id: `W${workspaceId}`,
+        workspace_name: name,
+        branch_name: project.is_git ? name : "",
+        worktree_path: worktreePath,
+        status: "active",
+        archive_status: "idle",
+        branch_rename_status: "idle",
+        agent_run_status: "idle",
+        has_unread_completion: false,
+        pull_request: null,
+      })
+
+      bumpRev(state)
+      state.app.ui.active_workspace_id = workspaceId
+      state.app.ui.active_thread_id = threadId
+
+      state.threadsByWorkspace.set(workspaceId, {
+        rev: state.rev,
+        workspace_id: workspaceId,
+        tabs: { open_tabs: [threadId], archived_tabs: [], active_tab: threadId },
+        threads: [
+          {
+            thread_id: threadId,
+            remote_thread_id: null,
+            title: "Mock task thread",
+            updated_at_unix_seconds: Math.floor(Date.now() / 1000),
+          },
+        ],
+      })
+
+      state.conversationsByWorkspaceThread.set(workspaceThreadKey(workspaceId, threadId), {
+        rev: state.rev,
+        workspace_id: workspaceId,
+        thread_id: threadId,
+        agent_model_id: state.app.agent.default_model_id ?? "gpt-5",
+        thinking_effort: state.app.agent.default_thinking_effort ?? "medium",
+        run_status: "idle",
+        run_started_at_unix_ms: null,
+        run_finished_at_unix_ms: null,
+        entries: [{ type: "user_message", text: action.draft.prompt, attachments: [] }],
+        entries_total: 1,
+        entries_start: 0,
+        entries_truncated: false,
+        in_progress_items: [],
+        pending_prompts: [],
+        queue_paused: false,
+        remote_thread_id: null,
+        title: "Mock task thread",
+      })
+
+      const ids: TaskExecuteResult = {
+        project_id: projectId,
+        workspace_id: workspaceId,
+        thread_id: threadId,
+        worktree_path: worktreePath,
+        prompt: action.draft.prompt,
+        mode: action.mode,
+      }
+      return ids as T
+    }
+
+    const workspaceId = state.app.ui.active_workspace_id ?? project.workspaces[0]?.id ?? 1
+    const threadId = state.app.ui.active_thread_id ?? 1
+    const worktreePath = locateWorkspace(state.app, workspaceId)?.worktree_path ?? project.path
+
     const ids: TaskExecuteResult = {
-      project_id: state.app.projects[0]?.id ?? "mock-project",
-      workspace_id: state.app.ui.active_workspace_id ?? 1,
-      thread_id: state.app.ui.active_thread_id ?? 1,
-      worktree_path: state.app.projects[0]?.path ?? "/mock/project",
+      project_id: projectId,
+      workspace_id: workspaceId,
+      thread_id: threadId,
+      worktree_path: worktreePath,
       prompt: action.draft.prompt,
       mode: action.mode,
     }

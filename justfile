@@ -68,8 +68,8 @@ web cmd profile="debug":
       (cd web && pnpm install); \
     fi; \
     (cd web && \
-      NEXT_PUBLIC_LUBAN_MODE=mock \
       channel="$([ "{{profile}}" = "release" ] && echo release || echo dev)" && \
+      NEXT_PUBLIC_LUBAN_MODE=mock \
       NEXT_PUBLIC_LUBAN_VERSION="$(node -p 'require("./package.json").version')" \
       NEXT_PUBLIC_LUBAN_BUILD_CHANNEL="$channel" \
       NEXT_PUBLIC_LUBAN_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo unknown)" \
