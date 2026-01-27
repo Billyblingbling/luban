@@ -1107,7 +1107,7 @@ mod tests {
     #[test]
     fn build_archive_spec_uses_bsdtar_flags() {
         let app_dir = Path::new("/tmp/Luban.app");
-        let archive_path = Path::new("/tmp/Luban_0.1.5_darwin-aarch64.app.tar.gz");
+        let archive_path = Path::new("/tmp/Luban_0.1.6_darwin-aarch64.app.tar.gz");
         let spec = build_archive_spec(app_dir, archive_path, true).expect("must build spec");
         assert_eq!(spec.program, "bsdtar");
         assert!(spec.args.iter().any(|arg| arg == "--no-xattrs"));
@@ -1188,16 +1188,16 @@ mod tests {
 
         std::fs::write(
             darwin.join("package.env"),
-            "LUBAN_PACKAGE_VERSION=0.1.5\n\
-LUBAN_PACKAGE_URL=https://releases.example/0.1.5/Luban_0.1.5_darwin-universal.app.tar.gz\n\
+            "LUBAN_PACKAGE_VERSION=0.1.6\n\
+LUBAN_PACKAGE_URL=https://releases.example/0.1.6/Luban_0.1.6_darwin-universal.app.tar.gz\n\
 LUBAN_PACKAGE_SIGNATURE=darwin-signature\n\
 LUBAN_PACKAGE_MANIFEST_KEYS=darwin-aarch64,darwin-x86_64\n",
         )
         .expect("must write darwin env");
         std::fs::write(
             windows.join("package.env"),
-            "LUBAN_PACKAGE_VERSION=0.1.5\n\
-LUBAN_PACKAGE_URL=https://releases.example/0.1.5/Luban_0.1.5_windows-x86_64.msi\n\
+            "LUBAN_PACKAGE_VERSION=0.1.6\n\
+LUBAN_PACKAGE_URL=https://releases.example/0.1.6/Luban_0.1.6_windows-x86_64.msi\n\
 LUBAN_PACKAGE_SIGNATURE=windows-signature\n\
 LUBAN_PACKAGE_MANIFEST_KEYS=windows-x86_64\n",
         )
