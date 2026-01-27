@@ -17,7 +17,7 @@ test-fast:
 
 web cmd profile="debug":
   if [ "{{cmd}}" = "build" ]; then \
-    if ! command -v pnpm >/dev/null 2>&1; then \
+    if ! command -v pnpm >/dev/null 2>&1 && ! command -v pnpm.cmd >/dev/null 2>&1; then \
       echo "pnpm not found; install pnpm to build the web UI"; \
       exit 1; \
     fi; \
@@ -44,7 +44,7 @@ web cmd profile="debug":
       cargo run -p luban_server --profile "{{profile}}"; \
     fi; \
   elif [ "{{cmd}}" = "dev" ]; then \
-    if ! command -v pnpm >/dev/null 2>&1; then \
+    if ! command -v pnpm >/dev/null 2>&1 && ! command -v pnpm.cmd >/dev/null 2>&1; then \
       echo "pnpm not found; install pnpm to run the web dev server"; \
       exit 1; \
     fi; \
@@ -60,7 +60,7 @@ web cmd profile="debug":
       NEXT_PUBLIC_LUBAN_BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date)" \
       pnpm dev); \
   elif [ "{{cmd}}" = "dev-mock" ]; then \
-    if ! command -v pnpm >/dev/null 2>&1; then \
+    if ! command -v pnpm >/dev/null 2>&1 && ! command -v pnpm.cmd >/dev/null 2>&1; then \
       echo "pnpm not found; install pnpm to run the web dev server"; \
       exit 1; \
     fi; \
@@ -106,14 +106,14 @@ app cmd profile="debug":
   fi
 
 test-ui:
-  if ! command -v pnpm >/dev/null 2>&1; then \
+  if ! command -v pnpm >/dev/null 2>&1 && ! command -v pnpm.cmd >/dev/null 2>&1; then \
     echo "pnpm not found; cannot run Playwright tests"; \
     exit 1; \
   fi; \
   (cd web && pnpm test:e2e)
 
 test-ui-headed:
-  if ! command -v pnpm >/dev/null 2>&1; then \
+  if ! command -v pnpm >/dev/null 2>&1 && ! command -v pnpm.cmd >/dev/null 2>&1; then \
     echo "pnpm not found; cannot run Playwright tests"; \
     exit 1; \
   fi; \
@@ -145,12 +145,18 @@ build-server profile="debug":
 
 ci: fmt lint test
 
-package target profile="release":
-  cargo run --quiet --manifest-path=dev/Cargo.toml -- package "{{target}}" --profile "{{profile}}"
+package target profile="release" out_dir="dist":
+  cargo run --quiet --manifest-path=dev/Cargo.toml -- package "{{target}}" --profile "{{profile}}" --out-dir "{{out_dir}}"
 
-upload:
-  if [ ! -f .context/package/package.env ]; then \
-    echo "missing .context/package/package.env; run: just package darwin-aarch64"; \
+upload package_env="dist/package.env" latest="true":
+  if [ ! -f "{{package_env}}" ]; then \
+    echo "missing {{package_env}}; run: just package <target> [out_dir=...]"; \
     exit 1; \
   fi; \
-  cargo run --quiet --manifest-path=dev/Cargo.toml -- upload
+  cargo run --quiet --manifest-path=dev/Cargo.toml -- upload --package-env "{{package_env}}" --latest "{{latest}}"
+
+manifest packages_dir="dist" out="dist/latest.json":
+  cargo run --quiet --manifest-path=dev/Cargo.toml -- manifest --packages-dir "{{packages_dir}}" --out "{{out}}"
+
+upload-manifest manifest="dist/latest.json":
+  cargo run --quiet --manifest-path=dev/Cargo.toml -- upload-manifest --manifest "{{manifest}}"

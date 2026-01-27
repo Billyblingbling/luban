@@ -1,0 +1,390 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  pull_request:
+    branches: [main]
+    paths:
+      - justfile
+      - .github/workflows/release.yml
+      - crates/luban_tauri/tauri.conf.json
+      - crates/luban_tauri/icons/**
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ fromJSON(matrix.runs_on) }}
+    if: >-
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
+    timeout-minutes: ${{ matrix.platform == 'macos' && 180 || 90 }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS (universal)
+            target: darwin-universal
+            platform: macos
+            runs_on: '["macos-15"]'
+          - name: Linux (x86_64)
+            target: linux-x86_64
+            platform: linux
+            runs_on: '["ubuntu-latest"]'
+          - name: Linux (aarch64)
+            target: linux-aarch64
+            platform: linux
+            runs_on: '["ubuntu-24.04-arm"]'
+          - name: Windows (x86_64)
+            target: windows-x86_64
+            platform: windows
+            runs_on: '["windows-latest"]'
+    env:
+      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+      LUBAN_VAULT: ${{ secrets.LUBAN_VAULT }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate tag
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if [[ -z "${tag}" ]]; then
+            echo "tag is required" >&2
+            exit 2
+          fi
+          if [[ "${tag}" != v* ]]; then
+            echo "tag must start with 'v': ${tag}" >&2
+            exit 2
+          fi
+          if [[ "${tag}" == *-* ]]; then
+            echo "pre-release tags are not supported: ${tag}" >&2
+            exit 2
+          fi
+
+      - name: Setup Rust (macOS)
+        if: runner.os == 'macOS'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+
+      - name: Setup Rust
+        if: runner.os != 'macOS'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup just
+        uses: extractions/setup-just@v2
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            clang \
+            libclang-dev \
+            curl \
+            pkg-config \
+            libssl-dev \
+            xz-utils \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            librsvg2-dev \
+            libayatana-appindicator3-dev \
+            libx11-dev \
+            libxrandr-dev \
+            libxinerama-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            libwayland-dev \
+            libxcb1-dev \
+            libfreetype6-dev \
+            libfontconfig1-dev
+
+      - name: Install system dependencies (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install -y nsis wixtoolset
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@9.15.5 --activate
+          pnpm --version
+
+      - name: Resolve pnpm store path
+        shell: bash
+        run: echo "PNPM_STORE_PATH=$(pnpm store path --silent)" >> "${GITHUB_ENV}"
+
+      - name: pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.PNPM_STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('web/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Install 1Password CLI
+        uses: 1password/install-cli-action@v2
+
+      - name: Install Tauri CLI
+        shell: bash
+        run: cargo install tauri-cli --locked --version 2.9.5
+
+      - name: Inject secrets into .env
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${LUBAN_VAULT:?LUBAN_VAULT is required}"
+          template="$(mktemp)"
+          cleanup() {
+            rm -f "${template}"
+          }
+          trap cleanup EXIT
+
+          python3 - "${template}" <<'PY'
+          import os
+          import pathlib
+          import sys
+          
+          vault = os.environ.get("LUBAN_VAULT", "")
+          if not vault:
+              raise SystemExit("LUBAN_VAULT is required")
+          
+          src = pathlib.Path(".env.example").read_text(encoding="utf-8")
+          rendered = src.replace("$LUBAN_VAULT", vault)
+          pathlib.Path(sys.argv[1]).write_text(rendered, encoding="utf-8")
+          PY
+
+          op inject -i "${template}" -o .env
+
+      - name: Setup macOS code signing keychain
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -a
+          source .env
+          set +a
+          : "${APPLE_CERTIFICATE:?APPLE_CERTIFICATE is required}"
+          : "${APPLE_CERTIFICATE_PASSWORD:?APPLE_CERTIFICATE_PASSWORD is required}"
+
+          keychain_password="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+          echo "CI_KEYCHAIN_PASSWORD=${keychain_password}" >> "${GITHUB_ENV}"
+          keychain="build.keychain"
+
+          security create-keychain -p "${keychain_password}" "${keychain}"
+          security default-keychain -s "${keychain}"
+          security unlock-keychain -p "${keychain_password}" "${keychain}"
+          security set-keychain-settings -t 3600 -u "${keychain}"
+          security list-keychains -d user -s "${keychain}"
+
+          cert_path="dist/.ci/apple-certificate.p12"
+          python3 - "${cert_path}" <<'PY'
+          import base64
+          import os
+          import pathlib
+          import sys
+          
+          cert_path = pathlib.Path(sys.argv[1])
+          cert_path.parent.mkdir(parents=True, exist_ok=True)
+          
+          data = os.environ.get("APPLE_CERTIFICATE", "")
+          if not data:
+              raise SystemExit("APPLE_CERTIFICATE is required")
+          
+          try:
+              data = data.strip()
+              if "base64," in data:
+                  data = data.split("base64,", 1)[1]
+              compact = "".join(data.split())
+              decoded = base64.b64decode(compact, validate=True)
+          except Exception as e:
+              raise SystemExit(f"failed to base64 decode APPLE_CERTIFICATE: {e}")
+          
+          cert_path.write_bytes(decoded)
+          PY
+
+          if security import "${cert_path}" -k "${keychain}" -P "${APPLE_CERTIFICATE_PASSWORD}" -T /usr/bin/codesign; then
+            :
+          elif security import "${cert_path}" -k "${keychain}" -P "" -T /usr/bin/codesign; then
+            :
+          else
+            echo "failed to import APPLE_CERTIFICATE; check APPLE_CERTIFICATE_PASSWORD" >&2
+            exit 1
+          fi
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${keychain_password}" "${keychain}"
+
+          identity_line="$(security find-identity -v -p codesigning "${keychain}" | grep -m1 'Developer ID Application' || true)"
+          if [[ -z "${identity_line}" ]]; then
+            echo "no Developer ID Application identity found in ${keychain}" >&2
+            security find-identity -v -p codesigning "${keychain}" || true
+            exit 1
+          fi
+          identity_name="$(echo "${identity_line}" | awk -F'\"' '{print $2}')"
+          if [[ -z "${identity_name}" ]]; then
+            echo "failed to parse code signing identity from: ${identity_line}" >&2
+            exit 1
+          fi
+
+          python3 - "${identity_name}" <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          identity = sys.argv[1].replace('"', '\\"')
+          env_path = pathlib.Path(".env")
+          src = env_path.read_text(encoding="utf-8")
+          line = f'APPLE_SIGNING_IDENTITY="{identity}"'
+
+          if re.search(r'(?m)^APPLE_SIGNING_IDENTITY=.*$', src):
+              out = re.sub(r'(?m)^APPLE_SIGNING_IDENTITY=.*$', line, src)
+          else:
+              out = src
+              if out and not out.endswith("\n"):
+                  out += "\n"
+              out += line + "\n"
+
+          env_path.write_text(out, encoding="utf-8")
+          PY
+
+          echo "APPLE_SIGNING_IDENTITY=${identity_name}" >> "${GITHUB_ENV}"
+
+      - name: Package
+        shell: bash
+        run: just package "${{ matrix.target }}" release "dist/${{ matrix.target }}"
+
+      - name: Upload artifacts to R2
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: just upload "dist/${{ matrix.target }}/package.env" false
+
+      - name: Export package env
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-env-${{ matrix.target }}
+          path: dist/${{ matrix.target }}/package.env
+
+      - name: Cleanup injected env file
+        if: always()
+        shell: bash
+        run: rm -f .env
+
+  publish_latest:
+    name: Publish latest.json
+    runs-on: ubuntu-latest
+    needs: build
+    if: >-
+      github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    timeout-minutes: 30
+    env:
+      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+      LUBAN_VAULT: ${{ secrets.LUBAN_VAULT }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if [[ -z "${tag}" ]]; then
+            echo "tag is required" >&2
+            exit 2
+          fi
+          if [[ "${tag}" != v* ]]; then
+            echo "tag must start with 'v': ${tag}" >&2
+            exit 2
+          fi
+          if [[ "${tag}" == *-* ]]; then
+            echo "pre-release tags are not supported: ${tag}" >&2
+            exit 2
+          fi
+
+      - name: Download package envs
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/.ci/release-packages
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup just
+        uses: extractions/setup-just@v2
+
+      - name: Install 1Password CLI
+        uses: 1password/install-cli-action@v2
+
+      - name: Inject secrets into .env
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${LUBAN_VAULT:?LUBAN_VAULT is required}"
+          template="$(mktemp)"
+          cleanup() {
+            rm -f "${template}"
+          }
+          trap cleanup EXIT
+
+          python3 - "${template}" <<'PY'
+          import os
+          import pathlib
+          import sys
+          
+          vault = os.environ.get("LUBAN_VAULT", "")
+          if not vault:
+              raise SystemExit("LUBAN_VAULT is required")
+          
+          src = pathlib.Path(".env.example").read_text(encoding="utf-8")
+          rendered = src.replace("$LUBAN_VAULT", vault)
+          pathlib.Path(sys.argv[1]).write_text(rendered, encoding="utf-8")
+          PY
+
+          op inject -i "${template}" -o .env
+
+      - name: Build latest.json
+        shell: bash
+        run: just manifest "dist/.ci/release-packages" "dist/.ci/release-packages/latest.json"
+
+      - name: Upload latest.json to R2
+        shell: bash
+        run: just upload-manifest "dist/.ci/release-packages/latest.json"
+
+      - name: Cleanup injected env file
+        if: always()
+        shell: bash
+        run: rm -f .env
