@@ -1,9 +1,7 @@
 .next/
 out/
-!out/
-out/*
-!out/.gitkeep
 dist/
+next-env.d.ts
 
 public/ghostty-vt.wasm
 
