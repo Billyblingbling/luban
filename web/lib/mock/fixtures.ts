@@ -160,16 +160,27 @@ export function defaultMockFixtures(): MockFixtures {
   const workspace1: WorkspaceId = 1
   const workspace2: WorkspaceId = 2
   const workspace3: WorkspaceId = 3
+  const workspace4: WorkspaceId = 4
+  const workspace5: WorkspaceId = 5
+  const workspace6: WorkspaceId = 6
+  const workspace7: WorkspaceId = 7
+  const workspace8: WorkspaceId = 8
+  const workspace9: WorkspaceId = 9
+  const workspace10: WorkspaceId = 10
+  const workspace11: WorkspaceId = 11
 
   const thread1: WorkspaceThreadId = 1
   const thread2: WorkspaceThreadId = 2
   const thread3: WorkspaceThreadId = 3
+  const thread4: WorkspaceThreadId = 4
 
   const thread10: WorkspaceThreadId = 10
   const thread11: WorkspaceThreadId = 11
 
   const project1: ProjectId = "mock-project-1"
   const project2: ProjectId = "mock-project-2"
+  const project3: ProjectId = "mock-project-3"
+  const project4: ProjectId = "mock-project-4"
 
   const imgA = attachment({
     id: "mock_att_img_a",
@@ -243,6 +254,114 @@ export function defaultMockFixtures(): MockFixtures {
               merge_ready: false,
             },
           },
+          {
+            id: workspace4,
+            short_id: "W4",
+            workspace_name: "agent-running",
+            branch_name: "agent/running",
+            worktree_path: "/mock/git/project-agent-running",
+            status: "active",
+            archive_status: op("idle"),
+            branch_rename_status: op("idle"),
+            agent_run_status: op("running"),
+            has_unread_completion: false,
+            pull_request: null,
+          },
+          {
+            id: workspace5,
+            short_id: "W5",
+            workspace_name: "ci-failure",
+            branch_name: "ci/failure",
+            worktree_path: "/mock/git/project-ci-failure",
+            status: "active",
+            archive_status: op("idle"),
+            branch_rename_status: op("idle"),
+            agent_run_status: op("idle"),
+            has_unread_completion: false,
+            pull_request: {
+              number: 13,
+              is_draft: false,
+              state: "open",
+              ci_state: "failure",
+              merge_ready: false,
+            },
+          },
+          {
+            id: workspace6,
+            short_id: "W6",
+            workspace_name: "ci-success",
+            branch_name: "ci/success",
+            worktree_path: "/mock/git/project-ci-success",
+            status: "active",
+            archive_status: op("idle"),
+            branch_rename_status: op("idle"),
+            agent_run_status: op("idle"),
+            has_unread_completion: false,
+            pull_request: {
+              number: 14,
+              is_draft: false,
+              state: "open",
+              ci_state: "success",
+              merge_ready: false,
+            },
+          },
+          {
+            id: workspace7,
+            short_id: "W7",
+            workspace_name: "ci-unknown",
+            branch_name: "ci/unknown",
+            worktree_path: "/mock/git/project-ci-unknown",
+            status: "active",
+            archive_status: op("idle"),
+            branch_rename_status: op("idle"),
+            agent_run_status: op("idle"),
+            has_unread_completion: false,
+            pull_request: {
+              number: 15,
+              is_draft: false,
+              state: "open",
+              ci_state: null,
+              merge_ready: false,
+            },
+          },
+          {
+            id: workspace8,
+            short_id: "W8",
+            workspace_name: "pr-merged",
+            branch_name: "pr/merged",
+            worktree_path: "/mock/git/project-pr-merged",
+            status: "active",
+            archive_status: op("idle"),
+            branch_rename_status: op("idle"),
+            agent_run_status: op("idle"),
+            has_unread_completion: false,
+            pull_request: {
+              number: 16,
+              is_draft: false,
+              state: "merged",
+              ci_state: "success",
+              merge_ready: true,
+            },
+          },
+          {
+            id: workspace9,
+            short_id: "W9",
+            workspace_name: "pr-closed",
+            branch_name: "pr/closed",
+            worktree_path: "/mock/git/project-pr-closed",
+            status: "active",
+            archive_status: op("idle"),
+            branch_rename_status: op("idle"),
+            agent_run_status: op("idle"),
+            has_unread_completion: false,
+            pull_request: {
+              number: 17,
+              is_draft: false,
+              state: "closed",
+              ci_state: "failure",
+              merge_ready: false,
+            },
+          },
         ],
       },
       {
@@ -265,6 +384,54 @@ export function defaultMockFixtures(): MockFixtures {
             branch_rename_status: op("idle"),
             agent_run_status: op("idle"),
             has_unread_completion: false,
+            pull_request: null,
+          },
+        ],
+      },
+      {
+        id: project3,
+        name: "Mock Local Project (Running)",
+        slug: "mock-local-project-running",
+        path: "/mock/local/project-running",
+        is_git: false,
+        expanded: true,
+        create_workspace_status: op("idle"),
+        workspaces: [
+          {
+            id: workspace10,
+            short_id: "W10",
+            workspace_name: "main",
+            branch_name: "",
+            worktree_path: "/mock/local/project-running",
+            status: "active",
+            archive_status: op("idle"),
+            branch_rename_status: op("idle"),
+            agent_run_status: op("running"),
+            has_unread_completion: false,
+            pull_request: null,
+          },
+        ],
+      },
+      {
+        id: project4,
+        name: "Mock Local Project (Pending)",
+        slug: "mock-local-project-pending",
+        path: "/mock/local/project-pending",
+        is_git: false,
+        expanded: true,
+        create_workspace_status: op("idle"),
+        workspaces: [
+          {
+            id: workspace11,
+            short_id: "W11",
+            workspace_name: "main",
+            branch_name: "",
+            worktree_path: "/mock/local/project-pending",
+            status: "active",
+            archive_status: op("idle"),
+            branch_rename_status: op("idle"),
+            agent_run_status: op("idle"),
+            has_unread_completion: true,
             pull_request: null,
           },
         ],
@@ -305,11 +472,12 @@ export function defaultMockFixtures(): MockFixtures {
     [workspace1]: {
       rev: 1,
       workspace_id: workspace1,
-      tabs: workspaceTabs({ open: [thread1, thread2, thread3], active: thread1 }),
+      tabs: workspaceTabs({ open: [thread1, thread2, thread3, thread4], active: thread1 }),
       threads: [
-        { thread_id: thread1, remote_thread_id: null, title: "Design iteration", updated_at_unix_seconds: unixSeconds(0) },
-        { thread_id: thread2, remote_thread_id: null, title: "Bugfix notes", updated_at_unix_seconds: unixSeconds(-3600) },
-        { thread_id: thread3, remote_thread_id: null, title: "Release checklist", updated_at_unix_seconds: unixSeconds(-7200) },
+        { thread_id: thread1, remote_thread_id: null, title: "Running: full coverage", updated_at_unix_seconds: unixSeconds(0) },
+        { thread_id: thread2, remote_thread_id: null, title: "Running: with queue", updated_at_unix_seconds: unixSeconds(-30) },
+        { thread_id: thread3, remote_thread_id: null, title: "Canceled", updated_at_unix_seconds: unixSeconds(-60) },
+        { thread_id: thread4, remote_thread_id: null, title: "Completed", updated_at_unix_seconds: unixSeconds(-90) },
       ],
     },
     [workspace2]: {
@@ -326,8 +494,56 @@ export function defaultMockFixtures(): MockFixtures {
       workspace_id: workspace3,
       tabs: workspaceTabs({ open: [thread1], active: thread1 }),
       threads: [
-        { thread_id: thread1, remote_thread_id: null, title: "Local workspace", updated_at_unix_seconds: unixSeconds(-60) },
+        { thread_id: thread1, remote_thread_id: null, title: "Local idle", updated_at_unix_seconds: unixSeconds(-60) },
       ],
+    },
+    [workspace4]: {
+      rev: 1,
+      workspace_id: workspace4,
+      tabs: workspaceTabs({ open: [thread1], active: thread1 }),
+      threads: [{ thread_id: thread1, remote_thread_id: null, title: "Agent running", updated_at_unix_seconds: unixSeconds(-10) }],
+    },
+    [workspace5]: {
+      rev: 1,
+      workspace_id: workspace5,
+      tabs: workspaceTabs({ open: [thread1], active: thread1 }),
+      threads: [{ thread_id: thread1, remote_thread_id: null, title: "PR: CI failure", updated_at_unix_seconds: unixSeconds(-20) }],
+    },
+    [workspace6]: {
+      rev: 1,
+      workspace_id: workspace6,
+      tabs: workspaceTabs({ open: [thread1], active: thread1 }),
+      threads: [{ thread_id: thread1, remote_thread_id: null, title: "PR: CI passed", updated_at_unix_seconds: unixSeconds(-25) }],
+    },
+    [workspace7]: {
+      rev: 1,
+      workspace_id: workspace7,
+      tabs: workspaceTabs({ open: [thread1], active: thread1 }),
+      threads: [{ thread_id: thread1, remote_thread_id: null, title: "PR: CI unknown", updated_at_unix_seconds: unixSeconds(-26) }],
+    },
+    [workspace8]: {
+      rev: 1,
+      workspace_id: workspace8,
+      tabs: workspaceTabs({ open: [thread1], active: thread1 }),
+      threads: [{ thread_id: thread1, remote_thread_id: null, title: "PR: merged", updated_at_unix_seconds: unixSeconds(-27) }],
+    },
+    [workspace9]: {
+      rev: 1,
+      workspace_id: workspace9,
+      tabs: workspaceTabs({ open: [thread1], active: thread1 }),
+      threads: [{ thread_id: thread1, remote_thread_id: null, title: "PR: closed", updated_at_unix_seconds: unixSeconds(-28) }],
+    },
+    [workspace10]: {
+      rev: 1,
+      workspace_id: workspace10,
+      tabs: workspaceTabs({ open: [thread1], active: thread1 }),
+      threads: [{ thread_id: thread1, remote_thread_id: null, title: "Local running", updated_at_unix_seconds: unixSeconds(-50) }],
+    },
+    [workspace11]: {
+      rev: 1,
+      workspace_id: workspace11,
+      tabs: workspaceTabs({ open: [thread1], active: thread1 }),
+      threads: [{ thread_id: thread1, remote_thread_id: null, title: "Local pending (extra)", updated_at_unix_seconds: unixSeconds(-55) }],
     },
   }
 
@@ -359,35 +575,155 @@ export function defaultMockFixtures(): MockFixtures {
   })
 
   const conversationsByWorkspaceThread: Record<string, ConversationSnapshot> = {
-    [key(workspace1, thread1)]: conversationBase({
-      workspaceId: workspace1,
-      threadId: thread1,
-      title: "Design iteration",
-      entries: [
-        { type: "user_message", text: "Hello from mock mode.", attachments: [] },
-        { type: "agent_item", id: "seed_agent_message_1", kind: "agent_message", payload: { text: "This is mock mode. UI and interaction changes should iterate here." } },
-        { type: "agent_item", id: "seed_reasoning_1", kind: "reasoning", payload: { text: "Contracts keep the server aligned while UI iterates quickly." } },
-        { type: "agent_item", id: "seed_cmd_1", kind: "command_execution", payload: { command: "just web dev-mock", aggregated_output: "Starting web dev server in mock mode...", status: "done" } },
-        { type: "user_message", text: "Can you show attachments?", attachments: [imgA, fileA] },
-        { type: "agent_item", id: "seed_agent_message_2", kind: "agent_message", payload: { text: "Attachments should render using object URLs in mock mode." } },
+    [key(workspace1, thread1)]: {
+      ...conversationBase({
+        workspaceId: workspace1,
+        threadId: thread1,
+        title: "Running: full coverage",
+        entries: [
+          { type: "user_message", text: "Start a running turn that covers all message types.", attachments: [] },
+          { type: "agent_item", id: "running_done_msg_1", kind: "agent_message", payload: { text: "Working on it." } },
+          { type: "agent_item", id: "running_done_reasoning_1", kind: "reasoning", payload: { text: "Plan: gather context, run checks, then apply a minimal patch." } },
+          {
+            type: "agent_item",
+            id: "running_done_cmd_1",
+            kind: "command_execution",
+            payload: { command: "zsh -lc \"rg -n \\\"mock mode\\\" -S web\"", aggregated_output: "web/lib/mock/fixtures.ts:...", status: "done" },
+          },
+          {
+            type: "agent_item",
+            id: "running_done_search_1",
+            kind: "web_search",
+            payload: { query: "Next.js mock mode fixtures best practices" },
+          },
+          {
+            type: "agent_item",
+            id: "running_done_mcp_1",
+            kind: "mcp_tool_call",
+            payload: {
+              server: "fs",
+              tool: "read_file",
+              arguments: { path: "README.md" },
+              result: { ok: true },
+              error: null,
+              status: "done",
+            },
+          },
+          {
+            type: "agent_item",
+            id: "running_done_todo_1",
+            kind: "todo_list",
+            payload: { items: [{ completed: true, text: "Add mock fixtures" }, { completed: false, text: "Verify UI states" }] },
+          },
+          {
+            type: "agent_item",
+            id: "running_done_files_1",
+            kind: "file_change",
+            payload: { changes: [{ kind: "update", path: "web/lib/mock/fixtures.ts" }, { kind: "add", path: "web/tests/e2e/new.spec.ts" }] },
+          },
+          { type: "agent_item", id: "running_done_error_item_1", kind: "error", payload: { message: "Non-fatal error: transient network failure." } },
+          { type: "turn_error", message: "Turn failed: command returned a non-zero exit code." },
+          { type: "turn_duration", duration_ms: 894 },
+          { type: "turn_usage", usage_json: null },
+          { type: "user_message", text: "Continue with a second completed round.", attachments: [imgA, fileA] },
+          { type: "agent_item", id: "running_done_msg_2", kind: "agent_message", payload: { text: "Acknowledged. Continuing." } },
+          { type: "agent_item", id: "running_done_cmd_2", kind: "command_execution", payload: { command: "zsh -lc \"just fmt\"", aggregated_output: "Formatting...", status: "done" } },
+        ],
+      }),
+      run_status: op("running"),
+      run_started_at_unix_ms: unixMs(-18_000),
+      run_finished_at_unix_ms: null,
+      in_progress_items: [
+        { id: "loop_agent_message_1", kind: "agent_message", payload: { text: "Streaming output..." } },
+        { id: "loop_reasoning_1", kind: "reasoning", payload: { text: "Thinking about edge cases." } },
+        {
+          id: "loop_cmd_1",
+          kind: "command_execution",
+          payload: { command: "zsh -lc \"just test\"", aggregated_output: "Running tests...", status: "in_progress" },
+        },
+        { id: "loop_file_change_1", kind: "file_change", payload: { changes: [{ kind: "update", path: "web/lib/mock/fixtures.ts" }] } },
+        {
+          id: "loop_mcp_1",
+          kind: "mcp_tool_call",
+          payload: { server: "git", tool: "status", arguments: {}, result: null, error: null, status: "in_progress" },
+        },
+        { id: "loop_search_1", kind: "web_search", payload: { query: "GitHub PR status mapping ci_state merge_ready" } },
+        { id: "loop_todo_1", kind: "todo_list", payload: { items: [{ completed: false, text: "Update fixtures" }] } },
+        { id: "loop_error_1", kind: "error", payload: { message: "Retrying after a temporary failure." } },
       ],
-    }),
-    [key(workspace1, thread2)]: conversationBase({
-      workspaceId: workspace1,
-      threadId: thread2,
-      title: "Bugfix notes",
-      entries: [
-        { type: "user_message", text: "Repro steps: ...", attachments: [] },
-        { type: "agent_item", id: "seed_agent_message_3", kind: "agent_message", payload: { text: "Mock data is deterministic so UI tests remain stable." } },
+    },
+    [key(workspace1, thread2)]: {
+      ...conversationBase({
+        workspaceId: workspace1,
+        threadId: thread2,
+        title: "Running: with queue",
+        entries: [
+          { type: "user_message", text: "Queue a few prompts while running.", attachments: [] },
+          { type: "agent_item", id: "queue_running_msg_1", kind: "agent_message", payload: { text: "Processing current prompt; others are queued." } },
+        ],
+      }),
+      run_status: op("running"),
+      run_started_at_unix_ms: unixMs(-12_000),
+      run_finished_at_unix_ms: null,
+      pending_prompts: [
+        { id: 1, text: "First queued prompt.", attachments: [], run_config: { model_id: "gpt-5", thinking_effort: "medium" } },
+        { id: 2, text: "Second queued prompt.", attachments: [fileA], run_config: { model_id: "gpt-5", thinking_effort: "medium" } },
       ],
-    }),
-    [key(workspace1, thread3)]: conversationBase({
+    },
+    [key(workspace1, thread3)]: {
+      ...conversationBase({
+        workspaceId: workspace1,
+        threadId: thread3,
+        title: "Canceled",
+        entries: [
+          { type: "user_message", text: "Start then cancel.", attachments: [] },
+          {
+            type: "agent_item",
+            id: "canceled_cmd_1",
+            kind: "command_execution",
+            payload: { command: "zsh -lc \"sleep 10\"", aggregated_output: "Canceled by user.", status: "done" },
+          },
+          { type: "turn_canceled" },
+        ],
+      }),
+      run_status: op("idle"),
+      run_started_at_unix_ms: unixMs(-25_000),
+      run_finished_at_unix_ms: unixMs(-24_000),
+    },
+    [key(workspace1, thread4)]: conversationBase({
       workspaceId: workspace1,
-      threadId: thread3,
-      title: "Release checklist",
+      threadId: thread4,
+      title: "Completed",
       entries: [
-        { type: "user_message", text: "Checklist item 1", attachments: [] },
-        { type: "agent_item", id: "seed_agent_message_4", kind: "agent_message", payload: { text: "- Verify\n- Package\n- Ship" } },
+        { type: "user_message", text: "Show all supported message types in a completed conversation.", attachments: [] },
+        { type: "agent_item", id: "completed_msg_1", kind: "agent_message", payload: { text: "Done." } },
+        { type: "agent_item", id: "completed_reasoning_1", kind: "reasoning", payload: { text: "This is a completed message containing reasoning." } },
+        { type: "agent_item", id: "completed_search_1", kind: "web_search", payload: { query: "Example web search query" } },
+        {
+          type: "agent_item",
+          id: "completed_mcp_1",
+          kind: "mcp_tool_call",
+          payload: {
+            server: "fs",
+            tool: "read_file",
+            arguments: { path: "web/lib/luban-api.ts" },
+            result: null,
+            error: { message: "File not found" },
+            status: "done",
+          },
+        },
+        {
+          type: "agent_item",
+          id: "completed_cmd_1",
+          kind: "command_execution",
+          payload: { command: "zsh -lc \"echo ok\"", aggregated_output: "ok", status: "done" },
+        },
+        { type: "agent_item", id: "completed_files_1", kind: "file_change", payload: { changes: [{ kind: "add", path: "notes.txt" }] } },
+        { type: "agent_item", id: "completed_todo_1", kind: "todo_list", payload: { items: [{ completed: true, text: "Ship" }] } },
+        { type: "agent_item", id: "completed_error_item_1", kind: "error", payload: { message: "A handled error occurred." } },
+        { type: "turn_error", message: "Turn failed: provider returned an error." },
+        { type: "turn_duration", duration_ms: 1234 },
+        { type: "turn_usage", usage_json: null },
       ],
     }),
     [key(workspace2, thread10)]: conversationBase({
@@ -405,7 +741,117 @@ export function defaultMockFixtures(): MockFixtures {
       title: "Contracts",
       entries: [
         { type: "user_message", text: "Update contracts when changing /api routes.", attachments: [] },
-        { type: "agent_item", id: "seed_agent_message_6", kind: "agent_message", payload: { text: "Run `just test` to ensure contracts progress covers server routes." } },
+        {
+          type: "agent_item",
+          id: "seed_agent_message_6",
+          kind: "agent_message",
+          payload: { text: "Run `just test` to ensure contracts progress covers server routes." },
+        },
+      ],
+    }),
+    [key(workspace4, thread1)]: {
+      ...conversationBase({
+        workspaceId: workspace4,
+        threadId: thread1,
+        title: "Agent running",
+        entries: [
+          { type: "user_message", text: "Agent status example (running).", attachments: [] },
+          agentMessage("This workspace row should show agent running."),
+        ],
+      }),
+      run_status: op("running"),
+      run_started_at_unix_ms: unixMs(-40_000),
+      run_finished_at_unix_ms: null,
+      in_progress_items: [
+        {
+          id: "agent_running_cmd_1",
+          kind: "command_execution",
+          payload: { command: "zsh -lc \"echo hello\"", aggregated_output: "hello", status: "in_progress" },
+        },
+      ],
+    },
+    [key(workspace5, thread1)]: conversationBase({
+      workspaceId: workspace5,
+      threadId: thread1,
+      title: "PR: CI failure",
+      entries: [
+        { type: "user_message", text: "PR status example (CI failed).", attachments: [] },
+        agentMessage("This workspace row should show CI failed."),
+      ],
+    }),
+    [key(workspace6, thread1)]: conversationBase({
+      workspaceId: workspace6,
+      threadId: thread1,
+      title: "PR: CI passed",
+      entries: [
+        { type: "user_message", text: "PR status example (CI passed).", attachments: [] },
+        agentMessage("This workspace row should show CI passed (not merge-ready)."),
+      ],
+    }),
+    [key(workspace7, thread1)]: conversationBase({
+      workspaceId: workspace7,
+      threadId: thread1,
+      title: "PR: CI unknown",
+      entries: [
+        { type: "user_message", text: "PR status example (CI unknown / running).", attachments: [] },
+        agentMessage("This workspace row should show CI running."),
+      ],
+    }),
+    [key(workspace8, thread1)]: conversationBase({
+      workspaceId: workspace8,
+      threadId: thread1,
+      title: "PR: merged",
+      entries: [
+        { type: "user_message", text: "PR status example (merged).", attachments: [] },
+        agentMessage("This workspace row should show merged / done."),
+      ],
+    }),
+    [key(workspace9, thread1)]: conversationBase({
+      workspaceId: workspace9,
+      threadId: thread1,
+      title: "PR: closed",
+      entries: [
+        { type: "user_message", text: "PR status example (closed).", attachments: [] },
+        agentMessage("This workspace row should not show an open PR status."),
+      ],
+    }),
+    [key(workspace3, thread1)]: conversationBase({
+      workspaceId: workspace3,
+      threadId: thread1,
+      title: "Local idle",
+      entries: [
+        { type: "user_message", text: "Non-git project idle state.", attachments: [] },
+        agentMessage("This project should show agent idle."),
+      ],
+    }),
+    [key(workspace10, thread1)]: {
+      ...conversationBase({
+        workspaceId: workspace10,
+        threadId: thread1,
+        title: "Local running",
+        entries: [
+          { type: "user_message", text: "Non-git project running state.", attachments: [] },
+          agentMessage("This project should show agent running."),
+        ],
+      }),
+      run_status: op("running"),
+      run_started_at_unix_ms: unixMs(-55_000),
+      run_finished_at_unix_ms: null,
+      in_progress_items: [
+        {
+          id: "local_in_progress_cmd_1",
+          kind: "command_execution",
+          payload: { command: "zsh -lc \"ls\"", aggregated_output: "", status: "in_progress" },
+        },
+      ],
+    },
+    [key(workspace11, thread1)]: conversationBase({
+      workspaceId: workspace11,
+      threadId: thread1,
+      title: "Local pending (extra)",
+      entries: [
+        { type: "user_message", text: "Non-git project pending state (extra).", attachments: [] },
+        agentMessage("This project should show agent pending (awaiting read)."),
       ],
     }),
   }
