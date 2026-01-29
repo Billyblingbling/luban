@@ -893,7 +893,7 @@ export function PtyTerminal() {
           "--terminal-foreground": "var(--foreground)",
         } as unknown as CSSProperties
       }
-      className="luban-terminal h-full w-full p-0 font-mono text-xs overflow-hidden bg-secondary text-foreground focus:outline-none flex"
+      className="luban-terminal h-full w-full p-0 font-mono text-xs overflow-hidden bg-background text-foreground focus:outline-none flex"
     >
       <div className="flex-1 min-h-0 min-w-0 overflow-hidden px-3">
         <div ref={containerRef} className="h-full w-full overflow-hidden" />

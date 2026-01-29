@@ -402,7 +402,7 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
   return (
     <aside
       data-testid="left-sidebar"
-      className="flex-shrink-0 border-r border-border bg-secondary flex flex-col overflow-x-hidden"
+      className="flex-shrink-0 border-r border-border bg-background flex flex-col overflow-x-hidden"
       style={{ width: `${widthPx}px` }}
     >
       <div className="flex items-center justify-between h-11 px-3 border-b border-border">
@@ -465,8 +465,8 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
                   className={cn(
                     "relative flex items-center mx-2 rounded-xl overflow-hidden transition-all duration-200",
                     isStandaloneMainActive
-                      ? "bg-glass-surface shadow-lg"
-                      : "hover:bg-glass-surface-muted/50",
+                      ? "z-10 bg-card ring-1 ring-border/80 shadow-[0_2px_8px_rgba(0,0,0,0.08)] dark:shadow-[0_2px_12px_rgba(0,0,0,0.4)] dark:ring-white/10"
+                      : "hover:bg-muted hover:shadow-sm",
                   )}
                 >
                 <button
@@ -599,8 +599,8 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
                       className={cn(
                         "group/worktree relative flex items-center gap-2 px-2 py-2 mx-2 rounded-xl cursor-pointer outline-none transition-all duration-200",
                         worktree.workspaceId === activeWorkspaceId
-                          ? "bg-glass-surface shadow-lg"
-                          : "hover:bg-glass-surface-muted/50",
+                          ? "z-10 bg-card ring-1 ring-border/80 shadow-[0_2px_8px_rgba(0,0,0,0.08)] dark:shadow-[0_2px_12px_rgba(0,0,0,0.4)] dark:ring-white/10"
+                          : "hover:bg-muted hover:shadow-sm",
                         newlyCreatedWorkspaceId === worktree.workspaceId &&
                           "animate-in slide-in-from-left-2 fade-in duration-300 ring-1 ring-primary/30",
                         worktree.isArchiving && "animate-pulse opacity-50 pointer-events-none",

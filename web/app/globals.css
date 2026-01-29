@@ -33,8 +33,9 @@
   --popover-foreground: var(--base05);
   --primary: var(--base0d);
   --primary-foreground: var(--base00);
-  --secondary: var(--base01);
+  --secondary: var(--base00);
   --secondary-foreground: var(--base04);
+  --floating-card-shadow: 0 4px 24px -4px rgba(0, 0, 0, 0.12);
   --muted: color-mix(in srgb, var(--base01) 25%, var(--base00));
   --muted-foreground: var(--base03);
   --accent: color-mix(in srgb, var(--base0c) 12%, var(--base00));
@@ -142,7 +143,7 @@
   --popover-foreground: var(--base05);
   --primary: var(--base0d);
   --primary-foreground: var(--base07);
-  --secondary: var(--base01);
+  --secondary: var(--base00);
   --secondary-foreground: var(--base05);
   --muted: var(--base01);
   --muted-foreground: var(--base04);
@@ -162,6 +163,7 @@
   --chart-5: var(--base0e);
   --sidebar: var(--base00);
   --sidebar-foreground: var(--base05);
+  --floating-card-shadow: 0 4px 24px -4px rgba(0, 0, 0, 0.4);
   --sidebar-primary: var(--base0d);
   --sidebar-primary-foreground: var(--base07);
   --sidebar-accent: var(--base0f);
@@ -244,6 +246,7 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
   --font-serif: "Source Serif 4", "Source Serif 4 Fallback";
+  --shadow-floating-card: var(--floating-card-shadow);
 
   /* Add semantic status color mappings */
   --color-status-idle: var(--status-idle);

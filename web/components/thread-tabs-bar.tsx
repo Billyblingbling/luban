@@ -5,6 +5,12 @@ import { ChevronDown, GitCompareArrows, MessageSquare, Plus, RotateCcw, X } from
 
 import { cn } from "@/lib/utils"
 import type { ArchivedTab, ChatTab } from "@/lib/use-thread-tabs"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
 
 export function ThreadTabsBar(props: {
   tabs: ChatTab[]
@@ -22,18 +28,18 @@ export function ThreadTabsBar(props: {
   const [showTabDropdown, setShowTabDropdown] = useState(false)
 
   return (
-    <div className="flex items-center h-11 border-b border-border bg-secondary px-2">
-      <div className="flex-1 flex items-center gap-1 min-w-0 overflow-x-auto scrollbar-none py-1.5">
+    <div className="flex items-center h-10 bg-background px-2 border-b border-border">
+      <div className="flex-1 flex items-center gap-0.5 min-w-0 overflow-x-auto scrollbar-none py-1.5 pl-1">
         {props.tabs.map((tab) => (
           <div
             key={tab.id}
             data-testid={`thread-tab-${tab.id}`}
             onClick={() => props.onTabClick(tab.id)}
             className={cn(
-              "group relative flex items-center gap-2 h-8 px-3 cursor-pointer transition-all duration-200 min-w-0 max-w-[180px] rounded-lg",
+              "group relative flex items-center gap-2 h-7 px-3 cursor-pointer transition-all duration-200 min-w-0 max-w-[180px] rounded-md",
               props.activePanel === "thread" && tab.id === props.activeTabId
-                ? "text-foreground bg-glass-surface shadow-lg"
-                : "text-muted-foreground hover:text-foreground hover:bg-glass-surface-muted/50",
+                ? "z-10 text-foreground bg-card ring-1 ring-border/80 shadow-[0_2px_8px_rgba(0,0,0,0.08)] dark:shadow-[0_2px_12px_rgba(0,0,0,0.4)] dark:ring-white/10"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted hover:shadow-sm",
             )}
           >
             <MessageSquare className="w-3.5 h-3.5 flex-shrink-0" />
@@ -43,9 +49,9 @@ export function ThreadTabsBar(props: {
             {props.tabs.length > 1 && (
               <button
                 onClick={(e) => props.onCloseTab(tab.id, e)}
-                className="p-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto hover:bg-muted rounded transition-all"
+                className="absolute right-0 top-0 bottom-0 w-7 flex items-center justify-center bg-muted rounded-r-md opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-all"
               >
-                <X className="w-3 h-3" />
+                <X className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
@@ -56,20 +62,20 @@ export function ThreadTabsBar(props: {
             key="diff-tab"
             onClick={props.onDiffTabClick}
             className={cn(
-              "group relative flex items-center gap-2 h-8 px-3 cursor-pointer transition-all duration-200 min-w-0 max-w-[180px] rounded-lg",
+              "group relative flex items-center gap-2 h-7 px-3 cursor-pointer transition-all duration-200 min-w-0 max-w-[180px] rounded-md",
               props.activePanel === "diff"
-                ? "text-foreground bg-glass-surface shadow-lg"
-                : "text-muted-foreground hover:text-foreground hover:bg-glass-surface-muted/50",
+                ? "z-10 text-foreground bg-card ring-1 ring-border/80 shadow-[0_2px_8px_rgba(0,0,0,0.08)] dark:shadow-[0_2px_12px_rgba(0,0,0,0.4)] dark:ring-white/10"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted hover:shadow-sm",
             )}
           >
             <GitCompareArrows className="w-3.5 h-3.5 flex-shrink-0" />
             <span className="text-xs truncate flex-1">Changes</span>
             <button
               onClick={props.onCloseDiffTab}
-              className="p-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto hover:bg-muted rounded transition-all"
+              className="absolute right-0 top-0 bottom-0 w-7 flex items-center justify-center bg-muted rounded-r-md opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-all"
               title="Close changes tab"
             >
-              <X className="w-3 h-3" />
+              <X className="w-3.5 h-3.5" />
             </button>
           </div>
         )}
