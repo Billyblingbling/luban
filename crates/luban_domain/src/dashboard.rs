@@ -1,7 +1,7 @@
 use crate::time::unix_seconds_or_zero;
 use crate::{
-    AppState, CodexThreadItem, ConversationEntry, OperationStatus, Project, PullRequestInfo,
-    Workspace, WorkspaceId, WorkspaceStatus,
+    AppState, ConversationEntry, OperationStatus, Project, PullRequestInfo, Workspace, WorkspaceId,
+    WorkspaceStatus,
 };
 use std::collections::HashMap;
 use std::time::SystemTime;
@@ -149,14 +149,12 @@ pub fn dashboard_preview(
     if let Some(conversation) = conversation {
         for entry in conversation.entries.iter().rev() {
             match entry {
-                ConversationEntry::UserMessage { text, .. } => {
-                    messages.push(DashboardPreviewMessage::User(text.clone()));
-                }
-                ConversationEntry::CodexItem { item } => {
-                    if let CodexThreadItem::AgentMessage { text, .. } = item.as_ref() {
-                        messages.push(DashboardPreviewMessage::Agent(text.clone()));
-                    }
-                }
+                ConversationEntry::UserEvent {
+                    event: crate::UserEvent::Message { text, .. },
+                } => messages.push(DashboardPreviewMessage::User(text.clone())),
+                ConversationEntry::AgentEvent {
+                    event: crate::AgentEvent::Message { text, .. },
+                } => messages.push(DashboardPreviewMessage::Agent(text.clone())),
                 _ => {}
             }
 
@@ -219,15 +217,12 @@ fn stage_for_workspace(
 fn latest_message_snippet(entries: &[ConversationEntry]) -> Option<String> {
     for entry in entries.iter().rev() {
         match entry {
-            ConversationEntry::UserMessage { text, .. } => {
-                return normalize_snippet(text);
-            }
-            ConversationEntry::CodexItem { item } => match item.as_ref() {
-                CodexThreadItem::AgentMessage { text, .. } => {
-                    return normalize_snippet(text);
-                }
-                _ => continue,
-            },
+            ConversationEntry::UserEvent {
+                event: crate::UserEvent::Message { text, .. },
+            } => return normalize_snippet(text),
+            ConversationEntry::AgentEvent {
+                event: crate::AgentEvent::Message { text, .. },
+            } => return normalize_snippet(text),
             _ => continue,
         }
     }

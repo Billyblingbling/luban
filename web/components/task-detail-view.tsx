@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useState, useMemo } from "react"
-import { ChatPanel } from "./chat-panel"
 import { TaskActivityPanel } from "./task-activity-panel"
 import { RightSidebar } from "./right-sidebar"
 import { TaskHeader } from "./shared/task-header"
@@ -18,11 +17,9 @@ interface TaskDetailViewProps {
   projectName?: string
   projectColor?: string
   onBack?: () => void
-  /** Use the new activity-based view instead of chat view */
-  useActivityView?: boolean
 }
 
-export function TaskDetailView({ taskId, taskTitle, workdir, projectName, projectColor, onBack, useActivityView = true }: TaskDetailViewProps) {
+export function TaskDetailView({ taskId, taskTitle, workdir, projectName, projectColor, onBack }: TaskDetailViewProps) {
   const {
     app,
     activeWorkdirId: activeWorkspaceId,
@@ -83,7 +80,7 @@ export function TaskDetailView({ taskId, taskTitle, workdir, projectName, projec
     return () => {
       cancelled = true
     }
-  }, [app?.rev, activeThreadId, activeWorkspaceId])
+  }, [app, activeThreadId, activeWorkspaceId])
 
   function clamp(n: number, min: number, max: number) {
     return Math.round(Math.max(min, Math.min(max, n)))
@@ -135,17 +132,10 @@ export function TaskDetailView({ taskId, taskTitle, workdir, projectName, projec
 
         {/* Chat Panel or Activity Panel */}
         <div className="flex-1 min-h-0 flex">
-          {useActivityView ? (
-            <TaskActivityPanel
-              pendingDiffFile={pendingDiffFile}
-              onDiffFileOpened={() => setPendingDiffFile(null)}
-            />
-          ) : (
-            <ChatPanel
-              pendingDiffFile={pendingDiffFile}
-              onDiffFileOpened={() => setPendingDiffFile(null)}
-            />
-          )}
+          <TaskActivityPanel
+            pendingDiffFile={pendingDiffFile}
+            onDiffFileOpened={() => setPendingDiffFile(null)}
+          />
         </div>
       </div>
 

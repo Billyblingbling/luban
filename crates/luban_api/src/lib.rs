@@ -332,8 +332,8 @@ pub struct ConversationSnapshot {
     pub entries_start: u64,
     #[serde(default)]
     pub entries_truncated: bool,
-    #[serde(default)]
-    pub in_progress_items: Vec<AgentItem>,
+    #[serde(default, alias = "in_progress_items")]
+    pub in_progress_entries: Vec<ConversationEntry>,
     #[serde(default)]
     pub pending_prompts: Vec<QueuedPromptSnapshot>,
     #[serde(default)]
@@ -536,8 +536,52 @@ impl Default for WorkspaceTabsSnapshot {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ConversationEntry {
-    UserMessage(UserMessage),
-    AgentItem(AgentItem),
+    SystemEvent(ConversationSystemEventEntry),
+    UserEvent(UserEventEntry),
+    AgentEvent(AgentEventEntry),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ConversationSystemEventEntry {
+    pub id: String,
+    pub created_at_unix_ms: u64,
+    pub event: ConversationSystemEvent,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "event_type", rename_all = "snake_case")]
+pub enum ConversationSystemEvent {
+    TaskCreated,
+    TaskStatusChanged { from: TaskStatus, to: TaskStatus },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct UserEventEntry {
+    pub event: UserEvent,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum UserEvent {
+    Message(UserMessage),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct UserMessage {
+    pub text: String,
+    pub attachments: Vec<AttachmentRef>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AgentEventEntry {
+    pub event: AgentEvent,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AgentEvent {
+    Message(AgentMessage),
+    Item(AgentItem),
     TurnUsage {
         usage_json: Option<serde_json::Value>,
     },
@@ -551,9 +595,9 @@ pub enum ConversationEntry {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct UserMessage {
+pub struct AgentMessage {
+    pub id: String,
     pub text: String,
-    pub attachments: Vec<AttachmentRef>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -621,7 +665,6 @@ pub struct AgentItem {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentItemKind {
-    AgentMessage,
     Reasoning,
     CommandExecution,
     FileChange,

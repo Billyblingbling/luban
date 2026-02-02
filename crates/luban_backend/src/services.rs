@@ -980,9 +980,11 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                 project_slug.clone(),
                 workspace_name.clone(),
                 thread_local_id,
-                vec![ConversationEntry::UserMessage {
-                    text: prompt.clone(),
-                    attachments: attachments.clone(),
+                vec![ConversationEntry::UserEvent {
+                    event: luban_domain::UserEvent::Message {
+                        text: prompt.clone(),
+                        attachments: attachments.clone(),
+                    },
                 }],
             )?;
 
@@ -1077,13 +1079,26 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                                 CodexThreadEvent::ItemCompleted { item } => {
                                     let id = codex_item_id(item).to_owned();
                                     if appended_item_ids.insert(id) {
+                                        let entry = match item {
+                                            CodexThreadItem::AgentMessage { id, text } => {
+                                                ConversationEntry::AgentEvent {
+                                                    event: luban_domain::AgentEvent::Message {
+                                                        id: id.clone(),
+                                                        text: text.clone(),
+                                                    },
+                                                }
+                                            }
+                                            _ => ConversationEntry::AgentEvent {
+                                                event: luban_domain::AgentEvent::Item {
+                                                    item: Box::new(item.clone()),
+                                                },
+                                            },
+                                        };
                                         self.sqlite.append_conversation_entries(
                                             project_slug.clone(),
                                             workspace_name.clone(),
                                             thread_local_id,
-                                            vec![ConversationEntry::CodexItem {
-                                                item: Box::new(item.clone()),
-                                            }],
+                                            vec![entry],
                                         )?;
                                     }
                                 }
@@ -1104,7 +1119,11 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                                             project_slug.clone(),
                                             workspace_name.clone(),
                                             thread_local_id,
-                                            vec![ConversationEntry::TurnDuration { duration_ms }],
+                                            vec![ConversationEntry::AgentEvent {
+                                                event: luban_domain::AgentEvent::TurnDuration {
+                                                    duration_ms,
+                                                },
+                                            }],
                                         )?;
                                         on_event(CodexThreadEvent::TurnDuration { duration_ms });
                                     }
@@ -1117,8 +1136,10 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                                         project_slug.clone(),
                                         workspace_name.clone(),
                                         thread_local_id,
-                                        vec![ConversationEntry::TurnError {
-                                            message: error.message.clone(),
+                                        vec![ConversationEntry::AgentEvent {
+                                            event: luban_domain::AgentEvent::TurnError {
+                                                message: error.message.clone(),
+                                            },
                                         }],
                                     )?;
                                     if duration_appended_for_events
@@ -1136,7 +1157,11 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                                             project_slug.clone(),
                                             workspace_name.clone(),
                                             thread_local_id,
-                                            vec![ConversationEntry::TurnDuration { duration_ms }],
+                                            vec![ConversationEntry::AgentEvent {
+                                                event: luban_domain::AgentEvent::TurnDuration {
+                                                    duration_ms,
+                                                },
+                                            }],
                                         )?;
                                         on_event(CodexThreadEvent::TurnDuration { duration_ms });
                                     }
@@ -1149,8 +1174,10 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                                         project_slug.clone(),
                                         workspace_name.clone(),
                                         thread_local_id,
-                                        vec![ConversationEntry::TurnError {
-                                            message: message.clone(),
+                                        vec![ConversationEntry::AgentEvent {
+                                            event: luban_domain::AgentEvent::TurnError {
+                                                message: message.clone(),
+                                            },
                                         }],
                                     )?;
                                     if duration_appended_for_events
@@ -1168,7 +1195,11 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                                             project_slug.clone(),
                                             workspace_name.clone(),
                                             thread_local_id,
-                                            vec![ConversationEntry::TurnDuration { duration_ms }],
+                                            vec![ConversationEntry::AgentEvent {
+                                                event: luban_domain::AgentEvent::TurnDuration {
+                                                    duration_ms,
+                                                },
+                                            }],
                                         )?;
                                         on_event(CodexThreadEvent::TurnDuration { duration_ms });
                                     }
@@ -1240,13 +1271,26 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                                 CodexThreadEvent::ItemCompleted { item } => {
                                     let id = codex_item_id(item).to_owned();
                                     if appended_item_ids.insert(id) {
+                                        let entry = match item {
+                                            CodexThreadItem::AgentMessage { id, text } => {
+                                                ConversationEntry::AgentEvent {
+                                                    event: luban_domain::AgentEvent::Message {
+                                                        id: id.clone(),
+                                                        text: text.clone(),
+                                                    },
+                                                }
+                                            }
+                                            _ => ConversationEntry::AgentEvent {
+                                                event: luban_domain::AgentEvent::Item {
+                                                    item: Box::new(item.clone()),
+                                                },
+                                            },
+                                        };
                                         self.sqlite.append_conversation_entries(
                                             project_slug.clone(),
                                             workspace_name.clone(),
                                             thread_local_id,
-                                            vec![ConversationEntry::CodexItem {
-                                                item: Box::new(item.clone()),
-                                            }],
+                                            vec![entry],
                                         )?;
                                     }
                                 }
@@ -1267,7 +1311,11 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                                             project_slug.clone(),
                                             workspace_name.clone(),
                                             thread_local_id,
-                                            vec![ConversationEntry::TurnDuration { duration_ms }],
+                                            vec![ConversationEntry::AgentEvent {
+                                                event: luban_domain::AgentEvent::TurnDuration {
+                                                    duration_ms,
+                                                },
+                                            }],
                                         )?;
                                         on_event(CodexThreadEvent::TurnDuration { duration_ms });
                                     }
@@ -1280,8 +1328,10 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                                         project_slug.clone(),
                                         workspace_name.clone(),
                                         thread_local_id,
-                                        vec![ConversationEntry::TurnError {
-                                            message: error.message.clone(),
+                                        vec![ConversationEntry::AgentEvent {
+                                            event: luban_domain::AgentEvent::TurnError {
+                                                message: error.message.clone(),
+                                            },
                                         }],
                                     )?;
                                     if duration_appended_for_events
@@ -1299,7 +1349,11 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                                             project_slug.clone(),
                                             workspace_name.clone(),
                                             thread_local_id,
-                                            vec![ConversationEntry::TurnDuration { duration_ms }],
+                                            vec![ConversationEntry::AgentEvent {
+                                                event: luban_domain::AgentEvent::TurnDuration {
+                                                    duration_ms,
+                                                },
+                                            }],
                                         )?;
                                         on_event(CodexThreadEvent::TurnDuration { duration_ms });
                                     }
@@ -1312,8 +1366,10 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                                         project_slug.clone(),
                                         workspace_name.clone(),
                                         thread_local_id,
-                                        vec![ConversationEntry::TurnError {
-                                            message: message.clone(),
+                                        vec![ConversationEntry::AgentEvent {
+                                            event: luban_domain::AgentEvent::TurnError {
+                                                message: message.clone(),
+                                            },
                                         }],
                                     )?;
                                     if duration_appended_for_events
@@ -1331,7 +1387,11 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                                             project_slug.clone(),
                                             workspace_name.clone(),
                                             thread_local_id,
-                                            vec![ConversationEntry::TurnDuration { duration_ms }],
+                                            vec![ConversationEntry::AgentEvent {
+                                                event: luban_domain::AgentEvent::TurnDuration {
+                                                    duration_ms,
+                                                },
+                                            }],
                                         )?;
                                         on_event(CodexThreadEvent::TurnDuration { duration_ms });
                                     }
@@ -1399,13 +1459,26 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                                 CodexThreadEvent::ItemCompleted { item } => {
                                     let id = codex_item_id(item).to_owned();
                                     if appended_item_ids.insert(id) {
+                                        let entry = match item {
+                                            CodexThreadItem::AgentMessage { id, text } => {
+                                                ConversationEntry::AgentEvent {
+                                                    event: luban_domain::AgentEvent::Message {
+                                                        id: id.clone(),
+                                                        text: text.clone(),
+                                                    },
+                                                }
+                                            }
+                                            _ => ConversationEntry::AgentEvent {
+                                                event: luban_domain::AgentEvent::Item {
+                                                    item: Box::new(item.clone()),
+                                                },
+                                            },
+                                        };
                                         self.sqlite.append_conversation_entries(
                                             project_slug.clone(),
                                             workspace_name.clone(),
                                             thread_local_id,
-                                            vec![ConversationEntry::CodexItem {
-                                                item: Box::new(item.clone()),
-                                            }],
+                                            vec![entry],
                                         )?;
                                     }
                                 }
@@ -1426,7 +1499,11 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                                             project_slug.clone(),
                                             workspace_name.clone(),
                                             thread_local_id,
-                                            vec![ConversationEntry::TurnDuration { duration_ms }],
+                                            vec![ConversationEntry::AgentEvent {
+                                                event: luban_domain::AgentEvent::TurnDuration {
+                                                    duration_ms,
+                                                },
+                                            }],
                                         )?;
                                         on_event(CodexThreadEvent::TurnDuration { duration_ms });
                                     }
@@ -1439,8 +1516,10 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                                         project_slug.clone(),
                                         workspace_name.clone(),
                                         thread_local_id,
-                                        vec![ConversationEntry::TurnError {
-                                            message: error.message.clone(),
+                                        vec![ConversationEntry::AgentEvent {
+                                            event: luban_domain::AgentEvent::TurnError {
+                                                message: error.message.clone(),
+                                            },
                                         }],
                                     )?;
                                     if duration_appended_for_events
@@ -1458,7 +1537,11 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                                             project_slug.clone(),
                                             workspace_name.clone(),
                                             thread_local_id,
-                                            vec![ConversationEntry::TurnDuration { duration_ms }],
+                                            vec![ConversationEntry::AgentEvent {
+                                                event: luban_domain::AgentEvent::TurnDuration {
+                                                    duration_ms,
+                                                },
+                                            }],
                                         )?;
                                         on_event(CodexThreadEvent::TurnDuration { duration_ms });
                                     }
@@ -1471,8 +1554,10 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                                         project_slug.clone(),
                                         workspace_name.clone(),
                                         thread_local_id,
-                                        vec![ConversationEntry::TurnError {
-                                            message: message.clone(),
+                                        vec![ConversationEntry::AgentEvent {
+                                            event: luban_domain::AgentEvent::TurnError {
+                                                message: message.clone(),
+                                            },
                                         }],
                                     )?;
                                     if duration_appended_for_events
@@ -1490,7 +1575,11 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                                             project_slug.clone(),
                                             workspace_name.clone(),
                                             thread_local_id,
-                                            vec![ConversationEntry::TurnDuration { duration_ms }],
+                                            vec![ConversationEntry::AgentEvent {
+                                                event: luban_domain::AgentEvent::TurnDuration {
+                                                    duration_ms,
+                                                },
+                                            }],
                                         )?;
                                         on_event(CodexThreadEvent::TurnDuration { duration_ms });
                                     }
@@ -1519,7 +1608,9 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                         project_slug.clone(),
                         workspace_name.clone(),
                         thread_local_id,
-                        vec![ConversationEntry::TurnDuration { duration_ms }],
+                        vec![ConversationEntry::AgentEvent {
+                            event: luban_domain::AgentEvent::TurnDuration { duration_ms },
+                        }],
                     )?;
                     on_event(CodexThreadEvent::TurnDuration { duration_ms });
                 }
@@ -1527,7 +1618,9 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                     project_slug.clone(),
                     workspace_name.clone(),
                     thread_local_id,
-                    vec![ConversationEntry::TurnCanceled],
+                    vec![ConversationEntry::AgentEvent {
+                        event: luban_domain::AgentEvent::TurnCanceled,
+                    }],
                 )?;
                 return Ok(());
             }
@@ -1553,7 +1646,9 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                     project_slug.clone(),
                     workspace_name.clone(),
                     thread_local_id,
-                    vec![ConversationEntry::TurnDuration { duration_ms }],
+                    vec![ConversationEntry::AgentEvent {
+                        event: luban_domain::AgentEvent::TurnDuration { duration_ms },
+                    }],
                 );
                 on_event(CodexThreadEvent::TurnDuration { duration_ms });
             }
@@ -1561,8 +1656,10 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                 project_slug.clone(),
                 workspace_name.clone(),
                 thread_local_id,
-                vec![ConversationEntry::TurnError {
-                    message: format!("{err:#}"),
+                vec![ConversationEntry::AgentEvent {
+                    event: luban_domain::AgentEvent::TurnError {
+                        message: format!("{err:#}"),
+                    },
                 }],
             );
         }
@@ -3156,10 +3253,12 @@ mod tests {
             .load_conversation("p".to_owned(), "w".to_owned(), 1)
             .expect("conversation should be persisted");
         assert!(
-            snapshot
-                .entries
-                .iter()
-                .any(|e| matches!(e, ConversationEntry::TurnError { .. })),
+            snapshot.entries.iter().any(|e| matches!(
+                e,
+                ConversationEntry::AgentEvent {
+                    event: luban_domain::AgentEvent::TurnError { .. }
+                }
+            )),
             "expected TurnError entry to be persisted"
         );
 

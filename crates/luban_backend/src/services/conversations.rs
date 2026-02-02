@@ -1,43 +1,116 @@
 use super::GitWorkspaceService;
 use anyhow::Context as _;
-use luban_domain::{ConversationEntry, ConversationSnapshot, PersistedAppState, WorkspaceStatus};
+use luban_domain::{
+    AgentEvent, AttachmentRef, CodexThreadItem, CodexUsage, ConversationEntry,
+    ConversationSnapshot, ConversationSystemEvent, PersistedAppState, UserEvent, WorkspaceStatus,
+};
 use std::{
     io::{BufRead as _, BufReader},
     path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
 };
 
-fn qualify_legacy_conversation_entries(entries: Vec<ConversationEntry>) -> Vec<ConversationEntry> {
-    let mut next_turn_index: usize = 0;
-    let mut current_scope: Option<String> = None;
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum LegacyConversationEntry {
+    SystemEvent {
+        id: String,
+        created_at_unix_ms: u64,
+        event: ConversationSystemEvent,
+    },
+    UserMessage {
+        text: String,
+        #[serde(default)]
+        attachments: Vec<AttachmentRef>,
+    },
+    CodexItem {
+        item: Box<CodexThreadItem>,
+    },
+    TurnUsage {
+        usage: Option<CodexUsage>,
+    },
+    TurnDuration {
+        duration_ms: u64,
+    },
+    TurnCanceled,
+    TurnError {
+        message: String,
+    },
+}
 
-    entries
-        .into_iter()
-        .map(|entry| match entry {
-            ConversationEntry::UserMessage { .. } => {
-                current_scope = Some(format!("legacy-turn-{next_turn_index}"));
-                next_turn_index = next_turn_index.saturating_add(1);
-                entry
-            }
-            ConversationEntry::CodexItem { item } => {
-                let scope = current_scope
-                    .as_deref()
-                    .unwrap_or("legacy-preamble")
-                    .to_owned();
-                let item = *item;
-                let raw_id = super::codex_item_id(&item);
-                let item = if raw_id.contains('/') {
-                    item
-                } else {
-                    super::qualify_codex_item(&scope, item)
-                };
-                ConversationEntry::CodexItem {
-                    item: Box::new(item),
-                }
-            }
-            other => other,
-        })
-        .collect()
+fn qualify_legacy_entry(
+    entry: &mut LegacyConversationEntry,
+    current_scope: &mut Option<String>,
+    next_turn_index: &mut usize,
+) {
+    match entry {
+        LegacyConversationEntry::UserMessage { .. } => {
+            *current_scope = Some(format!("legacy-turn-{next_turn_index}"));
+            *next_turn_index = next_turn_index.saturating_add(1);
+        }
+        LegacyConversationEntry::CodexItem { item } => {
+            let scope = current_scope
+                .as_deref()
+                .unwrap_or("legacy-preamble")
+                .to_owned();
+            let owned = std::mem::replace(
+                item,
+                Box::new(CodexThreadItem::Error {
+                    id: "tmp".to_owned(),
+                    message: "temporary placeholder".to_owned(),
+                }),
+            );
+            let raw_id = super::codex_item_id(&owned);
+            let qualified = if raw_id.contains('/') {
+                *owned
+            } else {
+                super::qualify_codex_item(&scope, *owned)
+            };
+            **item = qualified;
+        }
+        _ => {}
+    }
+}
+
+fn migrate_legacy_entry(entry: LegacyConversationEntry) -> Option<ConversationEntry> {
+    match entry {
+        LegacyConversationEntry::SystemEvent {
+            id,
+            created_at_unix_ms,
+            event,
+        } => Some(ConversationEntry::SystemEvent {
+            id,
+            created_at_unix_ms,
+            event,
+        }),
+        LegacyConversationEntry::UserMessage { text, attachments } => {
+            Some(ConversationEntry::UserEvent {
+                event: UserEvent::Message { text, attachments },
+            })
+        }
+        LegacyConversationEntry::CodexItem { item } => match *item {
+            CodexThreadItem::AgentMessage { id, text } => Some(ConversationEntry::AgentEvent {
+                event: AgentEvent::Message { id, text },
+            }),
+            other => Some(ConversationEntry::AgentEvent {
+                event: AgentEvent::Item {
+                    item: Box::new(other),
+                },
+            }),
+        },
+        LegacyConversationEntry::TurnUsage { .. } => None,
+        LegacyConversationEntry::TurnDuration { duration_ms } => {
+            Some(ConversationEntry::AgentEvent {
+                event: AgentEvent::TurnDuration { duration_ms },
+            })
+        }
+        LegacyConversationEntry::TurnCanceled => Some(ConversationEntry::AgentEvent {
+            event: AgentEvent::TurnCanceled,
+        }),
+        LegacyConversationEntry::TurnError { message } => Some(ConversationEntry::AgentEvent {
+            event: AgentEvent::TurnError { message },
+        }),
+    }
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -136,27 +209,37 @@ impl GitWorkspaceService {
             .with_context(|| format!("failed to open {}", events_path.display()))?;
         let reader = BufReader::new(file);
 
-        let mut entries = Vec::new();
+        let mut next_turn_index: usize = 0;
+        let mut current_scope: Option<String> = None;
+        let mut prev_codex_item_id: Option<String> = None;
+        let mut entries: Vec<ConversationEntry> = Vec::new();
         for line in reader.lines() {
             let line = line.context("failed to read line")?;
             let trimmed = line.trim();
             if trimmed.is_empty() {
                 continue;
             }
-            let entry: ConversationEntry =
+            let mut entry: LegacyConversationEntry =
                 serde_json::from_str(trimmed).context("failed to parse entry")?;
-            if matches!(entry, ConversationEntry::TurnUsage { .. }) {
+            if matches!(entry, LegacyConversationEntry::TurnUsage { .. }) {
                 continue;
             }
-            let is_duplicate = match (&entry, entries.last()) {
-                (
-                    ConversationEntry::CodexItem { item },
-                    Some(ConversationEntry::CodexItem { item: prev }),
-                ) => super::codex_item_id(item) == super::codex_item_id(prev),
-                _ => false,
-            };
-            if !is_duplicate {
-                entries.push(entry);
+
+            qualify_legacy_entry(&mut entry, &mut current_scope, &mut next_turn_index);
+
+            match &entry {
+                LegacyConversationEntry::CodexItem { item } => {
+                    let id = super::codex_item_id(item).to_owned();
+                    if prev_codex_item_id.as_deref() == Some(&id) {
+                        continue;
+                    }
+                    prev_codex_item_id = Some(id);
+                }
+                _ => prev_codex_item_id = None,
+            }
+
+            if let Some(migrated) = migrate_legacy_entry(entry) {
+                entries.push(migrated);
             }
         }
 
@@ -260,23 +343,36 @@ impl GitWorkspaceService {
         let snapshot_user_count = snapshot
             .entries
             .iter()
-            .filter(|e| matches!(e, ConversationEntry::UserMessage { .. }))
+            .filter(|e| matches!(e, ConversationEntry::UserEvent { .. }))
             .count();
         let snapshot_has_unscoped_codex_items = snapshot.entries.iter().any(|e| match e {
-            ConversationEntry::CodexItem { item } => !super::codex_item_id(item).contains('/'),
+            ConversationEntry::AgentEvent { event } => match event {
+                AgentEvent::Message { id, .. } => !id.contains('/'),
+                AgentEvent::Item { item } => !super::codex_item_id(item).contains('/'),
+                _ => false,
+            },
             _ => false,
         });
         let snapshot_has_scoped_codex_items = snapshot.entries.iter().any(|e| match e {
-            ConversationEntry::CodexItem { item } => super::codex_item_id(item).contains('/'),
+            ConversationEntry::AgentEvent { event } => match event {
+                AgentEvent::Message { id, .. } => id.contains('/'),
+                AgentEvent::Item { item } => super::codex_item_id(item).contains('/'),
+                _ => false,
+            },
             _ => false,
         });
+
+        let snapshot_has_non_system_entries = snapshot
+            .entries
+            .iter()
+            .any(|e| !matches!(e, ConversationEntry::SystemEvent { .. }));
 
         let should_attempt_legacy_repair = (!snapshot.entries.is_empty()
             || snapshot.thread_id.is_some())
             && snapshot_has_unscoped_codex_items
             && !snapshot_has_scoped_codex_items;
         let should_attempt_legacy_import =
-            snapshot.entries.is_empty() && snapshot.thread_id.is_none();
+            !snapshot_has_non_system_entries && snapshot.thread_id.is_none();
         if !should_attempt_legacy_import && !should_attempt_legacy_repair {
             return Ok(snapshot);
         }
@@ -309,19 +405,18 @@ impl GitWorkspaceService {
             let legacy_user_count = legacy
                 .entries
                 .iter()
-                .filter(|e| matches!(e, ConversationEntry::UserMessage { .. }))
+                .filter(|e| matches!(e, ConversationEntry::UserEvent { .. }))
                 .count();
             if snapshot_user_count > legacy_user_count {
                 return Ok(snapshot);
             }
         }
 
-        let qualified_entries = qualify_legacy_conversation_entries(legacy.entries);
         self.sqlite.replace_conversation_entries(
             project_slug.clone(),
             workspace_name.clone(),
             1,
-            qualified_entries,
+            legacy.entries,
         )?;
 
         self.sqlite
@@ -353,7 +448,7 @@ mod tests {
         conversations_root: &Path,
         project_slug: &str,
         workspace_name: &str,
-        entries: &[ConversationEntry],
+        entries: &[LegacyConversationEntry],
     ) {
         let dir = conversations_root.join(project_slug).join(workspace_name);
         std::fs::create_dir_all(&dir).unwrap();
@@ -366,8 +461,8 @@ mod tests {
         std::fs::write(path, format!("{content}\n")).unwrap();
     }
 
-    fn agent_message(id: &str, text: &str) -> ConversationEntry {
-        ConversationEntry::CodexItem {
+    fn agent_message(id: &str, text: &str) -> LegacyConversationEntry {
+        LegacyConversationEntry::CodexItem {
             item: Box::new(CodexThreadItem::AgentMessage {
                 id: id.to_owned(),
                 text: text.to_owned(),
@@ -392,12 +487,12 @@ mod tests {
         };
 
         let legacy_entries = vec![
-            ConversationEntry::UserMessage {
+            LegacyConversationEntry::UserMessage {
                 text: "u1".to_owned(),
                 attachments: Vec::new(),
             },
             agent_message("item_0", "A"),
-            ConversationEntry::UserMessage {
+            LegacyConversationEntry::UserMessage {
                 text: "u2".to_owned(),
                 attachments: Vec::new(),
             },
@@ -413,10 +508,9 @@ mod tests {
             .entries
             .iter()
             .filter_map(|e| match e {
-                ConversationEntry::CodexItem { item } => match item.as_ref() {
-                    CodexThreadItem::AgentMessage { text, .. } => Some(text.as_str()),
-                    _ => None,
-                },
+                ConversationEntry::AgentEvent {
+                    event: AgentEvent::Message { text, .. },
+                } => Some(text.as_str()),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -440,12 +534,12 @@ mod tests {
         };
 
         let legacy_entries = vec![
-            ConversationEntry::UserMessage {
+            LegacyConversationEntry::UserMessage {
                 text: "u1".to_owned(),
                 attachments: Vec::new(),
             },
             agent_message("item_0", "A"),
-            ConversationEntry::UserMessage {
+            LegacyConversationEntry::UserMessage {
                 text: "u2".to_owned(),
                 attachments: Vec::new(),
             },
@@ -453,8 +547,35 @@ mod tests {
         ];
         write_legacy_events(&conversations_root, "p", "w", &legacy_entries);
 
+        let broken_entries = vec![
+            ConversationEntry::UserEvent {
+                event: UserEvent::Message {
+                    text: "u1".to_owned(),
+                    attachments: Vec::new(),
+                },
+            },
+            ConversationEntry::AgentEvent {
+                event: AgentEvent::Message {
+                    id: "item_0".to_owned(),
+                    text: "A".to_owned(),
+                },
+            },
+            ConversationEntry::UserEvent {
+                event: UserEvent::Message {
+                    text: "u2".to_owned(),
+                    attachments: Vec::new(),
+                },
+            },
+            ConversationEntry::AgentEvent {
+                event: AgentEvent::Message {
+                    id: "item_0".to_owned(),
+                    text: "B".to_owned(),
+                },
+            },
+        ];
+
         sqlite
-            .append_conversation_entries("p".to_owned(), "w".to_owned(), 1, legacy_entries.clone())
+            .append_conversation_entries("p".to_owned(), "w".to_owned(), 1, broken_entries)
             .unwrap();
         let before = sqlite
             .load_conversation("p".to_owned(), "w".to_owned(), 1)
@@ -462,7 +583,7 @@ mod tests {
         let before_agent_count = before
             .entries
             .iter()
-            .filter(|e| matches!(e, ConversationEntry::CodexItem { .. }))
+            .filter(|e| matches!(e, ConversationEntry::AgentEvent { .. }))
             .count();
         assert_eq!(
             before_agent_count, 1,
@@ -476,10 +597,9 @@ mod tests {
             .entries
             .iter()
             .filter_map(|e| match e {
-                ConversationEntry::CodexItem { item } => match item.as_ref() {
-                    CodexThreadItem::AgentMessage { text, .. } => Some(text.as_str()),
-                    _ => None,
-                },
+                ConversationEntry::AgentEvent {
+                    event: AgentEvent::Message { text, .. },
+                } => Some(text.as_str()),
                 _ => None,
             })
             .collect::<Vec<_>>();

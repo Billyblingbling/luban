@@ -623,7 +623,7 @@ async fn http_contracts_smoke() {
     {
         let convo: luban_api::ConversationSnapshot = client
             .get(format!(
-                "{base}/api/workdirs/{workdir_id}/conversations/{task_id}?limit=1"
+                "{base}/api/workdirs/{workdir_id}/conversations/{task_id}?limit=10"
             ))
             .send()
             .await
@@ -637,14 +637,21 @@ async fn http_contracts_smoke() {
         assert_eq!(convo.workspace_id.0, workdir_id);
         assert_eq!(convo.thread_id.0, task_id);
         assert!(
-            convo.entries.len() <= 1,
-            "expected limit=1 to clamp entries"
+            convo.entries.len() <= 10,
+            "expected limit=10 to clamp entries"
         );
         assert!(
             convo.entries_total >= convo.entries.len() as u64,
             "expected entries_total to be consistent with page size"
         );
         assert!(convo.entries_start <= convo.entries_total);
+        assert!(
+            convo
+                .entries
+                .iter()
+                .any(|entry| matches!(entry, luban_api::ConversationEntry::SystemEvent(_))),
+            "expected conversation to include system events"
+        );
     }
 
     // C-HTTP-CHANGES / C-HTTP-DIFF

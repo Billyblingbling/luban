@@ -13,8 +13,8 @@ pub use agent::{AgentRunConfig, QueuedPrompt};
 pub use appearance::{AppearanceFonts, AppearanceTheme};
 pub use attachments::{AttachmentKind, AttachmentRef, ContextItem};
 pub use conversation::{
-    ChatScrollAnchor, ConversationEntry, ConversationSnapshot, ConversationThreadMeta,
-    DraftAttachment, WorkspaceConversation,
+    AgentEvent, ChatScrollAnchor, ConversationEntry, ConversationSnapshot, ConversationSystemEvent,
+    ConversationThreadMeta, DraftAttachment, UserEvent, WorkspaceConversation,
 };
 pub use ids::{ProjectId, WorkspaceId, WorkspaceThreadId};
 pub use layout::{MainPane, OperationStatus, RightPane, WorkspaceStatus};

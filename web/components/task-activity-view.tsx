@@ -331,12 +331,15 @@ interface SystemEventItemProps {
 }
 
 function SystemEventItem({ message, actor }: SystemEventItemProps) {
-  // Default actor based on event type - can be overridden via prop
-  const defaultActor = {
-    name: "You",
-    initial: "U",
-    color: COLORS.accent
-  }
+  const defaultActor = (() => {
+    if (message.eventSource === "agent") {
+      return { name: "Agent", initial: "A", color: COLORS.textPrimary }
+    }
+    if (message.eventSource === "system") {
+      return { name: "System", initial: "S", color: COLORS.textMuted }
+    }
+    return { name: "You", initial: "U", color: COLORS.accent }
+  })()
   const eventActor = actor || defaultActor
 
   return (
@@ -490,172 +493,19 @@ interface AgentActivityEventProps {
 }
 
 function AgentActivityEvent({ message }: AgentActivityEventProps) {
-  const [isActivitiesExpanded, setIsActivitiesExpanded] = useState(false)
-  const { durationLabel } = useActivityTiming(message.activities ?? [])
-
-  // Show each activity as a simple event (both running and completed)
   const activities = message.activities ?? []
-  const hasContent = message.content && message.content.length > 0
-  
-  // Determine if this is the latest turn (streaming or no content yet)
-  const isLatestTurn = message.isStreaming || !hasContent
-  
-  // Auto-collapse when more than 3 activities
-  // - Latest turn: keep last 3 visible
-  // - Completed turns (between cards): fully collapse
-  const shouldCollapse = activities.length > 3 && !isActivitiesExpanded
-  const keepVisible = isLatestTurn ? 3 : 0
-  
-  // When collapsed: show last N activities based on turn status
-  const collapsedCount = shouldCollapse ? activities.length - keepVisible : 0
-  const visibleActivities = shouldCollapse 
-    ? (keepVisible > 0 ? activities.slice(-keepVisible) : [])
-    : activities
-  
-  // Render a single activity item
-  const renderActivity = (activity: ActivityEvent, isLast: boolean, showConnector: boolean) => {
-    const isRunning = isLast && activity.status === "running" && message.isStreaming
-    
-    return (
-      <div key={activity.id} className="relative">
-        {/* Timeline connector between activities */}
-        {showConnector && (
-          <div 
-            className="absolute"
-            style={{
-              left: '19.5px',
-              top: '18px',
-              bottom: '-8px',
-              width: '1px',
-              backgroundColor: COLORS.timeline
-            }}
-          />
-        )}
-        
-        <div 
-          className="flex items-start"
-          style={{ padding: '1px 0' }}
-        >
-          {/* Icon column - 14x14 circular icon */}
-          <div
-            className="flex items-center justify-center flex-shrink-0 relative z-10"
-            style={{ 
-              width: '14px', 
-              height: '18px',
-              marginLeft: '13px',
-              marginRight: '4px',
-              paddingTop: '2px',
-              backgroundColor: COLORS.background
-            }}
-          >
-            <div
-              className="flex items-center justify-center text-white"
-              style={{ 
-                width: '14px', 
-                height: '14px', 
-                borderRadius: '50%',
-                backgroundColor: COLORS.textPrimary,
-                fontSize: '7px',
-                fontWeight: 500
-              }}
-            >
-              A
-            </div>
-          </div>
-          
-          {/* Event text */}
-          <span 
-            className="flex items-center flex-wrap flex-1"
-            style={{ fontSize: '12px', lineHeight: '16.8px', color: COLORS.textMuted }}
-          >
-            <b style={{ fontWeight: 500 }}>Agent</b>
-            <span style={{ marginLeft: '4px' }}>{activity.title}</span>
-            <span style={{ margin: '0 4px' }}>·</span>
-            {isRunning ? (
-              <Loader2 
-                className="w-3 h-3 animate-spin" 
-                style={{ color: COLORS.accent }}
-              />
-            ) : (
-              <span>{durationLabel(activity) ?? "now"}</span>
-            )}
-          </span>
-        </div>
-      </div>
-    )
-  }
-  
-  // Generate summary for collapsed events (first few titles, max 60 chars)
-  const getCollapsedSummary = () => {
-    const hiddenActivities = activities.slice(0, collapsedCount)
-    const titles = hiddenActivities.map(a => a.title)
-    let summary = ""
-    for (const title of titles) {
-      const next = summary ? `${summary}, ${title}` : title
-      if (next.length > 57) {
-        return summary ? `${summary}...` : `${title.slice(0, 57)}...`
-      }
-      summary = next
-    }
-    return summary
-  }
-  
+  const hasContent = message.content.length > 0
+
   return (
     <div className="flex flex-col gap-2">
-      {/* Collapsed summary row (shows hidden count) */}
-      {shouldCollapse && (
-        <div className="relative">
-          {/* Timeline connector to next item */}
-          <div 
-            className="absolute"
-            style={{
-              left: '19.5px',
-              top: '18px',
-              bottom: '-8px',
-              width: '1px',
-              backgroundColor: COLORS.timeline
-            }}
-          />
-          <div 
-            className="flex items-center"
-            style={{ padding: '1px 0' }}
-          >
-            <div
-              className="flex items-center justify-center flex-shrink-0 relative z-10"
-              style={{ 
-                width: '14px', 
-                marginLeft: '13px',
-                marginRight: '4px',
-                backgroundColor: COLORS.background
-              }}
-            >
-              <ChevronsUpDown 
-                className="w-3.5 h-3.5" 
-                style={{ color: COLORS.textMuted }}
-              />
-            </div>
-            
-            <button
-              onClick={() => setIsActivitiesExpanded(true)}
-              className="flex-1 min-w-0 hover:underline cursor-pointer text-left truncate"
-              style={{ fontSize: '12px', lineHeight: '16.8px', color: COLORS.textMuted }}
-            >
-              Show {collapsedCount} more: {getCollapsedSummary()}
-            </button>
-          </div>
-        </div>
+      {activities.length > 0 && (
+        <CollapsibleActivities
+          activities={activities}
+          isStreaming={message.isStreaming}
+          isCancelled={message.isCancelled}
+        />
       )}
-      
-      {/* Visible activities (all when expanded, last 3 when collapsed) */}
-      {visibleActivities.map((activity, index) => {
-        const isLastVisible = index === visibleActivities.length - 1
-        const isActuallyLast = shouldCollapse 
-          ? index === visibleActivities.length - 1 
-          : index === activities.length - 1
-        const showConnector = !isLastVisible || hasContent
-        return renderActivity(activity, isActuallyLast, showConnector)
-      })}
-      
+
       {/* Agent message content as a card (only if there's content) */}
       {hasContent && (
         <div 
@@ -972,7 +822,7 @@ export function TaskActivityView({
       style={{ backgroundColor: COLORS.background }}
     >
       {/* Scrollable content */}
-      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto" data-testid="chat-scroll-container">
         <div style={{ maxWidth: '686px', margin: '0 60px' }}>
           {/* Task header with title and description */}
           <TaskHeaderSection

@@ -148,7 +148,7 @@ export function NewTaskModal({ open, onOpenChange }: NewTaskModalProps) {
 
     const first = workdirOptions[0] ?? null
     setSelectedWorkdirId(first ? first.id : null)
-  }, [activeWorkdirId, isGitProject, open, selectedProjectId, selectedProject?.path, selectedWorkdirId, workdirOptions])
+  }, [activeWorkdirId, isGitProject, open, selectedProject, selectedProjectId, selectedWorkdirId, workdirOptions])
 
   // Check if we can execute the task
   const canExecute = useMemo(() => {

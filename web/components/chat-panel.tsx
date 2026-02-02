@@ -284,10 +284,11 @@ export function ChatPanel({
     const entries = conversation?.entries ?? []
     const isUserMessage = (
       entry: (typeof entries)[number],
-    ): entry is Extract<(typeof entries)[number], { type: "user_message" }> => entry.type === "user_message"
+    ): entry is Extract<(typeof entries)[number], { type: "user_event"; event: { type: "message" } }> =>
+      entry.type === "user_event" && entry.event.type === "message"
     const items = entries
       .filter(isUserMessage)
-      .map((entry) => entry.text)
+      .map((entry) => entry.event.text)
       .filter((text) => text.trim().length > 0)
     return items.slice(-50)
   }, [conversation?.entries])

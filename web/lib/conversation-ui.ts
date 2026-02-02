@@ -2,6 +2,7 @@
 
 import type {
   AttachmentRef,
+  AgentEvent,
   ConversationEntry,
   ConversationSnapshot,
   ThinkingEffort,
@@ -29,6 +30,7 @@ export interface SystemEvent {
 export interface Message {
   id: string
   type: "user" | "assistant" | "event"
+  eventSource?: "system" | "user" | "agent"
   content: string
   attachments?: AttachmentRef[]
   timestamp?: string
@@ -239,7 +241,7 @@ export function activityFromAgentItemLike(args: {
   }
 }
 
-export function activityFromAgentItem(entry: Extract<ConversationEntry, { type: "agent_item" }>): ActivityEvent {
+export function activityFromAgentItem(entry: Extract<AgentEvent, { type: "item" }>): ActivityEvent {
   return activityFromAgentItemLike({ id: entry.id, kind: entry.kind, payload: entry.payload })
 }
 
@@ -247,133 +249,209 @@ export function buildMessages(conversation: ConversationSnapshot | null): Messag
   if (!conversation) return []
 
   const out: Message[] = []
-  
 
-  
-  let assistantContent = ""
-  let assistantActivities: ActivityEvent[] = []
-  let assistantToolCalls = 0
-  let assistantThinkingSteps = 0
-  let assistantDurationMs: number | null = null
-  let assistantCancelled = false
-  const seenAgentItemIds = new Set<string>()
+  const unixMsToIso = (unixMs: number | null | undefined): string | undefined => {
+    if (typeof unixMs !== "number" || !Number.isFinite(unixMs)) return undefined
+    return new Date(unixMs).toISOString()
+  }
 
-  function flushAssistant() {
-    if (assistantContent.trim().length === 0 && assistantActivities.length === 0) return
-    const metadata =
-      assistantToolCalls > 0 || assistantThinkingSteps > 0 || assistantDurationMs != null
-        ? {
-            toolCalls: assistantToolCalls > 0 ? assistantToolCalls : undefined,
-            thinkingSteps: assistantThinkingSteps > 0 ? assistantThinkingSteps : undefined,
-            duration:
-              assistantDurationMs != null ? formatDurationMs(assistantDurationMs) : undefined,
-          }
-        : undefined
+  const taskStatusLabel = (status: string): string => {
+    switch (status) {
+      case "backlog":
+        return "Backlog"
+      case "todo":
+        return "Todo"
+      case "in_progress":
+        return "In Progress"
+      case "in_review":
+        return "In Review"
+      case "done":
+        return "Done"
+      case "canceled":
+        return "Canceled"
+      default:
+        return status
+    }
+  }
+
+  let pendingAgentActivities: ActivityEvent[] = []
+  let pendingAgentCancelled = false
+  const seenAgentEventIds = new Set<string>()
+
+  function flushPendingAgentEvents() {
+    if (pendingAgentActivities.length === 0) return
     out.push({
-      id: `a_${out.length}`,
+      id: `agent_events_${out.length}`,
       type: "assistant",
-      content: assistantContent.trim(),
+      content: "",
       timestamp: new Date().toISOString(),
-      isCancelled: assistantCancelled || undefined,
-      activities: assistantActivities.length > 0 ? assistantActivities : undefined,
-      metadata,
+      isCancelled: pendingAgentCancelled || undefined,
+      activities: pendingAgentActivities,
     })
-    assistantContent = ""
-    assistantActivities = []
-    assistantToolCalls = 0
-    assistantThinkingSteps = 0
-    assistantDurationMs = null
-    assistantCancelled = false
+    pendingAgentActivities = []
+    pendingAgentCancelled = false
   }
 
   for (const entry of conversation.entries) {
-    if (entry.type === "user_message") {
-      flushAssistant()
+    if (entry.type === "system_event") {
+      flushPendingAgentEvents()
+      const ev = entry.event as any
+      const eventType = (() => {
+        if (ev?.event_type === "task_created") return "task_created" as const
+        if (ev?.event_type === "task_status_changed") return "status_changed" as const
+        return "status_changed" as const
+      })()
+      const content = (() => {
+        if (ev?.event_type === "task_created") return "created the task"
+        if (ev?.event_type === "task_status_changed") {
+          const from = taskStatusLabel(String(ev.from ?? ""))
+          const to = taskStatusLabel(String(ev.to ?? ""))
+          if (from && to) return `moved from ${from} to ${to}`
+          if (to) return `changed status to ${to}`
+          return "changed task status"
+        }
+        return "updated the task"
+      })()
+
       out.push({
-        id: `u_${out.length}`,
-        type: "user",
-        content: entry.text,
-        attachments: entry.attachments,
-        timestamp: new Date().toISOString(),
+        id: `e_${entry.id}`,
+        type: "event",
+        eventSource: "system",
+        eventType,
+        content,
+        timestamp: unixMsToIso(entry.created_at_unix_ms),
       })
       continue
     }
 
-    if (entry.type === "agent_item") {
-      seenAgentItemIds.add(entry.id)
-      if (entry.kind === "agent_message") {
-        const payload = entry.payload as any
-        const text = typeof payload?.text === "string" ? payload.text : ""
-        assistantContent = assistantContent.length === 0 ? text : `${assistantContent}\n\n${text}`
-      } else {
-        assistantActivities.push(activityFromAgentItem(entry))
-        if (entry.kind === "reasoning") {
-          assistantThinkingSteps += 1
-        } else if (entry.kind !== "error") {
-          assistantToolCalls += 1
-        }
+    if (entry.type === "user_event") {
+      if (entry.event.type === "message") {
+        flushPendingAgentEvents()
+        out.push({
+          id: `u_${out.length}`,
+          type: "user",
+          eventSource: "user",
+          content: entry.event.text,
+          attachments: entry.event.attachments,
+          timestamp: new Date().toISOString(),
+        })
       }
       continue
     }
 
-    if (entry.type === "turn_duration") {
-      assistantDurationMs = entry.duration_ms
-      continue
-    }
-
-    if (entry.type === "turn_usage") {
-      continue
-    }
-
-    if (entry.type === "turn_error") {
-      assistantActivities.push({
-        id: `turn_error_${out.length}`,
-        type: "tool_call",
-        title: "Turn error",
-        detail: entry.message,
-        status: "done",
-      })
-      continue
-    }
-
-    if (entry.type === "turn_canceled") {
-      assistantCancelled = true
-      assistantActivities.push({
-        id: `turn_canceled_${out.length}`,
-        type: "tool_call",
-        title: "Turn canceled",
-        status: "done",
-      })
-      continue
-    }
-  }
-
-  if (conversation.run_status === "running" && conversation.in_progress_items.length > 0) {
-    for (const item of conversation.in_progress_items) {
-      if (seenAgentItemIds.has(item.id)) continue
-
-      if (item.kind === "agent_message") {
-        const payload = item.payload as any
-        const text = typeof payload?.text === "string" ? payload.text : ""
-        if (text.length > 0) {
-          assistantContent = assistantContent.length === 0 ? text : `${assistantContent}\n\n${text}`
-        }
+    if (entry.type === "agent_event") {
+      const ev = entry.event
+      if (ev.type === "message") {
+        flushPendingAgentEvents()
+        seenAgentEventIds.add(ev.id)
+        out.push({
+          id: `a_${ev.id}`,
+          type: "assistant",
+          eventSource: "agent",
+          content: ev.text.trim(),
+          timestamp: new Date().toISOString(),
+          isCancelled: pendingAgentCancelled || undefined,
+          activities: pendingAgentActivities.length > 0 ? pendingAgentActivities : undefined,
+        })
+        pendingAgentActivities = []
+        pendingAgentCancelled = false
         continue
       }
 
-      assistantActivities.push(
-        activityFromAgentItemLike({
-          id: item.id,
-          kind: item.kind,
-          payload: item.payload,
-          forcedStatus: "running",
-        }),
-      )
+      if (ev.type === "item") {
+        seenAgentEventIds.add(ev.id)
+        pendingAgentActivities.push(activityFromAgentItem(ev))
+        continue
+      }
+
+      if (ev.type === "turn_duration") {
+        pendingAgentActivities.push({
+          id: `turn_duration_${out.length}_${ev.duration_ms}`,
+          type: "complete",
+          title: `Turn duration: ${formatDurationMs(ev.duration_ms)}`,
+          status: "done",
+        })
+        continue
+      }
+
+      if (ev.type === "turn_usage") {
+        pendingAgentActivities.push({
+          id: `turn_usage_${out.length}`,
+          type: "tool_call",
+          title: "Turn usage",
+          detail: safeStringify(ev.usage_json ?? null),
+          status: "done",
+        })
+        continue
+      }
+
+      if (ev.type === "turn_error") {
+        pendingAgentActivities.push({
+          id: `turn_error_${out.length}`,
+          type: "tool_call",
+          title: "Turn error",
+          detail: ev.message,
+          status: "done",
+        })
+        continue
+      }
+
+      if (ev.type === "turn_canceled") {
+        pendingAgentCancelled = true
+        pendingAgentActivities.push({
+          id: `turn_canceled_${out.length}`,
+          type: "tool_call",
+          title: "Turn canceled",
+          status: "done",
+        })
+        continue
+      }
     }
   }
 
-  if (conversation.run_status === "running" && !assistantActivities.some((a) => a.status === "running")) {
-    assistantActivities.push({
+  if (conversation.run_status === "running" && conversation.in_progress_entries.length > 0) {
+    for (const pending of conversation.in_progress_entries) {
+      if (pending.type !== "agent_event") continue
+      const ev = pending.event
+
+      if (ev.type === "message") {
+        if (seenAgentEventIds.has(ev.id)) continue
+        out.push({
+          id: `a_${ev.id}`,
+          type: "assistant",
+          eventSource: "agent",
+          content: ev.text.trim(),
+          timestamp: new Date().toISOString(),
+          isStreaming: true,
+          isCancelled: pendingAgentCancelled || undefined,
+          activities: pendingAgentActivities.length > 0 ? pendingAgentActivities : undefined,
+        })
+        pendingAgentActivities = []
+        pendingAgentCancelled = false
+        continue
+      }
+
+      if (ev.type === "item") {
+        if (seenAgentEventIds.has(ev.id)) continue
+        pendingAgentActivities.push(
+          activityFromAgentItemLike({
+            id: ev.id,
+            kind: ev.kind,
+            payload: ev.payload,
+            forcedStatus: "running",
+          }),
+        )
+        continue
+      }
+    }
+  }
+
+  if (
+    conversation.run_status === "running" &&
+    pendingAgentActivities.length > 0 &&
+    !pendingAgentActivities.some((a) => a.status === "running")
+  ) {
+    pendingAgentActivities.push({
       id: "synthetic_running",
       type: "thinking",
       title: "Running...",
@@ -381,7 +459,7 @@ export function buildMessages(conversation: ConversationSnapshot | null): Messag
     })
   }
 
-  flushAssistant()
+  flushPendingAgentEvents()
 
   if (conversation.run_status === "running") {
     const last = out[out.length - 1]
@@ -389,36 +467,6 @@ export function buildMessages(conversation: ConversationSnapshot | null): Messag
       last.isStreaming = true
     }
   }
-  
-  // Prepend system events for demo/review purposes
-  // Use a sample timestamp for demo (e.g., 2 hours ago)
-  const demoTimestamp = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
-  const systemEvents: Message[] = [
-    {
-      id: "event_task_created",
-      type: "event",
-      eventType: "task_created",
-      content: "created the task",
-      timestamp: demoTimestamp,
-    },
-    {
-      id: "event_status_todo",
-      type: "event",
-      eventType: "status_changed",
-      content: "moved from Backlog to Todo",
-      timestamp: demoTimestamp,
-    },
-    {
-      id: "event_status_in_progress",
-      type: "event",
-      eventType: "status_changed", 
-      content: "changed status to In Progress",
-      timestamp: demoTimestamp,
-    },
-  ]
-  
-  // Insert events at the beginning
-  out.unshift(...systemEvents)
-  
+
   return out
 }

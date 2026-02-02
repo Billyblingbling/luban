@@ -103,15 +103,33 @@ function key(workdirId: WorkspaceId, taskId: WorkspaceThreadId): string {
 }
 
 function userMessage(text: string): ConversationEntry {
-  return { type: "user_message", text, attachments: [] }
+  return { type: "user_event", event: { type: "message", text, attachments: [] } }
 }
 
 function agentMessage(text: string): ConversationEntry {
-  return { type: "agent_item", id: `agent_msg_${Math.random().toString(16).slice(2)}`, kind: "agent_message", payload: { text } }
+  return { type: "agent_event", event: { type: "message", id: `agent_msg_${Math.random().toString(16).slice(2)}`, text } }
 }
 
 function agentActivity(kind: AgentItemKind, payload: unknown): ConversationEntry {
-  return { type: "agent_item", id: `agent_act_${Math.random().toString(16).slice(2)}`, kind, payload }
+  return {
+    type: "agent_event",
+    event: { type: "item", id: `agent_act_${Math.random().toString(16).slice(2)}`, kind, payload },
+  }
+}
+
+function systemEvent(args: {
+  id: string
+  createdAtUnixMs: number
+  event:
+    | { event_type: "task_created" }
+    | { event_type: "task_status_changed"; from: TaskStatus; to: TaskStatus }
+}): ConversationEntry {
+  return {
+    type: "system_event",
+    id: args.id,
+    created_at_unix_ms: args.createdAtUnixMs,
+    event: args.event,
+  }
 }
 
 function conversationBase(args: {
@@ -122,7 +140,7 @@ function conversationBase(args: {
   runStatus?: OperationStatus
   taskStatus?: TaskStatus
   entries: ConversationEntry[]
-  inProgressItems?: Array<{ id: string; kind: AgentItemKind; payload: unknown }>
+  inProgressEntries?: ConversationEntry[]
 }): ConversationSnapshot {
   const runner = args.runner ?? "codex"
   return {
@@ -141,7 +159,7 @@ function conversationBase(args: {
     entries_total: args.entries.length,
     entries_start: 0,
     entries_truncated: false,
-    in_progress_items: args.inProgressItems ?? [],
+    in_progress_entries: args.inProgressEntries ?? [],
     pending_prompts: [],
     queue_paused: false,
     remote_thread_id: null,
@@ -343,6 +361,16 @@ export function defaultMockFixtures(): MockFixtures {
       title: "Mock task 1",
       taskStatus: "todo",
       entries: [
+        systemEvent({
+          id: "sys_1",
+          createdAtUnixMs: unixMs(-2 * 60 * 60 * 1000),
+          event: { event_type: "task_created" },
+        }),
+        systemEvent({
+          id: "sys_2",
+          createdAtUnixMs: unixMs(-2 * 60 * 60 * 1000 + 20_000),
+          event: { event_type: "task_status_changed", from: "backlog", to: "todo" },
+        }),
         // First user message
         userMessage("Please help me refactor the authentication module."),
         // First agent turn with many activities (should fully collapse between cards)
@@ -381,25 +409,44 @@ export function defaultMockFixtures(): MockFixtures {
       taskId: task2,
       title: "Mock task 2",
       taskStatus: "backlog",
-      entries: [userMessage("Hello from mock task 2.")],
+      entries: [
+        systemEvent({
+          id: "sys_1",
+          createdAtUnixMs: unixMs(-90 * 60 * 1000),
+          event: { event_type: "task_created" },
+        }),
+        userMessage("Hello from mock task 2."),
+      ],
     }),
     [key(workdir2, task3)]: conversationBase({
       workdirId: workdir2,
       taskId: task3,
       title: "PR: pending",
       taskStatus: "in_progress",
-      entries: [userMessage("Please open a PR.")],
+      entries: [
+        systemEvent({
+          id: "sys_1",
+          createdAtUnixMs: unixMs(-30 * 60 * 1000),
+          event: { event_type: "task_created" },
+        }),
+        systemEvent({
+          id: "sys_2",
+          createdAtUnixMs: unixMs(-25 * 60 * 1000),
+          event: { event_type: "task_status_changed", from: "backlog", to: "in_progress" },
+        }),
+        userMessage("Please open a PR."),
+      ],
       runStatus: "running",
-      inProgressItems: [
-        { id: "prog_1", kind: "reasoning", payload: { text: "Analyzing the codebase structure to understand the project layout" } },
-        { id: "prog_2", kind: "command_execution", payload: { command: "git status", status: "completed", aggregated_output: "On branch main\nnothing to commit" } },
-        { id: "prog_3", kind: "file_change", payload: { changes: [{ path: "src/utils/helpers.ts", kind: "update" }] } },
-        { id: "prog_4", kind: "command_execution", payload: { command: "pnpm run lint", status: "completed", aggregated_output: "✓ No ESLint warnings or errors" } },
-        { id: "prog_5", kind: "web_search", payload: { query: "TypeScript best practices for error handling" } },
-        { id: "prog_6", kind: "file_change", payload: { changes: [{ path: "src/lib/api.ts", kind: "update" }, { path: "src/lib/types.ts", kind: "create" }] } },
-        { id: "prog_7", kind: "command_execution", payload: { command: "pnpm run test", status: "completed", aggregated_output: "Test Suites: 12 passed\nTests: 48 passed" } },
-        { id: "prog_8", kind: "reasoning", payload: { text: "Preparing the pull request with proper commit message" } },
-        { id: "prog_9", kind: "command_execution", payload: { command: "git add -A && git commit -m 'feat: add new API endpoints'", status: "in_progress" } },
+      inProgressEntries: [
+        { type: "agent_event", event: { type: "item", id: "prog_1", kind: "reasoning", payload: { text: "Analyzing the codebase structure to understand the project layout" } } },
+        { type: "agent_event", event: { type: "item", id: "prog_2", kind: "command_execution", payload: { command: "git status", status: "completed", aggregated_output: "On branch main\nnothing to commit" } } },
+        { type: "agent_event", event: { type: "item", id: "prog_3", kind: "file_change", payload: { changes: [{ path: "src/utils/helpers.ts", kind: "update" }] } } },
+        { type: "agent_event", event: { type: "item", id: "prog_4", kind: "command_execution", payload: { command: "pnpm run lint", status: "completed", aggregated_output: "✓ No ESLint warnings or errors" } } },
+        { type: "agent_event", event: { type: "item", id: "prog_5", kind: "web_search", payload: { query: "TypeScript best practices for error handling" } } },
+        { type: "agent_event", event: { type: "item", id: "prog_6", kind: "file_change", payload: { changes: [{ path: "src/lib/api.ts", kind: "update" }, { path: "src/lib/types.ts", kind: "create" }] } } },
+        { type: "agent_event", event: { type: "item", id: "prog_7", kind: "command_execution", payload: { command: "pnpm run test", status: "completed", aggregated_output: "Test Suites: 12 passed\nTests: 48 passed" } } },
+        { type: "agent_event", event: { type: "item", id: "prog_8", kind: "reasoning", payload: { text: "Preparing the pull request with proper commit message" } } },
+        { type: "agent_event", event: { type: "item", id: "prog_9", kind: "command_execution", payload: { command: "git add -A && git commit -m 'feat: add new API endpoints'", status: "in_progress" } } },
       ],
     }),
     [key(workdir3, task1)]: conversationBase({
@@ -407,7 +454,14 @@ export function defaultMockFixtures(): MockFixtures {
       taskId: task1,
       title: "Local task",
       taskStatus: "todo",
-      entries: [userMessage("Local project task.")],
+      entries: [
+        systemEvent({
+          id: "sys_1",
+          createdAtUnixMs: unixMs(-24 * 60 * 60 * 1000),
+          event: { event_type: "task_created" },
+        }),
+        userMessage("Local project task."),
+      ],
     }),
   }
 

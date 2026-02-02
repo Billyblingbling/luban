@@ -11,7 +11,7 @@ import {
   Inbox as InboxIcon,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { ChatPanel } from "./chat-panel"
+import { TaskActivityPanel } from "./task-activity-panel"
 import { TaskHeader, ProjectIcon } from "./shared/task-header"
 import type { ChangedFile } from "./right-sidebar"
 import { useLuban } from "@/lib/luban-context"
@@ -153,7 +153,7 @@ export function InboxView({ onOpenFullView }: InboxViewProps) {
     return () => {
       cancelled = true
     }
-  }, [app?.rev])
+  }, [app])
 
   useEffect(() => {
     const update = () => setNowMs(Date.now())
@@ -329,7 +329,7 @@ export function InboxView({ onOpenFullView }: InboxViewProps) {
 
             {/* Chat Preview */}
             <div className="flex-1 min-h-0 flex">
-              <ChatPanel
+              <TaskActivityPanel
                 pendingDiffFile={pendingDiffFile}
                 onDiffFileOpened={() => setPendingDiffFile(null)}
               />

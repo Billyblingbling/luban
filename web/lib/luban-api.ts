@@ -221,11 +221,21 @@ export type ConversationSnapshot = {
   entries_total?: number
   entries_start?: number
   entries_truncated?: boolean
-  in_progress_items: AgentItem[]
+  in_progress_entries: ConversationEntry[]
   pending_prompts: QueuedPromptSnapshot[]
   queue_paused: boolean
   remote_thread_id: string | null
   title: string
+}
+
+export type ConversationSystemEvent =
+  | { event_type: "task_created" }
+  | { event_type: "task_status_changed"; from: TaskStatus; to: TaskStatus }
+
+export type ConversationSystemEventEntry = {
+  id: string
+  created_at_unix_ms: number
+  event: ConversationSystemEvent
 }
 
 export type AgentRunConfigSnapshot = {
@@ -321,7 +331,6 @@ export type ClaudeConfigEntrySnapshot = {
 }
 
 export type AgentItemKind =
-  | "agent_message"
   | "reasoning"
   | "command_execution"
   | "file_change"
@@ -337,8 +346,15 @@ export type AgentItem = {
 }
 
 export type ConversationEntry =
-  | { type: "user_message"; text: string; attachments: AttachmentRef[] }
-  | { type: "agent_item"; id: string; kind: AgentItemKind; payload: unknown }
+  | { type: "system_event"; id: string; created_at_unix_ms: number; event: ConversationSystemEvent }
+  | { type: "user_event"; event: UserEvent }
+  | { type: "agent_event"; event: AgentEvent }
+
+export type UserEvent = { type: "message"; text: string; attachments: AttachmentRef[] }
+
+export type AgentEvent =
+  | { type: "message"; id: string; text: string }
+  | { type: "item"; id: string; kind: AgentItemKind; payload: unknown }
   | { type: "turn_usage"; usage_json: unknown | null }
   | { type: "turn_duration"; duration_ms: number }
   | { type: "turn_canceled" }

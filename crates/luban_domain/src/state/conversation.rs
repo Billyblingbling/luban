@@ -7,26 +7,47 @@ use super::{
 use crate::{CodexThreadItem, CodexUsage, ContextTokenKind, TaskStatus, ThinkingEffort};
 use std::collections::{BTreeMap, HashSet, VecDeque};
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "event_type", rename_all = "snake_case")]
+pub enum ConversationSystemEvent {
+    TaskCreated,
+    TaskStatusChanged { from: TaskStatus, to: TaskStatus },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum ConversationEntry {
-    UserMessage {
+pub enum UserEvent {
+    Message {
         text: String,
         #[serde(default)]
         attachments: Vec<AttachmentRef>,
     },
-    CodexItem {
-        item: Box<CodexThreadItem>,
-    },
-    TurnUsage {
-        usage: Option<CodexUsage>,
-    },
-    TurnDuration {
-        duration_ms: u64,
-    },
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AgentEvent {
+    Message { id: String, text: String },
+    Item { item: Box<CodexThreadItem> },
+    TurnUsage { usage: Option<CodexUsage> },
+    TurnDuration { duration_ms: u64 },
     TurnCanceled,
-    TurnError {
-        message: String,
+    TurnError { message: String },
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ConversationEntry {
+    SystemEvent {
+        id: String,
+        created_at_unix_ms: u64,
+        event: ConversationSystemEvent,
+    },
+    UserEvent {
+        event: UserEvent,
+    },
+    AgentEvent {
+        event: AgentEvent,
     },
 }
 
@@ -68,30 +89,49 @@ pub(crate) fn flush_in_progress_items(conversation: &mut WorkspaceConversation) 
 fn entry_is_same(a: &ConversationEntry, b: &ConversationEntry) -> bool {
     match (a, b) {
         (
-            ConversationEntry::UserMessage {
-                text: a,
-                attachments: a_attachments,
+            ConversationEntry::SystemEvent {
+                id: a_id,
+                created_at_unix_ms: a_created_at,
+                event: a_event,
             },
-            ConversationEntry::UserMessage {
-                text: b,
-                attachments: b_attachments,
+            ConversationEntry::SystemEvent {
+                id: b_id,
+                created_at_unix_ms: b_created_at,
+                event: b_event,
             },
-        ) => a == b && a_attachments == b_attachments,
-        (ConversationEntry::CodexItem { item: a }, ConversationEntry::CodexItem { item: b }) => {
-            codex_item_id(a) == codex_item_id(b)
-        }
-        (ConversationEntry::TurnUsage { usage: a }, ConversationEntry::TurnUsage { usage: b }) => {
+        ) => a_id == b_id && a_created_at == b_created_at && a_event == b_event,
+        (ConversationEntry::UserEvent { event: a }, ConversationEntry::UserEvent { event: b }) => {
             a == b
         }
         (
-            ConversationEntry::TurnDuration { duration_ms: a },
-            ConversationEntry::TurnDuration { duration_ms: b },
-        ) => a == b,
-        (ConversationEntry::TurnCanceled, ConversationEntry::TurnCanceled) => true,
-        (
-            ConversationEntry::TurnError { message: a },
-            ConversationEntry::TurnError { message: b },
-        ) => a == b,
+            ConversationEntry::AgentEvent { event: a },
+            ConversationEntry::AgentEvent { event: b },
+        ) => match (a, b) {
+            (
+                AgentEvent::Message {
+                    id: a_id,
+                    text: a_text,
+                },
+                AgentEvent::Message {
+                    id: b_id,
+                    text: b_text,
+                },
+            ) => a_id == b_id && a_text == b_text,
+            (AgentEvent::Item { item: a_item }, AgentEvent::Item { item: b_item }) => {
+                codex_item_id(a_item) == codex_item_id(b_item)
+            }
+            (
+                AgentEvent::TurnUsage { usage: a_usage },
+                AgentEvent::TurnUsage { usage: b_usage },
+            ) => a_usage == b_usage,
+            (
+                AgentEvent::TurnDuration { duration_ms: a },
+                AgentEvent::TurnDuration { duration_ms: b },
+            ) => a == b,
+            (AgentEvent::TurnCanceled, AgentEvent::TurnCanceled) => true,
+            (AgentEvent::TurnError { message: a }, AgentEvent::TurnError { message: b }) => a == b,
+            _ => false,
+        },
         _ => false,
     }
 }
@@ -210,9 +250,8 @@ impl WorkspaceConversation {
         self.codex_item_ids.clear();
         self.codex_item_ids.reserve(self.entries.len());
         for entry in &self.entries {
-            if let ConversationEntry::CodexItem { item } = entry {
-                self.codex_item_ids
-                    .insert(codex_item_id(item.as_ref()).to_owned());
+            if let Some(id) = conversation_entry_stable_id(entry) {
+                self.codex_item_ids.insert(id.to_owned());
             }
         }
     }
@@ -226,9 +265,8 @@ impl WorkspaceConversation {
     }
 
     pub(crate) fn push_entry(&mut self, entry: ConversationEntry) {
-        if let ConversationEntry::CodexItem { item } = &entry {
-            self.codex_item_ids
-                .insert(codex_item_id(item.as_ref()).to_owned());
+        if let Some(id) = conversation_entry_stable_id(&entry) {
+            self.codex_item_ids.insert(id.to_owned());
         }
         self.push_entry_and_update_totals(entry);
     }
@@ -239,9 +277,17 @@ impl WorkspaceConversation {
             return false;
         }
         self.codex_item_ids.insert(id.to_owned());
-        self.push_entry_and_update_totals(ConversationEntry::CodexItem {
-            item: Box::new(item),
-        });
+        let entry = match item {
+            CodexThreadItem::AgentMessage { id, text } => ConversationEntry::AgentEvent {
+                event: AgentEvent::Message { id, text },
+            },
+            other => ConversationEntry::AgentEvent {
+                event: AgentEvent::Item {
+                    item: Box::new(other),
+                },
+            },
+        };
+        self.push_entry_and_update_totals(entry);
         true
     }
 
@@ -252,11 +298,22 @@ impl WorkspaceConversation {
         let overflow = self.entries.len() - MAX_CONVERSATION_ENTRIES_IN_MEMORY;
         let (entries, codex_item_ids) = (&mut self.entries, &mut self.codex_item_ids);
         for entry in entries.drain(0..overflow) {
-            if let ConversationEntry::CodexItem { item } = entry {
-                codex_item_ids.remove(codex_item_id(item.as_ref()));
+            if let Some(id) = conversation_entry_stable_id(&entry) {
+                codex_item_ids.remove(id);
             }
         }
         self.entries_start = self.entries_start.saturating_add(overflow as u64);
+    }
+}
+
+fn conversation_entry_stable_id(entry: &ConversationEntry) -> Option<&str> {
+    match entry {
+        ConversationEntry::AgentEvent { event } => match event {
+            AgentEvent::Message { id, .. } => Some(id.as_str()),
+            AgentEvent::Item { item } => Some(codex_item_id(item.as_ref())),
+            _ => None,
+        },
+        _ => None,
     }
 }
 
@@ -385,28 +442,30 @@ mod tests {
         conversation.entries_start = 100;
 
         let mut entries = Vec::with_capacity(MAX_CONVERSATION_ENTRIES_IN_MEMORY + 2);
-        entries.push(ConversationEntry::CodexItem {
-            item: Box::new(CodexThreadItem::AgentMessage {
+        entries.push(ConversationEntry::AgentEvent {
+            event: AgentEvent::Message {
                 id: "item-a".to_owned(),
                 text: "a".to_owned(),
-            }),
+            },
         });
-        entries.push(ConversationEntry::CodexItem {
-            item: Box::new(CodexThreadItem::AgentMessage {
+        entries.push(ConversationEntry::AgentEvent {
+            event: AgentEvent::Message {
                 id: "item-b".to_owned(),
                 text: "b".to_owned(),
-            }),
+            },
         });
-        entries.push(ConversationEntry::CodexItem {
-            item: Box::new(CodexThreadItem::AgentMessage {
+        entries.push(ConversationEntry::AgentEvent {
+            event: AgentEvent::Message {
                 id: "item-c".to_owned(),
                 text: "c".to_owned(),
-            }),
+            },
         });
         for idx in 0..(MAX_CONVERSATION_ENTRIES_IN_MEMORY - 1) {
-            entries.push(ConversationEntry::UserMessage {
-                text: format!("user-{idx}"),
-                attachments: Vec::new(),
+            entries.push(ConversationEntry::UserEvent {
+                event: UserEvent::Message {
+                    text: format!("user-{idx}"),
+                    attachments: Vec::new(),
+                },
             });
         }
 
@@ -424,7 +483,11 @@ mod tests {
         assert!(conversation.codex_item_ids.contains("item-c"));
 
         let first_entry_id = match &conversation.entries[0] {
-            ConversationEntry::CodexItem { item } => codex_item_id(item.as_ref()),
+            ConversationEntry::AgentEvent { event } => match event {
+                AgentEvent::Message { id, .. } => id.as_str(),
+                AgentEvent::Item { item } => codex_item_id(item.as_ref()),
+                other => panic!("expected agent event entry, got {other:?}"),
+            },
             other => panic!("expected codex item entry, got {other:?}"),
         };
         assert_eq!(first_entry_id, "item-c");
@@ -484,7 +547,11 @@ mod tests {
         assert_eq!(conversation.entries_total, 1);
 
         let first_entry_id = match &conversation.entries[0] {
-            ConversationEntry::CodexItem { item } => codex_item_id(item.as_ref()),
+            ConversationEntry::AgentEvent { event } => match event {
+                AgentEvent::Message { id, .. } => id.as_str(),
+                AgentEvent::Item { item } => codex_item_id(item.as_ref()),
+                other => panic!("expected agent event entry, got {other:?}"),
+            },
             other => panic!("expected codex item entry, got {other:?}"),
         };
         assert_eq!(first_entry_id, "item-a");

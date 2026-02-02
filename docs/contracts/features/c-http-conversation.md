@@ -27,6 +27,56 @@ Paginated read for a single conversation thread.
 - `200 OK`
 - JSON body: `ConversationSnapshot`
 
+### Events
+
+`snapshot.entries` is an ordered timeline. Each element is a `ConversationEntry` tagged by `type`:
+
+- `system_event`: provider-appended lifecycle transitions (task created, status changes, etc.)
+- `user_event`: user-originated events (today: `event.type=message`)
+- `agent_event`: agent-originated events (messages, tool steps, turn lifecycle events)
+
+`snapshot.in_progress_entries` may include additional `ConversationEntry` values that are not yet
+persisted into `snapshot.entries` (typically `agent_event` while a turn is running).
+
+### System events
+
+`snapshot.entries` may include `type=system_event` entries. These are appended by the provider for
+user-visible lifecycle transitions (for example: task creation, task status changes).
+
+The event payload is structured:
+
+- `type`: `system_event`
+- `id`: stable string identifier (unique within the conversation)
+- `created_at_unix_ms`: millisecond timestamp
+- `event.event_type`: `task_created` | `task_status_changed`
+
+### User events
+
+User events are structured:
+
+- `type`: `user_event`
+- `event.type`: `message`
+- `event.text`: string
+- `event.attachments`: array of `AttachmentRef`
+
+### Agent events
+
+Agent events are structured:
+
+- `type`: `agent_event`
+- `event.type`: `message` | `item` | `turn_usage` | `turn_duration` | `turn_canceled` | `turn_error`
+
+For `event.type=message`:
+
+- `event.id`: stable string identifier (unique within the conversation)
+- `event.text`: string
+
+For `event.type=item`:
+
+- `event.id`: stable string identifier (unique within the conversation)
+- `event.kind`: `AgentItemKind`
+- `event.payload`: JSON value (implementation-defined)
+
 ### Task status
 
 - `snapshot.task_status`: explicit lifecycle stage (`TaskStatus`, see `docs/task-and-turn-status.md`)

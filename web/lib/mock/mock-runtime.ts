@@ -316,7 +316,7 @@ function createTaskInWorkdir(state: RuntimeState, workdirId: WorkspaceId, title:
   snap.tabs.active_tab = taskId
   snap.rev = state.rev
 
-  const convo: ConversationSnapshot = {
+	  const convo: ConversationSnapshot = {
     rev: state.rev,
     workdir_id: workdirId,
     task_id: taskId,
@@ -329,15 +329,15 @@ function createTaskInWorkdir(state: RuntimeState, workdirId: WorkspaceId, title:
     run_started_at_unix_ms: null,
     run_finished_at_unix_ms: null,
     entries: [],
-    entries_total: 0,
-    entries_start: 0,
-    entries_truncated: false,
-    in_progress_items: [],
-    pending_prompts: [],
-    queue_paused: false,
-    remote_thread_id: null,
-    title,
-  }
+	    entries_total: 0,
+	    entries_start: 0,
+	    entries_truncated: false,
+	    in_progress_entries: [],
+	    pending_prompts: [],
+	    queue_paused: false,
+	    remote_thread_id: null,
+	    title,
+	  }
   state.conversationsByWorkdirTask.set(workdirTaskKey(workdirId, taskId), convo)
   return taskId
 }
@@ -545,7 +545,10 @@ export function mockDispatchAction(args: { action: ClientAction; onEvent: (event
     const key = workdirTaskKey(a.workdir_id, a.task_id)
     const convo = state.conversationsByWorkdirTask.get(key) ?? null
     if (!convo) return
-    const next: ConversationEntry[] = [...convo.entries, { type: "user_message", text: a.text, attachments: a.attachments ?? [] }]
+    const next: ConversationEntry[] = [
+      ...convo.entries,
+      { type: "user_event", event: { type: "message", text: a.text, attachments: a.attachments ?? [] } },
+    ]
     state.conversationsByWorkdirTask.set(key, { ...convo, entries: next, entries_total: next.length })
     emitConversationChanged({ state, workdirId: a.workdir_id, taskId: a.task_id, onEvent: args.onEvent })
     return

@@ -187,7 +187,7 @@ export function LubanSidebar({
     return () => {
       cancelled = true
     }
-  }, [app?.rev])
+  }, [app])
 
   const handleNavClick = (view: NavView) => {
     onViewChange?.(view)

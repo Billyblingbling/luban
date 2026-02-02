@@ -164,7 +164,7 @@ export function TaskListView({ activeProjectId, onTaskClick }: TaskListViewProps
     return () => {
       cancelled = true
     }
-  }, [activeProjectId, app?.rev])
+  }, [activeProjectId, app])
 
   const applyLocalTaskStatus = useCallback((args: { workspaceId: WorkspaceId; taskId: WorkspaceThreadId; status: TaskStatus }) => {
     setTasksSnapshot((prev) => {
@@ -240,7 +240,7 @@ export function TaskListView({ activeProjectId, onTaskClick }: TaskListViewProps
     }
 
     return out
-  }, [activeProjectId, app, tasksSnapshot])
+  }, [app, tasksSnapshot])
 
   const headerProject: ProjectInfo = useMemo(() => {
     if (!app) return { name: "Projects", color: "bg-violet-500" }

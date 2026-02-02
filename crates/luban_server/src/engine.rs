@@ -1771,7 +1771,7 @@ impl Engine {
             entries_total,
             entries_start,
             entries_truncated,
-            in_progress_items: Vec::new(),
+            in_progress_entries: Vec::new(),
             pending_prompts: loaded
                 .pending_prompts
                 .iter()
@@ -3630,14 +3630,14 @@ impl Engine {
             entries_total: total_entries as u64,
             entries_start: start as u64,
             entries_truncated,
-            in_progress_items: conversation
+            in_progress_entries: conversation
                 .in_progress_order
                 .iter()
                 .filter_map(|id| conversation.in_progress_items.get(id))
                 .map(|item| {
-                    let id = codex_item_id(item).to_owned();
-                    let (kind, payload) = map_agent_item(item);
-                    luban_api::AgentItem { id, kind, payload }
+                    luban_api::ConversationEntry::AgentEvent(luban_api::AgentEventEntry {
+                        event: map_codex_thread_item_to_agent_event(item),
+                    })
                 })
                 .collect(),
             pending_prompts: conversation
@@ -4120,30 +4120,99 @@ fn map_workspace_tabs_snapshot(tabs: &luban_domain::WorkspaceTabs) -> WorkspaceT
 
 fn map_conversation_entry(entry: &ConversationEntry) -> luban_api::ConversationEntry {
     match entry {
-        ConversationEntry::UserMessage { text, attachments } => {
-            luban_api::ConversationEntry::UserMessage(luban_api::UserMessage {
+        ConversationEntry::SystemEvent {
+            id,
+            created_at_unix_ms,
+            event,
+        } => luban_api::ConversationEntry::SystemEvent(luban_api::ConversationSystemEventEntry {
+            id: id.clone(),
+            created_at_unix_ms: *created_at_unix_ms,
+            event: match event {
+                luban_domain::ConversationSystemEvent::TaskCreated => {
+                    luban_api::ConversationSystemEvent::TaskCreated
+                }
+                luban_domain::ConversationSystemEvent::TaskStatusChanged { from, to } => {
+                    luban_api::ConversationSystemEvent::TaskStatusChanged {
+                        from: match from {
+                            luban_domain::TaskStatus::Backlog => luban_api::TaskStatus::Backlog,
+                            luban_domain::TaskStatus::Todo => luban_api::TaskStatus::Todo,
+                            luban_domain::TaskStatus::InProgress => {
+                                luban_api::TaskStatus::InProgress
+                            }
+                            luban_domain::TaskStatus::InReview => luban_api::TaskStatus::InReview,
+                            luban_domain::TaskStatus::Done => luban_api::TaskStatus::Done,
+                            luban_domain::TaskStatus::Canceled => luban_api::TaskStatus::Canceled,
+                        },
+                        to: match to {
+                            luban_domain::TaskStatus::Backlog => luban_api::TaskStatus::Backlog,
+                            luban_domain::TaskStatus::Todo => luban_api::TaskStatus::Todo,
+                            luban_domain::TaskStatus::InProgress => {
+                                luban_api::TaskStatus::InProgress
+                            }
+                            luban_domain::TaskStatus::InReview => luban_api::TaskStatus::InReview,
+                            luban_domain::TaskStatus::Done => luban_api::TaskStatus::Done,
+                            luban_domain::TaskStatus::Canceled => luban_api::TaskStatus::Canceled,
+                        },
+                    }
+                }
+            },
+        }),
+        ConversationEntry::UserEvent { event } => {
+            let event = match event {
+                luban_domain::UserEvent::Message { text, attachments } => {
+                    luban_api::UserEvent::Message(luban_api::UserMessage {
+                        text: text.clone(),
+                        attachments: attachments.iter().map(map_attachment_ref).collect(),
+                    })
+                }
+            };
+            luban_api::ConversationEntry::UserEvent(luban_api::UserEventEntry { event })
+        }
+        ConversationEntry::AgentEvent { event } => {
+            let event = match event {
+                luban_domain::AgentEvent::Message { id, text } => {
+                    luban_api::AgentEvent::Message(luban_api::AgentMessage {
+                        id: id.clone(),
+                        text: text.clone(),
+                    })
+                }
+                luban_domain::AgentEvent::Item { item } => {
+                    map_codex_thread_item_to_agent_event(item.as_ref())
+                }
+                luban_domain::AgentEvent::TurnUsage { usage } => {
+                    let usage_json = usage.as_ref().and_then(|u| serde_json::to_value(u).ok());
+                    luban_api::AgentEvent::TurnUsage { usage_json }
+                }
+                luban_domain::AgentEvent::TurnDuration { duration_ms } => {
+                    luban_api::AgentEvent::TurnDuration {
+                        duration_ms: *duration_ms,
+                    }
+                }
+                luban_domain::AgentEvent::TurnCanceled => luban_api::AgentEvent::TurnCanceled,
+                luban_domain::AgentEvent::TurnError { message } => {
+                    luban_api::AgentEvent::TurnError {
+                        message: message.clone(),
+                    }
+                }
+            };
+            luban_api::ConversationEntry::AgentEvent(luban_api::AgentEventEntry { event })
+        }
+    }
+}
+
+fn map_codex_thread_item_to_agent_event(item: &CodexThreadItem) -> luban_api::AgentEvent {
+    match item {
+        CodexThreadItem::AgentMessage { id, text } => {
+            luban_api::AgentEvent::Message(luban_api::AgentMessage {
+                id: id.clone(),
                 text: text.clone(),
-                attachments: attachments.iter().map(map_attachment_ref).collect(),
             })
         }
-        ConversationEntry::CodexItem { item } => {
-            let id = codex_item_id(item.as_ref()).to_owned();
-            let (kind, payload) = map_agent_item(item.as_ref());
-            luban_api::ConversationEntry::AgentItem(luban_api::AgentItem { id, kind, payload })
+        _ => {
+            let id = codex_item_id(item).to_owned();
+            let (kind, payload) = map_agent_item(item);
+            luban_api::AgentEvent::Item(luban_api::AgentItem { id, kind, payload })
         }
-        ConversationEntry::TurnUsage { usage } => {
-            let usage_json = usage.as_ref().and_then(|u| serde_json::to_value(u).ok());
-            luban_api::ConversationEntry::TurnUsage { usage_json }
-        }
-        ConversationEntry::TurnDuration { duration_ms } => {
-            luban_api::ConversationEntry::TurnDuration {
-                duration_ms: *duration_ms,
-            }
-        }
-        ConversationEntry::TurnCanceled => luban_api::ConversationEntry::TurnCanceled,
-        ConversationEntry::TurnError { message } => luban_api::ConversationEntry::TurnError {
-            message: message.clone(),
-        },
     }
 }
 
@@ -4164,7 +4233,6 @@ fn map_attachment_ref(att: &AttachmentRef) -> luban_api::AttachmentRef {
 
 fn map_agent_item(item: &CodexThreadItem) -> (luban_api::AgentItemKind, serde_json::Value) {
     let kind = match item {
-        CodexThreadItem::AgentMessage { .. } => luban_api::AgentItemKind::AgentMessage,
         CodexThreadItem::Reasoning { .. } => luban_api::AgentItemKind::Reasoning,
         CodexThreadItem::CommandExecution { .. } => luban_api::AgentItemKind::CommandExecution,
         CodexThreadItem::FileChange { .. } => luban_api::AgentItemKind::FileChange,
@@ -4172,6 +4240,9 @@ fn map_agent_item(item: &CodexThreadItem) -> (luban_api::AgentItemKind, serde_js
         CodexThreadItem::WebSearch { .. } => luban_api::AgentItemKind::WebSearch,
         CodexThreadItem::TodoList { .. } => luban_api::AgentItemKind::TodoList,
         CodexThreadItem::Error { .. } => luban_api::AgentItemKind::Error,
+        CodexThreadItem::AgentMessage { .. } => {
+            unreachable!("agent messages are mapped to AgentEvent::Message")
+        }
     };
     let payload = serde_json::to_value(item).unwrap_or(serde_json::Value::Null);
     (kind, payload)
@@ -5168,14 +5239,16 @@ mod tests {
             .get_mut(&key)
             .expect("conversation must exist");
         for i in 0..7000u32 {
-            convo.entries.push(ConversationEntry::CodexItem {
-                item: Box::new(CodexThreadItem::CommandExecution {
-                    id: format!("cmd_{i}"),
-                    command: format!("echo {i}"),
-                    aggregated_output: String::new(),
-                    exit_code: Some(0),
-                    status: CodexCommandExecutionStatus::Completed,
-                }),
+            convo.entries.push(ConversationEntry::AgentEvent {
+                event: luban_domain::AgentEvent::Item {
+                    item: Box::new(CodexThreadItem::CommandExecution {
+                        id: format!("cmd_{i}"),
+                        command: format!("echo {i}"),
+                        aggregated_output: String::new(),
+                        exit_code: Some(0),
+                        status: CodexCommandExecutionStatus::Completed,
+                    }),
+                },
             });
         }
         convo.entries_start = 0;
@@ -5184,7 +5257,9 @@ mod tests {
             .entries
             .iter()
             .filter_map(|entry| match entry {
-                ConversationEntry::CodexItem { item } => match item.as_ref() {
+                ConversationEntry::AgentEvent {
+                    event: luban_domain::AgentEvent::Item { item },
+                } => match item.as_ref() {
                     CodexThreadItem::CommandExecution { id, .. } => Some(id.clone()),
                     _ => None,
                 },

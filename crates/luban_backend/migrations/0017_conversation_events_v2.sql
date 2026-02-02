@@ -1,0 +1,2 @@
+-- conversation events v2 (wire-aligned payloads)
+-- This migration is implemented in Rust to rewrite `conversation_entries.payload_json`.

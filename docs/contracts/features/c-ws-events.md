@@ -27,6 +27,13 @@ See `crates/luban_api`:
 - `WsServerMessage`
 - `ClientAction`
 - `ServerEvent`
+- `ConversationSnapshot` / `ConversationEntry` (carried inside `ServerEvent::ConversationChanged`)
+
+Wire invariant for conversations:
+
+- `ConversationEntry` is tagged by `type` and only includes: `system_event`, `user_event`, `agent_event`.
+- `ConversationSnapshot.in_progress_entries` may be sent while a turn is running to preview agent events
+  that are not yet persisted into `entries`.
 
 ## Invariants
 
