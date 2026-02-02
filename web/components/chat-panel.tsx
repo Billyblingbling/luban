@@ -10,7 +10,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useLuban } from "@/lib/luban-context"
-import { buildMessages, type Message } from "@/lib/conversation-ui"
+import { buildAgentActivities, buildMessages, type Message } from "@/lib/conversation-ui"
 import { ConversationView } from "@/components/conversation-view"
 import { VirtualizedConversationView } from "@/components/virtualized-conversation-view"
 import { fetchCodexCustomPrompts, fetchWorkspaceDiff, uploadAttachment } from "@/lib/luban-http"
@@ -276,10 +276,11 @@ export function ChatPanel({
     for (let idx = displayMessages.length - 1; idx >= 0; idx -= 1) {
       const msg = displayMessages[idx]
       if (!msg) continue
-      if (msg.type === "assistant" && msg.activities && msg.activities.length > 0) return msg.id
+      if (msg.type !== "event") return msg.id
     }
-    return null
+    return displayMessages[displayMessages.length - 1]?.id ?? null
   }, [displayMessages])
+  const agentActivities = useMemo(() => buildAgentActivities(conversation), [conversation])
   const messageHistory = useMemo(() => {
     const entries = conversation?.entries ?? []
     const isUserMessage = (
@@ -1050,9 +1051,9 @@ export function ChatPanel({
     (message: (typeof messages)[number]) => {
       if (!agentStatus) return null
       if (!agentCardMessageId || message.id !== agentCardMessageId) return null
-      if (!message.activities || message.activities.length === 0) return null
-      const filtered = message.activities.filter((event) => event.title !== "Turn canceled")
-      const activities = filtered.length > 0 ? filtered : message.activities
+      if (agentActivities.length === 0) return null
+      const filtered = agentActivities.filter((event) => event.title !== "Turn canceled")
+      const activities = filtered.length > 0 ? filtered : agentActivities
       return (
         <AgentRunningCard
           activities={activities}
@@ -1086,6 +1087,7 @@ export function ChatPanel({
     },
     [
       activeWorkspaceId,
+      agentActivities,
       agentCardMessageId,
       agentEditorAttachments,
       agentEditorValue,

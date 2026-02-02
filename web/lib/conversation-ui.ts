@@ -245,6 +245,92 @@ export function activityFromAgentItem(entry: Extract<AgentEvent, { type: "item" 
   return activityFromAgentItemLike({ id: entry.id, kind: entry.kind, payload: entry.payload })
 }
 
+export function buildAgentActivities(conversation: ConversationSnapshot | null): ActivityEvent[] {
+  if (!conversation) return []
+
+  const out: ActivityEvent[] = []
+  const seen = new Set<string>()
+
+  const push = (event: ActivityEvent) => {
+    if (seen.has(event.id)) return
+    seen.add(event.id)
+    out.push(event)
+  }
+
+  const lastUserIndex = (() => {
+    for (let i = conversation.entries.length - 1; i >= 0; i -= 1) {
+      const entry = conversation.entries[i]
+      if (entry?.type === "user_event" && entry.event.type === "message") return i
+    }
+    return -1
+  })()
+
+  for (const entry of conversation.entries.slice(lastUserIndex + 1)) {
+    if (entry.type !== "agent_event") continue
+    const ev = entry.event
+    if (ev.type === "item") {
+      push(activityFromAgentItem(ev))
+      continue
+    }
+    if (ev.type === "turn_duration") {
+      push({
+        id: `turn_duration_${ev.duration_ms}`,
+        type: "complete",
+        title: `Turn duration: ${formatDurationMs(ev.duration_ms)}`,
+        status: "done",
+      })
+      continue
+    }
+    if (ev.type === "turn_usage") {
+      push({
+        id: "turn_usage",
+        type: "tool_call",
+        title: "Turn usage",
+        detail: safeStringify(ev.usage_json ?? null),
+        status: "done",
+      })
+      continue
+    }
+    if (ev.type === "turn_error") {
+      push({
+        id: "turn_error",
+        type: "tool_call",
+        title: "Turn error",
+        detail: ev.message,
+        status: "done",
+      })
+      continue
+    }
+    if (ev.type === "turn_canceled") {
+      push({
+        id: "turn_canceled",
+        type: "tool_call",
+        title: "Turn canceled",
+        status: "done",
+      })
+      continue
+    }
+  }
+
+  if (conversation.run_status === "running" && conversation.in_progress_entries.length > 0) {
+    for (const pending of conversation.in_progress_entries) {
+      if (pending.type !== "agent_event") continue
+      const ev = pending.event
+      if (ev.type !== "item") continue
+      push(
+        activityFromAgentItemLike({
+          id: ev.id,
+          kind: ev.kind,
+          payload: ev.payload,
+          forcedStatus: "running",
+        }),
+      )
+    }
+  }
+
+  return out
+}
+
 export function buildMessages(conversation: ConversationSnapshot | null): Message[] {
   if (!conversation) return []
 
@@ -274,27 +360,10 @@ export function buildMessages(conversation: ConversationSnapshot | null): Messag
     }
   }
 
-  let pendingAgentActivities: ActivityEvent[] = []
-  let pendingAgentCancelled = false
   const seenAgentEventIds = new Set<string>()
-
-  function flushPendingAgentEvents() {
-    if (pendingAgentActivities.length === 0) return
-    out.push({
-      id: `agent_events_${out.length}`,
-      type: "assistant",
-      content: "",
-      timestamp: new Date().toISOString(),
-      isCancelled: pendingAgentCancelled || undefined,
-      activities: pendingAgentActivities,
-    })
-    pendingAgentActivities = []
-    pendingAgentCancelled = false
-  }
 
   for (const entry of conversation.entries) {
     if (entry.type === "system_event") {
-      flushPendingAgentEvents()
       const ev = entry.event as any
       const eventType = (() => {
         if (ev?.event_type === "task_created") return "task_created" as const
@@ -326,7 +395,6 @@ export function buildMessages(conversation: ConversationSnapshot | null): Messag
 
     if (entry.type === "user_event") {
       if (entry.event.type === "message") {
-        flushPendingAgentEvents()
         out.push({
           id: `u_${out.length}`,
           type: "user",
@@ -342,7 +410,6 @@ export function buildMessages(conversation: ConversationSnapshot | null): Messag
     if (entry.type === "agent_event") {
       const ev = entry.event
       if (ev.type === "message") {
-        flushPendingAgentEvents()
         seenAgentEventIds.add(ev.id)
         out.push({
           id: `a_${ev.id}`,
@@ -350,59 +417,63 @@ export function buildMessages(conversation: ConversationSnapshot | null): Messag
           eventSource: "agent",
           content: ev.text.trim(),
           timestamp: new Date().toISOString(),
-          isCancelled: pendingAgentCancelled || undefined,
-          activities: pendingAgentActivities.length > 0 ? pendingAgentActivities : undefined,
         })
-        pendingAgentActivities = []
-        pendingAgentCancelled = false
         continue
       }
 
       if (ev.type === "item") {
         seenAgentEventIds.add(ev.id)
-        pendingAgentActivities.push(activityFromAgentItem(ev))
+        const activity = activityFromAgentItem(ev)
+        out.push({
+          id: `ae_${ev.id}`,
+          type: "event",
+          eventSource: "agent",
+          content: activity.title,
+          timestamp: new Date().toISOString(),
+        })
         continue
       }
 
       if (ev.type === "turn_duration") {
-        pendingAgentActivities.push({
-          id: `turn_duration_${out.length}_${ev.duration_ms}`,
-          type: "complete",
-          title: `Turn duration: ${formatDurationMs(ev.duration_ms)}`,
-          status: "done",
+        out.push({
+          id: `ae_turn_duration_${out.length}_${ev.duration_ms}`,
+          type: "event",
+          eventSource: "agent",
+          content: `Turn duration: ${formatDurationMs(ev.duration_ms)}`,
+          timestamp: new Date().toISOString(),
         })
         continue
       }
 
       if (ev.type === "turn_usage") {
-        pendingAgentActivities.push({
-          id: `turn_usage_${out.length}`,
-          type: "tool_call",
-          title: "Turn usage",
-          detail: safeStringify(ev.usage_json ?? null),
-          status: "done",
+        out.push({
+          id: `ae_turn_usage_${out.length}`,
+          type: "event",
+          eventSource: "agent",
+          content: "Turn usage",
+          timestamp: new Date().toISOString(),
         })
         continue
       }
 
       if (ev.type === "turn_error") {
-        pendingAgentActivities.push({
-          id: `turn_error_${out.length}`,
-          type: "tool_call",
-          title: "Turn error",
-          detail: ev.message,
-          status: "done",
+        out.push({
+          id: `ae_turn_error_${out.length}`,
+          type: "event",
+          eventSource: "agent",
+          content: `Turn error: ${ev.message}`,
+          timestamp: new Date().toISOString(),
         })
         continue
       }
 
       if (ev.type === "turn_canceled") {
-        pendingAgentCancelled = true
-        pendingAgentActivities.push({
-          id: `turn_canceled_${out.length}`,
-          type: "tool_call",
-          title: "Turn canceled",
-          status: "done",
+        out.push({
+          id: `ae_turn_canceled_${out.length}`,
+          type: "event",
+          eventSource: "agent",
+          content: "Turn canceled",
+          timestamp: new Date().toISOString(),
         })
         continue
       }
@@ -423,43 +494,29 @@ export function buildMessages(conversation: ConversationSnapshot | null): Messag
           content: ev.text.trim(),
           timestamp: new Date().toISOString(),
           isStreaming: true,
-          isCancelled: pendingAgentCancelled || undefined,
-          activities: pendingAgentActivities.length > 0 ? pendingAgentActivities : undefined,
         })
-        pendingAgentActivities = []
-        pendingAgentCancelled = false
         continue
       }
 
       if (ev.type === "item") {
         if (seenAgentEventIds.has(ev.id)) continue
-        pendingAgentActivities.push(
-          activityFromAgentItemLike({
-            id: ev.id,
-            kind: ev.kind,
-            payload: ev.payload,
-            forcedStatus: "running",
-          }),
-        )
+        const activity = activityFromAgentItemLike({
+          id: ev.id,
+          kind: ev.kind,
+          payload: ev.payload,
+          forcedStatus: "running",
+        })
+        out.push({
+          id: `ae_${ev.id}`,
+          type: "event",
+          eventSource: "agent",
+          content: activity.title,
+          timestamp: new Date().toISOString(),
+        })
         continue
       }
     }
   }
-
-  if (
-    conversation.run_status === "running" &&
-    pendingAgentActivities.length > 0 &&
-    !pendingAgentActivities.some((a) => a.status === "running")
-  ) {
-    pendingAgentActivities.push({
-      id: "synthetic_running",
-      type: "thinking",
-      title: "Running...",
-      status: "running",
-    })
-  }
-
-  flushPendingAgentEvents()
 
   if (conversation.run_status === "running") {
     const last = out[out.length - 1]

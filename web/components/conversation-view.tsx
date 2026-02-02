@@ -79,6 +79,18 @@ export function ConversationMessage({
   workspaceId?: number
   renderAgentRunningCard?: (message: Message) => React.ReactNode
 }): React.ReactElement | null {
+  if (message.type === "event") {
+    return (
+      <div
+        className="text-[11px] text-muted-foreground/80"
+        data-testid="conversation-event"
+      >
+        {message.eventSource === "agent" ? "Agent: " : message.eventSource === "system" ? "System: " : ""}
+        {message.content}
+      </div>
+    )
+  }
+
   return (
     <div className="group">
       {message.type === "assistant" ? (
