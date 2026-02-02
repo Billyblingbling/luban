@@ -7,6 +7,32 @@ export async function runLatestEventsVisible({ page }) {
 
   const scrollContainer = page.getByTestId('chat-scroll-container');
   await scrollContainer.waitFor({ state: 'visible' });
+  const contentWrapper = page.getByTestId('chat-content-wrapper');
+  await contentWrapper.waitFor({ state: 'visible' });
+
+  const containerMetrics = await scrollContainer.evaluate((el) => {
+    const rect = el.getBoundingClientRect();
+    return {
+      left: rect.left,
+      clientLeft: el.clientLeft,
+      clientWidth: el.clientWidth,
+    };
+  });
+  const wrapperMetrics = await contentWrapper.evaluate((el) => {
+    const rect = el.getBoundingClientRect();
+    return { left: rect.left, right: rect.right };
+  });
+  const containerInnerLeft = containerMetrics.left + containerMetrics.clientLeft;
+  const containerInnerRight = containerInnerLeft + containerMetrics.clientWidth;
+  const leftInset = wrapperMetrics.left - containerInnerLeft;
+  const rightInset = containerInnerRight - wrapperMetrics.right;
+  const insetDelta = Math.abs(leftInset - rightInset);
+  const insetTolerance = 2;
+  if (insetDelta > insetTolerance) {
+    throw new Error(
+      `expected chat content to be horizontally centered (within ${insetTolerance}px), got leftInset=${leftInset.toFixed(2)}px rightInset=${rightInset.toFixed(2)}px`,
+    );
+  }
   await scrollContainer.evaluate((el) => {
     el.scrollTop = el.scrollHeight;
   });

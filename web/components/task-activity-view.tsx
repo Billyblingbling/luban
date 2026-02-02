@@ -862,8 +862,13 @@ export function TaskActivityView({
       style={{ backgroundColor: COLORS.background }}
     >
       {/* Scrollable content */}
-      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto" data-testid="chat-scroll-container">
-        <div style={{ maxWidth: '686px', margin: '0 60px' }}>
+      <div
+        ref={scrollContainerRef}
+        className="flex-1 overflow-y-auto"
+        data-testid="chat-scroll-container"
+        style={{ padding: "0 60px" }}
+      >
+        <div data-testid="chat-content-wrapper" style={{ maxWidth: "686px", margin: "0 auto" }}>
           {/* Task header with title and description */}
           <TaskHeaderSection
             title={title}
