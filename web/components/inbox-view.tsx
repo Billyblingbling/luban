@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   CheckCircle2,
   AlertCircle,
@@ -131,6 +131,7 @@ export function InboxView({ onOpenFullView }: InboxViewProps) {
   const [tasksSnapshot, setTasksSnapshot] = useState<TasksSnapshot | null>(null)
   const [selectedNotificationId, setSelectedNotificationId] = useState<string | null>(null)
   const [pendingDiffFile, setPendingDiffFile] = useState<ChangedFile | null>(null)
+  const [nowMs, setNowMs] = useState<number | null>(null)
 
   useEffect(() => {
     if (!app) {
@@ -154,9 +155,16 @@ export function InboxView({ onOpenFullView }: InboxViewProps) {
     }
   }, [app?.rev])
 
-  const formatTimestamp = (updatedAtUnixSeconds: number): string => {
+  useEffect(() => {
+    const update = () => setNowMs(Date.now())
+    update()
+    const id = window.setInterval(update, 60_000)
+    return () => window.clearInterval(id)
+  }, [])
+
+  const formatTimestamp = useCallback((updatedAtUnixSeconds: number): string => {
     const date = new Date(updatedAtUnixSeconds * 1000)
-    const now = Date.now()
+    const now = nowMs ?? date.getTime()
     const diffMs = Math.max(0, now - date.getTime())
     const diffMinutes = Math.floor(diffMs / 60_000)
     if (diffMinutes < 60) return `${diffMinutes}m`
@@ -166,7 +174,7 @@ export function InboxView({ onOpenFullView }: InboxViewProps) {
     const month = String(date.getMonth() + 1).padStart(2, "0")
     const day = String(date.getDate()).padStart(2, "0")
     return `${year}-${month}-${day}`
-  }
+  }, [nowMs])
 
   const notifications = useMemo(() => {
     if (!app || !tasksSnapshot) return [] as InboxNotification[]
@@ -221,7 +229,7 @@ export function InboxView({ onOpenFullView }: InboxViewProps) {
       })
     }
     return out
-  }, [app, tasksSnapshot])
+  }, [app, formatTimestamp, tasksSnapshot])
 
   const selectedNotification = useMemo(() => {
     if (!selectedNotificationId) return null

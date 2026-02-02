@@ -2,6 +2,12 @@
 @import "tw-animate-css";
 @import "@xterm/xterm/css/xterm.css";
 
+/* Iconify Tabler Icons */
+@plugin "@iconify/tailwind4" {
+  prefixes: tabler;
+  scale: 1.1;
+}
+
 @custom-variant dark (&:is(.dark *));
 
 /* Linear-style theme - precise color matching */

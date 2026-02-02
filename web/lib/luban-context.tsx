@@ -22,10 +22,11 @@ import type {
   ProjectId,
   ServerEvent,
   SystemTaskKind,
-  ThreadMeta,
   TaskExecuteMode,
   TaskExecuteResult,
   TaskIntentKind,
+  TaskStatus,
+  ThreadMeta,
   ThinkingEffort,
   OpenTarget,
   WorkspaceId,
@@ -72,6 +73,7 @@ type LubanContextValue = {
 
   executeTask: (prompt: string, mode: TaskExecuteMode, workdirId: WorkspaceId) => Promise<TaskExecuteResult>
   setTaskStarred: (workdirId: WorkspaceId, taskId: WorkspaceThreadId, starred: boolean) => void
+  setTaskStatus: (workdirId: WorkspaceId, taskId: WorkspaceThreadId, taskStatus: TaskStatus) => void
   submitFeedback: (args: {
     title: string
     body: string
@@ -375,6 +377,7 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     toggleProjectExpanded: actions.toggleProjectExpanded,
     executeTask: actions.executeTask,
     setTaskStarred: actions.setTaskStarred,
+    setTaskStatus: actions.setTaskStatus,
     submitFeedback: actions.submitFeedback,
     openWorkdir: actions.openWorkdir,
     activateTask: actions.activateTask,

@@ -3,3 +3,11 @@ target/
 node_modules/
 .env
 dist/
+
+# Local UI/design screenshots (do not commit)
+/backlog_*.png
+/linear_*.png
+/status_*.png
+/task_detail*.png
+/task_status_*.png
+/right_sidebar_no_props.png

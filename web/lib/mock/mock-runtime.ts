@@ -551,6 +551,36 @@ export function mockDispatchAction(args: { action: ClientAction; onEvent: (event
     return
   }
 
+  if (a.type === "task_status_set") {
+    const snap = state.threadsByWorkdir.get(a.workdir_id) ?? null
+    if (!snap) return
+
+    const now = Math.floor(Date.now() / 1000)
+    snap.tasks = snap.tasks.map((t) =>
+      t.task_id === a.task_id
+        ? { ...t, task_status: a.task_status, updated_at_unix_seconds: Math.max(t.updated_at_unix_seconds, now) }
+        : t,
+    )
+
+    const key = workdirTaskKey(a.workdir_id, a.task_id)
+    const convo = state.conversationsByWorkdirTask.get(key) ?? null
+    if (convo) {
+      state.conversationsByWorkdirTask.set(key, { ...convo, task_status: a.task_status })
+    }
+
+    const rev = bumpRev(state)
+    snap.rev = rev
+    if (convo) {
+      const updated = state.conversationsByWorkdirTask.get(key) ?? null
+      if (updated) state.conversationsByWorkdirTask.set(key, { ...updated, rev })
+    }
+
+    args.onEvent({ type: "app_changed", rev, snapshot: clone(state.app) })
+    emitWorkdirTasksChanged({ state, workdirId: a.workdir_id, onEvent: args.onEvent })
+    emitConversationChanged({ state, workdirId: a.workdir_id, taskId: a.task_id, onEvent: args.onEvent })
+    return
+  }
+
   if (a.type === "task_star_set") {
     const key = workdirTaskKey(a.workdir_id, a.task_id)
     if (a.starred) {

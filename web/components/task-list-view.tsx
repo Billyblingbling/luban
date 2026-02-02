@@ -1,26 +1,24 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ChevronDown,
   ChevronRight,
-  Circle,
-  CircleDot,
-  CheckCircle2,
   Plus,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ProjectIcon, type ProjectInfo } from "./shared/task-header"
+import { TaskStatusSelector } from "./shared/task-status-selector"
 import { useLuban } from "@/lib/luban-context"
 import { computeProjectDisplayNames } from "@/lib/project-display-names"
 import { projectColorClass } from "@/lib/project-colors"
 import { fetchTasks } from "@/lib/luban-http"
-import type { TaskStatus, TasksSnapshot } from "@/lib/luban-api"
+import type { TaskStatus, TasksSnapshot, WorkspaceId, WorkspaceThreadId } from "@/lib/luban-api"
 
 export interface Task {
   id: string
-  workspaceId: number
-  taskId: number
+  workspaceId: WorkspaceId
+  taskId: WorkspaceThreadId
   title: string
   status: TaskStatus
   workdir: string
@@ -29,30 +27,14 @@ export interface Task {
   createdAt: string
 }
 
-const StatusIcon = ({ status }: { status: TaskStatus }) => {
-  switch (status) {
-    case "backlog":
-      return <Circle className="w-[14px] h-[14px]" style={{ color: '#d4d4d4' }} />
-    case "todo":
-      return <Circle className="w-[14px] h-[14px]" style={{ color: '#9b9b9b' }} />
-    case "in_progress":
-      return <CircleDot className="w-[14px] h-[14px]" style={{ color: '#f2994a' }} />
-    case "in_review":
-      return <CircleDot className="w-[14px] h-[14px]" style={{ color: '#5e6ad2' }} />
-    case "done":
-      return <CheckCircle2 className="w-[14px] h-[14px]" style={{ color: '#5e6ad2' }} />
-    case "canceled":
-      return <Circle className="w-[14px] h-[14px]" style={{ color: '#d4d4d4' }} />
-  }
-}
-
 interface TaskRowProps {
   task: Task
   selected?: boolean
   onClick?: () => void
+  onStatusChange?: (status: TaskStatus) => void
 }
 
-function TaskRow({ task, selected, onClick }: TaskRowProps) {
+function TaskRow({ task, selected, onClick, onStatusChange }: TaskRowProps) {
   return (
     <div
       onClick={onClick}
@@ -62,7 +44,14 @@ function TaskRow({ task, selected, onClick }: TaskRowProps) {
       )}
       style={{ borderBottom: '1px solid #ebebeb' }}
     >
-      <StatusIcon status={task.status} />
+      <div onClick={(e) => e.stopPropagation()}>
+        <TaskStatusSelector
+          status={task.status}
+          onStatusChange={onStatusChange}
+          size="sm"
+          triggerTestId={`task-status-selector-${task.workspaceId}-${task.taskId}`}
+        />
+      </div>
       <span
         className="text-[13px] truncate"
         style={{ color: '#1b1b1b' }}
@@ -142,9 +131,18 @@ interface TaskListViewProps {
 }
 
 export function TaskListView({ activeProjectId, onTaskClick }: TaskListViewProps) {
-  const { app } = useLuban()
+  const { app, setTaskStatus } = useLuban()
   const [tasksSnapshot, setTasksSnapshot] = useState<TasksSnapshot | null>(null)
   const [selectedTask, setSelectedTask] = useState<string | null>(null)
+
+  const refreshTasks = useCallback(async () => {
+    try {
+      const snap = await fetchTasks(activeProjectId ? { projectId: activeProjectId } : {})
+      setTasksSnapshot(snap)
+    } catch (err) {
+      console.warn("fetchTasks failed", err)
+    }
+  }, [activeProjectId])
 
   useEffect(() => {
     if (!app) {
@@ -167,6 +165,29 @@ export function TaskListView({ activeProjectId, onTaskClick }: TaskListViewProps
       cancelled = true
     }
   }, [activeProjectId, app?.rev])
+
+  const applyLocalTaskStatus = useCallback((args: { workspaceId: WorkspaceId; taskId: WorkspaceThreadId; status: TaskStatus }) => {
+    setTasksSnapshot((prev) => {
+      if (!prev) return prev
+      let changed = false
+      const nextTasks = prev.tasks.map((t) => {
+        if (t.workdir_id !== args.workspaceId || t.task_id !== args.taskId) return t
+        if (t.task_status === args.status) return t
+        changed = true
+        return { ...t, task_status: args.status }
+      })
+      return changed ? { ...prev, tasks: nextTasks, rev: prev.rev + 1 } : prev
+    })
+  }, [])
+
+  const handleStatusChange = useCallback(
+    (args: { workspaceId: WorkspaceId; taskId: WorkspaceThreadId; status: TaskStatus }) => {
+      applyLocalTaskStatus(args)
+      setTaskStatus(args.workspaceId, args.taskId, args.status)
+      window.setTimeout(() => void refreshTasks(), 200)
+    },
+    [applyLocalTaskStatus, refreshTasks, setTaskStatus],
+  )
 
   const tasks = useMemo(() => {
     if (!app || !tasksSnapshot) return [] as Task[]
@@ -288,6 +309,9 @@ export function TaskListView({ activeProjectId, onTaskClick }: TaskListViewProps
                 setSelectedTask(task.id)
                 onTaskClick?.(task)
               }}
+              onStatusChange={(newStatus) =>
+                handleStatusChange({ workspaceId: task.workspaceId, taskId: task.taskId, status: newStatus })
+              }
             />
           ))}
         </TaskGroup>
@@ -302,6 +326,9 @@ export function TaskListView({ activeProjectId, onTaskClick }: TaskListViewProps
                 setSelectedTask(task.id)
                 onTaskClick?.(task)
               }}
+              onStatusChange={(newStatus) =>
+                handleStatusChange({ workspaceId: task.workspaceId, taskId: task.taskId, status: newStatus })
+              }
             />
           ))}
         </TaskGroup>
@@ -316,6 +343,9 @@ export function TaskListView({ activeProjectId, onTaskClick }: TaskListViewProps
                 setSelectedTask(task.id)
                 onTaskClick?.(task)
               }}
+              onStatusChange={(newStatus) =>
+                handleStatusChange({ workspaceId: task.workspaceId, taskId: task.taskId, status: newStatus })
+              }
             />
           ))}
         </TaskGroup>
@@ -330,6 +360,9 @@ export function TaskListView({ activeProjectId, onTaskClick }: TaskListViewProps
                 setSelectedTask(task.id)
                 onTaskClick?.(task)
               }}
+              onStatusChange={(newStatus) =>
+                handleStatusChange({ workspaceId: task.workspaceId, taskId: task.taskId, status: newStatus })
+              }
             />
           ))}
         </TaskGroup>
@@ -344,6 +377,9 @@ export function TaskListView({ activeProjectId, onTaskClick }: TaskListViewProps
                 setSelectedTask(task.id)
                 onTaskClick?.(task)
               }}
+              onStatusChange={(newStatus) =>
+                handleStatusChange({ workspaceId: task.workspaceId, taskId: task.taskId, status: newStatus })
+              }
             />
           ))}
         </TaskGroup>
@@ -358,6 +394,9 @@ export function TaskListView({ activeProjectId, onTaskClick }: TaskListViewProps
                 setSelectedTask(task.id)
                 onTaskClick?.(task)
               }}
+              onStatusChange={(newStatus) =>
+                handleStatusChange({ workspaceId: task.workspaceId, taskId: task.taskId, status: newStatus })
+              }
             />
           ))}
         </TaskGroup>

@@ -51,6 +51,7 @@ export function LubanIDE() {
       setSelectedTask({
         id: notification.id,
         workspaceId: notification.workdirId,
+        taskId: notification.taskId,
         title: notification.taskTitle,
         status:
           notification.type === "completed"
