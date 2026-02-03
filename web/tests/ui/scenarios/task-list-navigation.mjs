@@ -12,6 +12,25 @@ export async function runTaskListNavigation({ page }) {
   // Anchor the active workdir so the new task modal defaults are stable.
   await page.getByTestId('sidebar-project-mock-project-1').click();
   await page.getByTestId('task-list-view').waitFor({ state: 'visible' });
+  {
+    const indicator = page.getByTestId('task-list-project-indicator');
+    await indicator.waitFor({ state: 'visible' });
+
+    const img = indicator.locator('img').first();
+    await img.waitFor({ state: 'visible' });
+
+    const src = await img.getAttribute('src');
+    if (!src) throw new Error('missing task list project avatar src');
+    if (!src.startsWith('data:image/svg+xml,')) {
+      throw new Error(`expected mock avatar data URL, got: ${src.slice(0, 64)}`);
+    }
+
+    const box = await img.boundingBox();
+    if (!box) throw new Error('missing task list project avatar bounding box');
+    if (Math.round(box.width) !== 18 || Math.round(box.height) !== 18) {
+      throw new Error(`expected task list project avatar to be 18x18, got ${box.width}x${box.height}`);
+    }
+  }
   await page.getByText('Mock task 1').first().click();
   await page.getByTestId('chat-scroll-container').waitFor({ state: 'visible' });
 

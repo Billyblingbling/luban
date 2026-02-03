@@ -12,6 +12,7 @@ import { TaskStatusSelector } from "./shared/task-status-selector"
 import { useLuban } from "@/lib/luban-context"
 import { computeProjectDisplayNames } from "@/lib/project-display-names"
 import { projectColorClass } from "@/lib/project-colors"
+import { buildSidebarProjects } from "@/lib/sidebar-view-model"
 import { fetchTasks } from "@/lib/luban-http"
 import type { TaskStatus, TasksSnapshot, WorkspaceId, WorkspaceThreadId } from "@/lib/luban-api"
 
@@ -130,10 +131,15 @@ interface TaskListViewProps {
   onTaskClick?: (task: Task) => void
 }
 
+type HeaderProjectInfo = ProjectInfo & {
+  avatarUrl?: string
+}
+
 export function TaskListView({ activeProjectId, onTaskClick }: TaskListViewProps) {
   const { app, setTaskStatus } = useLuban()
   const [tasksSnapshot, setTasksSnapshot] = useState<TasksSnapshot | null>(null)
   const [selectedTask, setSelectedTask] = useState<string | null>(null)
+  const [headerAvatarFailed, setHeaderAvatarFailed] = useState(false)
 
   const formatCreatedAt = useCallback((createdAtUnixSeconds: number): string => {
     if (!createdAtUnixSeconds) return ""
@@ -261,15 +267,19 @@ export function TaskListView({ activeProjectId, onTaskClick }: TaskListViewProps
     return out
   }, [app, formatCreatedAt, tasksSnapshot])
 
-  const headerProject: ProjectInfo = useMemo(() => {
+  const headerProject: HeaderProjectInfo = useMemo(() => {
     if (!app) return { name: "Projects", color: "bg-violet-500" }
-    const displayNames = computeProjectDisplayNames(app.projects.map((p) => ({ path: p.path, name: p.name })))
     if (activeProjectId) {
-      const p = app.projects.find((p) => p.id === activeProjectId)
-      if (p) return { name: displayNames.get(p.path) ?? p.slug, color: projectColorClass(p.id) }
+      const sidebarProjects = buildSidebarProjects(app, { projectOrder: app.ui.sidebar_project_order ?? [] })
+      const p = sidebarProjects.find((p) => p.id === activeProjectId) ?? null
+      if (p) return { name: p.displayName, color: projectColorClass(p.id), avatarUrl: p.avatarUrl }
     }
     return { name: "Projects", color: "bg-violet-500" }
   }, [activeProjectId, app])
+
+  useEffect(() => {
+    setHeaderAvatarFailed(false)
+  }, [headerProject.avatarUrl])
 
   const iteratingTasks = tasks.filter((t) => t.status === "iterating")
   const validatingTasks = tasks.filter((t) => t.status === "validating")
@@ -286,8 +296,21 @@ export function TaskListView({ activeProjectId, onTaskClick }: TaskListViewProps
         style={{ padding: '0 24px 0 20px', borderBottom: '1px solid #ebebeb' }}
       >
         {/* Project Indicator */}
-        <div className="flex items-center gap-1">
-          <ProjectIcon name={headerProject.name} color={headerProject.color} />
+        <div className="flex items-center gap-1" data-testid="task-list-project-indicator">
+          {headerProject.avatarUrl && !headerAvatarFailed ? (
+            <img
+              src={headerProject.avatarUrl}
+              alt=""
+              width={18}
+              height={18}
+              className="w-[18px] h-[18px] rounded overflow-hidden flex-shrink-0"
+              loading="lazy"
+              decoding="async"
+              onError={() => setHeaderAvatarFailed(true)}
+            />
+          ) : (
+            <ProjectIcon name={headerProject.name} color={headerProject.color} />
+          )}
           <span className="text-[13px] font-medium" style={{ color: '#1b1b1b' }}>
             {headerProject.name}
           </span>

@@ -246,6 +246,7 @@ export function defaultMockFixtures(): MockFixtures {
   const task7: WorkspaceThreadId = 7
   const task8: WorkspaceThreadId = 8
   const task9: WorkspaceThreadId = 9
+  const task10: WorkspaceThreadId = 10
 
   const project1: ProjectId = "mock-project-1"
   const project2: ProjectId = "mock-project-2"
@@ -376,7 +377,7 @@ export function defaultMockFixtures(): MockFixtures {
   }
 
   const tabs1: WorkspaceTabsSnapshot = { open_tabs: [task1, task9, task7, task4, task2, task8, task5, task6], archived_tabs: [], active_tab: task1 }
-  const tabs2: WorkspaceTabsSnapshot = { open_tabs: [task3], archived_tabs: [], active_tab: task3 }
+  const tabs2: WorkspaceTabsSnapshot = { open_tabs: [task3, task10], archived_tabs: [], active_tab: task3 }
   const tabs3: WorkspaceTabsSnapshot = { open_tabs: [task1, task9, task7, task4, task8, task5, task6], archived_tabs: [], active_tab: task1 }
 
   const threadsByWorkspace: Record<number, ThreadsSnapshot> = {
@@ -399,7 +400,10 @@ export function defaultMockFixtures(): MockFixtures {
       rev: 1,
       workdir_id: workdir2,
       tabs: tabs2,
-      tasks: [{ task_id: task3, remote_thread_id: null, title: "PR: pending", created_at_unix_seconds: unixSeconds(-5), updated_at_unix_seconds: unixSeconds(-5), task_status: "iterating" as TaskStatus, turn_status: "running" as TurnStatus, last_turn_result: null }],
+      tasks: [
+        { task_id: task3, remote_thread_id: null, title: "PR: pending", created_at_unix_seconds: unixSeconds(-5), updated_at_unix_seconds: unixSeconds(-5), task_status: "iterating" as TaskStatus, turn_status: "running" as TurnStatus, last_turn_result: null },
+        { task_id: task10, remote_thread_id: null, title: "Todo: awaiting ack", created_at_unix_seconds: unixSeconds(-3), updated_at_unix_seconds: unixSeconds(-3), task_status: "todo" as TaskStatus, turn_status: "idle" as TurnStatus, last_turn_result: "completed" as TurnResult },
+      ],
     },
     [workdir3]: {
       rev: 1,
@@ -792,6 +796,22 @@ export function defaultMockFixtures(): MockFixtures {
         },
       ],
     }),
+    [key(workdir2, task10)]: conversationBase({
+      workdirId: workdir2,
+      taskId: task10,
+      title: "Todo: awaiting ack",
+      taskStatus: "todo",
+      runStatus: "idle",
+      entries: [
+        systemEvent({
+          id: "sys_1",
+          createdAtUnixMs: unixMs(-20 * 60 * 1000),
+          event: { event_type: "task_created" },
+        }),
+        userMessage("Please implement the agent status pill in the task list."),
+        agentMessage("Done. Please review and acknowledge the result."),
+      ],
+    }),
     [key(workdir3, task1)]: conversationBase({
       workdirId: workdir3,
       taskId: task1,
@@ -1159,6 +1179,22 @@ export function defaultMockFixtures(): MockFixtures {
         task_status: "iterating",
         turn_status: "running",
         last_turn_result: null,
+        is_starred: false,
+      } satisfies TaskSummarySnapshot,
+      {
+        project_id: project1,
+        workdir_id: workdir2,
+        task_id: task10,
+        title: "Todo: awaiting ack",
+        created_at_unix_seconds: unixSeconds(-3),
+        updated_at_unix_seconds: unixSeconds(-3),
+        branch_name: "feat/ui-mock",
+        workdir_name: "feat-ui",
+        agent_run_status: "idle",
+        has_unread_completion: true,
+        task_status: "todo",
+        turn_status: "idle",
+        last_turn_result: "completed",
         is_starred: false,
       } satisfies TaskSummarySnapshot,
       {
