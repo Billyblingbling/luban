@@ -221,6 +221,7 @@ function ActivityEventItem({ event, isExpanded, onToggle, duration }: ActivityEv
         </span>
         {hasDuration && (
           <span
+            data-testid="activity-event-duration"
             className="font-mono tabular-nums text-right flex-shrink-0"
             style={{ fontSize: "10px", color: COLORS.textMuted }}
           >

@@ -8,6 +8,9 @@ import type {
   ThinkingEffort,
 } from "./luban-api"
 import { AGENT_MODELS } from "./agent-settings"
+import { formatDurationMs } from "./duration-format"
+
+export { formatDurationMs } from "./duration-format"
 
 export interface ActivityEvent {
   id: string
@@ -58,17 +61,6 @@ function safeStringify(value: unknown): string {
   } catch {
     return String(value)
   }
-}
-
-export function formatDurationMs(ms: number): string {
-  const seconds = Math.max(0, Math.round(ms / 1000))
-  const s = seconds % 60
-  const minutes = Math.floor(seconds / 60)
-  const m = minutes % 60
-  const hours = Math.floor(minutes / 60)
-  if (hours > 0) return `${hours}h${m}m${s}s`
-  if (minutes > 0) return `${minutes}m${s}s`
-  return `${s}s`
 }
 
 export function agentModelLabel(modelId: string | null | undefined): string {

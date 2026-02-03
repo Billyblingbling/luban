@@ -114,6 +114,16 @@ export async function runLatestEventsVisible({ page }) {
   if (dedupeRunningIcons !== 0) {
     throw new Error('expected dedupe update to be done, but it is still running');
   }
+  const dedupeDuration = dedupeRows.first().getByTestId('activity-event-duration');
+  await dedupeDuration.waitFor({ state: 'visible' });
+  const dedupeDurationText = ((await dedupeDuration.textContent()) ?? '').trim();
+  if (dedupeDurationText === 'now') {
+    throw new Error('expected activity duration to be formatted as a duration (not a relative timestamp like "now")');
+  }
+  const durationPattern = /^(< 1s|\d+s|\d+m \d+s|\d+h \d+m \d+s)$/;
+  if (!durationPattern.test(dedupeDurationText)) {
+    throw new Error(`expected activity duration to match ${durationPattern}, got "${dedupeDurationText}"`);
+  }
 
   const runningRow = progressEvents.filter({ hasText: 'Progress update 3' }).first();
   await runningRow.waitFor({ state: 'visible' });

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 
 import type { ActivityEvent } from "@/lib/conversation-ui"
+import { formatDurationMs } from "@/lib/duration-format"
 
 type TimingMeta = {
   startedAtMs: number
@@ -15,14 +16,7 @@ const MAX_TIMING_ENTRIES = 50_000
 const PRUNE_BATCH_SIZE = 5_000
 
 function formatStepDuration(ms: number): string {
-  const totalSeconds = Math.max(0, Math.floor(ms / 1000))
-  const minutesTotal = Math.floor(totalSeconds / 60)
-  const hours = Math.floor(minutesTotal / 60)
-  const minutes = minutesTotal % 60
-
-  if (totalSeconds < 60) return "now"
-  if (hours > 0) return `${hours}h ${minutes}m`
-  return `${minutesTotal}m`
+  return formatDurationMs(ms)
 }
 
 export function useActivityTiming(
