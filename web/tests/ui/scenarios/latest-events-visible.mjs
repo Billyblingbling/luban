@@ -37,15 +37,58 @@ export async function runLatestEventsVisible({ page }) {
     el.scrollTop = el.scrollHeight;
   });
 
-  const pickEventLocator = async () => {
-    const activity = page.getByTestId('activity-event');
-    if ((await activity.count()) > 0) return activity;
-    return page.getByTestId('conversation-event');
-  };
+  const latestTurn = page.getByTestId('agent-turn-card').filter({ hasText: 'Progress update 3' }).first();
+  await latestTurn.waitFor({ state: 'visible' });
+  await latestTurn.scrollIntoViewIfNeeded();
+  await latestTurn.getByTestId('agent-turn-toggle').click();
 
-  const eventLocator = await pickEventLocator();
-  const progressEvents = eventLocator.filter({ hasText: 'Progress update' });
+  const progressEvents = latestTurn.getByTestId('agent-turn-event').filter({ hasText: 'Progress update' });
   await waitForLocatorCount(progressEvents, 3, 20_000);
+
+  const alignmentRow = progressEvents.first();
+  const avatar = latestTurn.getByTestId('agent-turn-avatar');
+  await avatar.waitFor({ state: 'visible' });
+  const avatarBox = await avatar.boundingBox();
+  if (!avatarBox) throw new Error('missing agent avatar bounding box');
+
+  const firstSimpleEventAvatar = page.getByTestId('event-avatar').first();
+  await firstSimpleEventAvatar.waitFor({ state: 'visible' });
+  const firstSimpleEventAvatarBox = await firstSimpleEventAvatar.boundingBox();
+  if (!firstSimpleEventAvatarBox) throw new Error('missing simple event icon bounding box');
+
+  const icon = alignmentRow.getByTestId('activity-event-icon');
+  const title = alignmentRow.getByTestId('activity-event-title');
+  await icon.waitFor({ state: 'visible' });
+  await title.waitFor({ state: 'visible' });
+  const iconBox = await icon.boundingBox();
+  const titleBox = await title.boundingBox();
+  if (!iconBox) throw new Error('missing activity icon bounding box');
+  if (!titleBox) throw new Error('missing activity title bounding box');
+
+  const avatarCenterX = avatarBox.x + avatarBox.width / 2;
+  const firstSimpleEventCenterX = firstSimpleEventAvatarBox.x + firstSimpleEventAvatarBox.width / 2;
+  const simpleEventDeltaX = Math.abs(avatarCenterX - firstSimpleEventCenterX);
+  const simpleEventTolerance = 1.5;
+  if (simpleEventDeltaX > simpleEventTolerance) {
+    throw new Error(
+      `expected simple event icon to align with card avatar center within ${simpleEventTolerance}px, got delta=${simpleEventDeltaX}px`,
+    );
+  }
+
+  const iconCenterX = iconBox.x + iconBox.width / 2;
+  const xDelta = Math.abs(avatarCenterX - iconCenterX);
+  const xTolerance = 1.5;
+  if (xDelta > xTolerance) {
+    throw new Error(`expected activity icon to align with avatar center within ${xTolerance}px, got delta=${xDelta}px`);
+  }
+
+  const iconCenterY = iconBox.y + iconBox.height / 2;
+  const titleCenterY = titleBox.y + titleBox.height / 2;
+  const centerDelta = Math.abs(iconCenterY - titleCenterY);
+  const centerTolerance = 1.5;
+  if (centerDelta > centerTolerance) {
+    throw new Error(`expected activity icon/title vertical alignment within ${centerTolerance}px, got delta=${centerDelta}px`);
+  }
 
   const userActivityContent = page.getByTestId('activity-user-message-content');
   const agentActivityContent = page.getByTestId('activity-agent-message-content');
@@ -65,31 +108,8 @@ export async function runLatestEventsVisible({ page }) {
     }
   }
 
-  const progressUpdate1 = eventLocator.filter({ hasText: 'Progress update 1' }).first();
-  await progressUpdate1.waitFor({ state: 'visible' });
-  await progressUpdate1.scrollIntoViewIfNeeded();
-
-  const avatar = progressUpdate1.getByTestId('event-avatar');
-  const text = progressUpdate1.getByTestId('event-text');
-  await avatar.waitFor({ state: 'visible' });
-  await text.waitFor({ state: 'visible' });
-
-  const avatarBox = await avatar.boundingBox();
-  const textBox = await text.boundingBox();
-  if (!avatarBox) throw new Error('missing avatar bounding box');
-  if (!textBox) throw new Error('missing text bounding box');
-
-  const avatarCenterY = avatarBox.y + avatarBox.height / 2;
-  const textCenterY = textBox.y + textBox.height / 2;
-  const delta = Math.abs(avatarCenterY - textCenterY);
-  const tolerance = 1.5;
-  if (delta > tolerance) {
-    throw new Error(`expected avatar/text vertical alignment within ${tolerance}px, got delta=${delta}px`);
-  }
-
-  await eventLocator.filter({ hasText: 'Progress update 2' }).first().waitFor({ state: 'visible' });
-  const runningRow = eventLocator.filter({ hasText: 'Progress update 3' }).first();
+  await progressEvents.filter({ hasText: 'Progress update 2' }).first().waitFor({ state: 'visible' });
+  const runningRow = progressEvents.filter({ hasText: 'Progress update 3' }).first();
   await runningRow.waitFor({ state: 'visible' });
   await runningRow.getByTestId('event-running-icon').waitFor({ state: 'visible' });
-  await waitForLocatorCount(runningRow.getByTestId('event-timestamp'), 0, 5_000);
 }

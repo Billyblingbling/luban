@@ -282,9 +282,9 @@ The activity-based task view follows Linear's issue detail page pattern. Styles 
 #### Simple Event (System Event)
 ```tsx
 <div className="flex items-start" style={{ padding: '1px 0' }}>
-  {/* Icon column - 14x14 */}
-  <div style={{ width: '14px', height: '18px', marginRight: '11px', paddingTop: '2px' }}>
-    <div style={{ width: '14px', height: '14px', borderRadius: '4px', backgroundColor: '#5e6ad2' }}>
+  {/* Icon column - 14x14, aligned with card avatars */}
+  <div style={{ width: '14px', height: '16.8px', marginLeft: '14px', marginRight: '4px' }}>
+    <div style={{ width: '14px', height: '14px', borderRadius: '50%', backgroundColor: '#5e6ad2' }}>
       {/* Icon or initial */}
     </div>
   </div>
@@ -296,8 +296,21 @@ The activity-based task view follows Linear's issue detail page pattern. Styles 
 </div>
 ```
 
+#### Activity Icon Alignment (Critical)
+
+In Linear-style activity lists, icon alignment is a primary visual anchor.
+
+- Icon size: `14x14` (e.g. Tailwind `w-3.5 h-3.5`)
+- Icon slot: `width: 14px`, `height: 16.8px`
+- Text line-height: `16.8px`
+- Rule: the icon center must be vertically centered with the text center for single-line rows
+- Rule: simple events and card avatars share the same center X axis in the activity stream
+- When rendering nested activity rows inside a card, align the activity icon center X with the card avatar center X
+- Keep right-edge alignment stable by reserving the chevron slot even for non-expandable rows
+- Do not reserve a fixed duration column when the duration is empty
+
 #### Collapsible Agent Activities
-Activities are collapsed by default, showing a summary like "Completed 5 steps" with a chevron to expand.
+Activities are collapsed by default, showing a one-line summary. The card itself is the toggle target (no extra expand button).
 
 ## Full-Screen Overlays
 

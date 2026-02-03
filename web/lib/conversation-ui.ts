@@ -21,6 +21,8 @@ export interface ActivityEvent {
 
 type ActivityStatus = ActivityEvent["status"]
 
+export type AgentTurnStatus = "running" | "done" | "canceled" | "error"
+
 export interface SystemEvent {
   id: string
   type: "event"
@@ -31,7 +33,7 @@ export interface SystemEvent {
 
 export interface Message {
   id: string
-  type: "user" | "assistant" | "event"
+  type: "user" | "assistant" | "event" | "agent_turn"
   eventSource?: "system" | "user" | "agent"
   content: string
   attachments?: AttachmentRef[]
@@ -40,6 +42,7 @@ export interface Message {
   isCancelled?: boolean
   status?: ActivityStatus
   activities?: ActivityEvent[]
+  turnStatus?: AgentTurnStatus
   metadata?: {
     toolCalls?: number
     thinkingSteps?: number
@@ -203,6 +206,7 @@ export function activityFromAgentItemLike(args: {
       id: args.id,
       type: "search",
       title: payload?.query ?? "Web search",
+      detail: safeStringify(payload ?? null),
       status: forcedStatus ?? "done",
     }
   }
@@ -324,9 +328,266 @@ export function buildAgentActivities(conversation: ConversationSnapshot | null):
   return order.map((id) => latestById.get(id)!).filter(Boolean)
 }
 
-export function buildMessages(conversation: ConversationSnapshot | null): Message[] {
+export function buildMessages(
+  conversation: ConversationSnapshot | null,
+  opts?: { agentTurns?: "flat" | "grouped" },
+): Message[] {
   if (!conversation) return []
+  const mode = opts?.agentTurns ?? "flat"
+  return mode === "grouped" ? buildMessagesGroupedTurns(conversation) : buildMessagesFlatEvents(conversation)
+}
 
+function buildMessagesGroupedTurns(conversation: ConversationSnapshot): Message[] {
+  const out: Message[] = []
+
+  const unixMsToIso = (unixMs: number | null | undefined): string | undefined => {
+    if (typeof unixMs !== "number" || !Number.isFinite(unixMs)) return undefined
+    return new Date(unixMs).toISOString()
+  }
+
+  const taskStatusLabel = (status: string): string => {
+    switch (status) {
+      case "backlog":
+        return "Backlog"
+      case "todo":
+        return "Todo"
+      case "in_progress":
+        return "In Progress"
+      case "in_review":
+        return "In Review"
+      case "done":
+        return "Done"
+      case "canceled":
+        return "Canceled"
+      default:
+        return status
+    }
+  }
+
+  const tailStart = Math.max(0, conversation.entries.length - 3)
+  const agentMessageById = new Map<string, Message>()
+  const turnMessageById = new Map<string, Message>()
+  const turnActivityById = new Map<
+    string,
+    { order: string[]; latestByRowId: Map<string, ActivityEvent>; latestByKey: Map<string, string> }
+  >()
+  let lastUserEntryId: string | null = null
+  let lastUserOutIndex: number | null = null
+
+  const ensureTurnMessage = (turnId: string): Message => {
+    const existing = turnMessageById.get(turnId) ?? null
+    if (existing) return existing
+
+    const msg: Message = {
+      id: turnId,
+      type: "agent_turn",
+      eventSource: "agent",
+      content: "",
+      activities: [],
+      turnStatus: "done",
+    }
+    if (lastUserOutIndex != null) {
+      out.splice(lastUserOutIndex + 1, 0, msg)
+      lastUserOutIndex += 1
+    } else {
+      out.push(msg)
+    }
+    turnMessageById.set(turnId, msg)
+    turnActivityById.set(turnId, { order: [], latestByRowId: new Map(), latestByKey: new Map() })
+    return msg
+  }
+
+  const appendTurnActivity = (turnId: string, args: { key: string; rowId: string; event: ActivityEvent }) => {
+    const state = turnActivityById.get(turnId)
+    if (!state) return
+
+    const existingRowId = state.latestByKey.get(args.key) ?? null
+    if (existingRowId == null || existingRowId !== args.rowId) {
+      if (!state.latestByRowId.has(args.rowId)) {
+        state.order.push(args.rowId)
+      }
+      state.latestByKey.set(args.key, args.rowId)
+    }
+
+    state.latestByRowId.set(args.rowId, args.event)
+    const msg = turnMessageById.get(turnId) ?? null
+    if (!msg) return
+    msg.activities = state.order.map((id) => state.latestByRowId.get(id)!).filter(Boolean)
+  }
+
+  const applyTurnStatus = (turnId: string, status: AgentTurnStatus) => {
+    const msg = turnMessageById.get(turnId) ?? null
+    if (!msg || msg.type !== "agent_turn") return
+    msg.turnStatus = status
+  }
+
+  for (let i = 0; i < conversation.entries.length; i += 1) {
+    const entry = conversation.entries[i]!
+    if (entry.type === "system_event") {
+      const ev = entry.event as any
+      const eventType = (() => {
+        if (ev?.event_type === "task_created") return "task_created" as const
+        if (ev?.event_type === "task_status_changed") return "status_changed" as const
+        return "status_changed" as const
+      })()
+      const content = (() => {
+        if (ev?.event_type === "task_created") return "created the task"
+        if (ev?.event_type === "task_status_changed") {
+          const from = taskStatusLabel(String(ev.from ?? ""))
+          const to = taskStatusLabel(String(ev.to ?? ""))
+          if (from && to) return `moved from ${from} to ${to}`
+          if (to) return `changed status to ${to}`
+          return "changed task status"
+        }
+        return "updated the task"
+      })()
+
+      out.push({
+        id: `e_${entry.entry_id}`,
+        type: "event",
+        eventSource: "system",
+        status: "done",
+        eventType,
+        content,
+        timestamp: unixMsToIso(entry.created_at_unix_ms),
+      })
+      continue
+    }
+
+    if (entry.type === "user_event") {
+      if (entry.event.type === "message") {
+        lastUserEntryId = entry.entry_id || null
+        out.push({
+          id: `u_${entry.entry_id}`,
+          type: "user",
+          eventSource: "user",
+          content: entry.event.text,
+          attachments: entry.event.attachments,
+          timestamp: new Date().toISOString(),
+        })
+        lastUserOutIndex = out.length - 1
+      }
+      continue
+    }
+
+    if (entry.type === "agent_event") {
+      const ev = entry.event
+      if (ev.type === "message") {
+        const baseId = `a_${ev.id}`
+        const existing = agentMessageById.get(baseId) ?? null
+        if (existing && existing.type === "assistant") {
+          existing.content = ev.text.trim()
+        } else {
+          const msg: Message = {
+            id: baseId,
+            type: "assistant",
+            eventSource: "agent",
+            content: ev.text.trim(),
+            timestamp: new Date().toISOString(),
+          }
+          out.push(msg)
+          agentMessageById.set(baseId, msg)
+        }
+        continue
+      }
+
+      if (ev.type === "item") {
+        if (!lastUserEntryId) continue
+        const turnId = `t_${lastUserEntryId}`
+        ensureTurnMessage(turnId)
+        const status = inferActivityStatusFromPayload(ev.payload)
+        const activityKey = `item_${ev.id}`
+        const rowId = i >= tailStart ? `${activityKey}_${entry.entry_id}` : activityKey
+        const activity = activityFromAgentItemLike({
+          id: rowId,
+          kind: String(ev.kind ?? "item"),
+          payload: ev.payload,
+          forcedStatus: status,
+        })
+        appendTurnActivity(turnId, { key: activityKey, rowId, event: activity })
+        continue
+      }
+
+      if (ev.type === "turn_duration") {
+        if (!lastUserEntryId) continue
+        const turnId = `t_${lastUserEntryId}`
+        ensureTurnMessage(turnId)
+        const activityKey = `turn_duration_${ev.duration_ms}`
+        const rowId = `${activityKey}_${entry.entry_id || out.length}`
+        appendTurnActivity(turnId, {
+          key: activityKey,
+          rowId,
+          event: { id: rowId, type: "complete", title: `Turn duration: ${formatDurationMs(ev.duration_ms)}`, status: "done" },
+        })
+        continue
+      }
+
+      if (ev.type === "turn_usage") {
+        if (!lastUserEntryId) continue
+        const turnId = `t_${lastUserEntryId}`
+        ensureTurnMessage(turnId)
+        const activityKey = "turn_usage"
+        const rowId = `${activityKey}_${entry.entry_id || out.length}`
+        appendTurnActivity(turnId, {
+          key: activityKey,
+          rowId,
+          event: { id: rowId, type: "tool_call", title: "Turn usage", detail: safeStringify(ev.usage_json ?? null), status: "done" },
+        })
+        continue
+      }
+
+      if (ev.type === "turn_error") {
+        if (!lastUserEntryId) continue
+        const turnId = `t_${lastUserEntryId}`
+        ensureTurnMessage(turnId)
+        applyTurnStatus(turnId, "error")
+        const activityKey = "turn_error"
+        const rowId = `${activityKey}_${entry.entry_id || out.length}`
+        appendTurnActivity(turnId, {
+          key: activityKey,
+          rowId,
+          event: { id: rowId, type: "tool_call", title: "Turn error", detail: ev.message, status: "done" },
+        })
+        continue
+      }
+
+      if (ev.type === "turn_canceled") {
+        if (!lastUserEntryId) continue
+        const turnId = `t_${lastUserEntryId}`
+        ensureTurnMessage(turnId)
+        applyTurnStatus(turnId, "canceled")
+        const activityKey = "turn_canceled"
+        const rowId = `${activityKey}_${entry.entry_id || out.length}`
+        appendTurnActivity(turnId, {
+          key: activityKey,
+          rowId,
+          event: { id: rowId, type: "tool_call", title: "Turn canceled", status: "done" },
+        })
+        continue
+      }
+    }
+  }
+
+  if (conversation.run_status === "running" && lastUserEntryId) {
+    const turnId = `t_${lastUserEntryId}`
+    ensureTurnMessage(turnId)
+    applyTurnStatus(turnId, "running")
+  }
+
+  if (conversation.run_status === "running") {
+    for (let i = out.length - 1; i >= 0; i -= 1) {
+      const msg = out[i]
+      if (msg && msg.type === "assistant") {
+        msg.isStreaming = true
+        break
+      }
+    }
+  }
+
+  return out
+}
+
+function buildMessagesFlatEvents(conversation: ConversationSnapshot): Message[] {
   const out: Message[] = []
   const tailStart = Math.max(0, conversation.entries.length - 3)
 

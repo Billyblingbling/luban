@@ -11,16 +11,9 @@ export async function runQueuedPrompts({ page }) {
     el.scrollTop = el.scrollHeight;
   });
 
-  const pickEventLocator = async () => {
-    const activity = page.getByTestId('activity-event');
-    if ((await activity.count()) > 0) return activity;
-    return page.getByTestId('conversation-event');
-  };
-
-  const eventLocator = await pickEventLocator();
-  const runningRow = eventLocator.filter({ hasText: 'Progress update 3' }).first();
-  await runningRow.waitFor({ state: 'visible' });
-  await runningRow.getByTestId('event-running-icon').waitFor({ state: 'visible' });
+  const runningTurn = page.getByTestId('agent-turn-card').filter({ hasText: 'Progress update 3' }).first();
+  await runningTurn.waitFor({ state: 'visible' });
+  await runningTurn.getByTestId('event-running-icon').waitFor({ state: 'visible' });
 
   const queuedText = `Queued prompt ${Date.now()}`;
   await page.getByTestId('chat-input').fill(queuedText);
@@ -49,4 +42,3 @@ export async function runQueuedPrompts({ page }) {
     throw new Error('expected queued prompt not to be inserted into the activity stream until processing starts');
   }
 }
-

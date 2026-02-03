@@ -88,7 +88,7 @@ export function TaskActivityPanel({
     [],
   )
 
-  const messages = useMemo(() => buildMessages(conversation), [conversation])
+  const messages = useMemo(() => buildMessages(conversation, { agentTurns: "grouped" }), [conversation])
   const queuedPrompts = useMemo(() => conversation?.pending_prompts ?? [], [conversation?.pending_prompts])
 
   const messageHistory = useMemo(() => {
@@ -500,6 +500,7 @@ export function TaskActivityPanel({
           description={taskDescription}
           messages={messages}
           isLoading={isAgentRunning}
+          onCancelAgentTurn={isAgentRunning ? () => cancelAgentTurn() : undefined}
           inputComponent={inputComponent}
           className="flex-1 min-w-0"
         />
