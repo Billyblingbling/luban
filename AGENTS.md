@@ -124,6 +124,14 @@ This repository may be operated in a shared worktree model (multiple agents shar
 - Never rely on long-lived uncommitted local changes; keep the working tree clean between tasks.
 - If you modify the same area as another concurrent change, call it out explicitly and resolve conflicts promptly.
 
+**Git safety (hard requirement in shared worktrees)**
+- Multiple code agents may operate on the same branch and in the same working directory.
+- Do **not** run `git clean` or `git stash` (including `git stash -u`) since they can destroy or hide other agents' work.
+- Before any git operation that mutates the index/worktree/refs/remotes (e.g. `add`, `commit`, `pull`, `merge`, `rebase`, `reset`, `checkout`, `push`), acquire the shared lock:
+  - `tools/git-lock.sh -- git <subcommand> ...`
+- If the lock times out, stop and inspect `.context/git-ops.lock.owner` to see who owns the lock.
+
+
 ### 2.6 Commit scope defaults (required)
 
 When the user asks to "commit and push":
@@ -131,7 +139,7 @@ When the user asks to "commit and push":
 - Default to a task-scoped commit: stage and commit only changes needed for the current request.
 - If unrelated changes exist in the working tree, do not ask the user which option to pick; proceed with the task-scoped commit.
 - Use `git add -p` (or explicit pathspecs) to avoid mixing unrelated hunks/files.
-- Leave unrelated changes unstaged and uncommitted (or `git stash -u` temporarily only if needed to run verification).
+- Leave unrelated changes unstaged and uncommitted. If a clean tree is required for verification, use an isolated worktree/clone instead of `git stash`/`git clean`.
 
 ## 2.5 Repository map (where things live)
 - `crates/luban_domain/`: pure state + reducers (`AppState`, `Action`, `Effect`), deterministic logic, most regressions should be captured here.
