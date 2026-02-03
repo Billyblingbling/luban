@@ -25,7 +25,7 @@ import { cn } from "@/lib/utils"
 import type { Message, ActivityEvent } from "@/lib/conversation-ui"
 import { Markdown } from "@/components/markdown"
 import { AnsiOutput } from "@/components/shared/ansi-output"
-import { useActivityTiming } from "@/lib/activity-timing"
+import { extractTurnDurationLabel, useActivityTiming } from "@/lib/activity-timing"
 import { attachmentHref } from "@/lib/attachment-href"
 
 /**
@@ -611,6 +611,7 @@ function AgentTurnCardEvent({
 
   const latestActivity = activities[activities.length - 1]
   const completedCount = activities.filter((a) => a.status === "done" && a.title !== "Turn canceled").length
+  const turnDurationLabel = extractTurnDurationLabel(activities)
 
   const toggleEvent = (eventId: string) => {
     setExpandedEvents((prev) => {
@@ -626,9 +627,10 @@ function AgentTurnCardEvent({
 
   const summary = (() => {
     if (isRunning) return latestActivity?.title ?? "Processing"
-    if (isCancelled) return `Cancelled after ${completedCount} steps`
-    if (isErrored) return `Failed after ${completedCount} steps`
-    return `Completed ${completedCount} steps`
+    const suffix = turnDurationLabel ? ` in ${turnDurationLabel}` : ""
+    if (isCancelled) return `Cancelled after ${completedCount} steps${suffix}`
+    if (isErrored) return `Failed after ${completedCount} steps${suffix}`
+    return `Completed ${completedCount} steps${suffix}`
   })()
 
   return (
@@ -677,17 +679,20 @@ function AgentTurnCardEvent({
         </button>
 
         {isRunning && onCancel ? (
-          <div className="relative flex items-center justify-center w-7 h-7 flex-shrink-0">
+          <div
+            data-testid="agent-turn-cancel-area"
+            className="group/cancel relative flex items-center justify-center w-7 h-7 flex-shrink-0"
+          >
             <Loader2
               data-testid="event-running-icon"
-              className="w-3.5 h-3.5 animate-spin transition-opacity group-hover/turn:opacity-0"
+              className="w-3.5 h-3.5 animate-spin transition-opacity group-hover/cancel:opacity-0"
               style={{ color: COLORS.textMuted }}
             />
             <button
               data-testid="agent-turn-cancel"
               type="button"
               onClick={onCancel}
-              className="absolute inset-0 flex items-center justify-center rounded hover:bg-black/[0.04] transition-colors opacity-0 pointer-events-none group-hover/turn:opacity-100 group-hover/turn:pointer-events-auto"
+              className="absolute inset-0 flex items-center justify-center rounded hover:bg-black/[0.04] transition-colors opacity-0 pointer-events-none group-hover/cancel:opacity-100 group-hover/cancel:pointer-events-auto"
               title="Pause"
             >
               <Pause className="w-3.5 h-3.5" style={{ color: COLORS.textMuted }} />

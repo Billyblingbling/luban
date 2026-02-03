@@ -128,4 +128,30 @@ export async function runLatestEventsVisible({ page }) {
   const runningRow = progressEvents.filter({ hasText: 'Progress update 3' }).first();
   await runningRow.waitFor({ state: 'visible' });
   await runningRow.getByTestId('event-running-icon').waitFor({ state: 'visible' });
+
+  // Only show the cancel affordance when hovering the running icon area (not the entire card).
+  const cancelArea = latestTurn.getByTestId('agent-turn-cancel-area');
+  await cancelArea.waitFor({ state: 'visible' });
+  const cancelButton = cancelArea.getByTestId('agent-turn-cancel');
+
+  const getOpacity = async (locator) => await locator.evaluate((el) => getComputedStyle(el).opacity);
+
+  const waitForOpacity = async (locator, expected, timeoutMs = 1000) => {
+    const start = Date.now();
+    while (Date.now() - start <= timeoutMs) {
+      const opacity = await getOpacity(locator);
+      if (opacity === expected) return;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    const finalOpacity = await getOpacity(locator);
+    throw new Error(`expected opacity ${expected}, got ${finalOpacity}`);
+  };
+
+  await waitForOpacity(cancelButton, '0');
+
+  await latestTurn.getByTestId('agent-turn-toggle').hover();
+  await waitForOpacity(cancelButton, '0');
+
+  await cancelArea.hover();
+  await waitForOpacity(cancelButton, '1');
 }
