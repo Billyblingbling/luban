@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 import {
   X,
@@ -12,9 +12,10 @@ import {
 } from "lucide-react"
 
 import { useLuban } from "@/lib/luban-context"
-import type { TaskExecuteMode } from "@/lib/luban-api"
+import type { AttachmentRef, TaskExecuteMode } from "@/lib/luban-api"
 import { draftKey } from "@/lib/ui-prefs"
 import { focusChatInput } from "@/lib/focus-chat-input"
+import { uploadAttachment } from "@/lib/luban-http"
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -28,17 +29,36 @@ interface NewTaskModalProps {
   onOpenChange: (open: boolean) => void
 }
 
+type PendingAttachment = {
+  id: string
+  file: File
+  kind: "image" | "file"
+  name: string
+  url?: string
+}
+
 export function NewTaskModal({ open, onOpenChange }: NewTaskModalProps) {
-  const { app, executeTask, openWorkdir, activateTask, activeWorkdirId, createWorkdir, ensureMainWorkdir } = useLuban()
+  const {
+    app,
+    executeTask,
+    openWorkdir,
+    activateTask,
+    activeWorkdirId,
+    createWorkdir,
+    ensureMainWorkdir,
+  } = useLuban()
 
   const [input, setInput] = useState("")
   const [executingMode, setExecutingMode] = useState<TaskExecuteMode | null>(null)
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([])
   const [selectedProjectId, setSelectedProjectId] = useState<string>("")
   const [selectedWorkdirId, setSelectedWorkdirId] = useState<number | null>(null)
   const [projectSearch, setProjectSearch] = useState("")
   const [workdirSearch, setWorkdirSearch] = useState("")
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const appRef = useRef<AppSnapshot | null>(null)
+  const submitInFlightRef = useRef(false)
 
   useEffect(() => {
     appRef.current = app
@@ -167,6 +187,69 @@ export function NewTaskModal({ open, onOpenChange }: NewTaskModalProps) {
     }
   }, [open])
 
+  const revokeAttachmentUrls = (items: PendingAttachment[]) => {
+    for (const item of items) {
+      if (item.url) URL.revokeObjectURL(item.url)
+    }
+  }
+
+  useEffect(() => {
+    if (open) return
+    if (attachments.length === 0) return
+    revokeAttachmentUrls(attachments)
+    setAttachments([])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
+
+  const addPendingFiles = (files: Iterable<File>) => {
+    const next: PendingAttachment[] = []
+    for (const file of files) {
+      const isImage = file.type.startsWith("image/")
+      const id =
+        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+      next.push({
+        id,
+        file,
+        kind: isImage ? "image" : "file",
+        name: file.name || (isImage ? "screenshot.png" : "file"),
+        url: isImage ? URL.createObjectURL(file) : undefined,
+      })
+    }
+    if (next.length === 0) return
+    setAttachments((prev) => [...prev, ...next])
+  }
+
+  const handleFileSelect = (files: FileList | null) => {
+    if (!files || files.length === 0) return
+    addPendingFiles(Array.from(files))
+  }
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items
+    if (!items) return
+
+    const files: File[] = []
+    for (const item of Array.from(items)) {
+      if (item.kind !== "file") continue
+      const file = item.getAsFile()
+      if (file) files.push(file)
+    }
+
+    if (files.length === 0) return
+    e.preventDefault()
+    addPendingFiles(files)
+  }
+
+  const removeAttachment = (id: string) => {
+    setAttachments((prev) => {
+      const removed = prev.find((a) => a.id === id) ?? null
+      if (removed) revokeAttachmentUrls([removed])
+      return prev.filter((a) => a.id !== id)
+    })
+  }
+
   const waitForWorkdir = async (args: {
     projectId: string
     predicate: (w: { id: number; workdir_name: string; workdir_path: string; status: string }) => boolean
@@ -208,8 +291,10 @@ export function NewTaskModal({ open, onOpenChange }: NewTaskModalProps) {
   }
 
   const handleSubmit = async (mode: TaskExecuteMode) => {
+    if (submitInFlightRef.current) return
     if (!input.trim()) return
     if (!selectedProject) return
+    submitInFlightRef.current = true
     setExecutingMode(mode)
     try {
       const trimmed = input.trim()
@@ -234,39 +319,86 @@ export function NewTaskModal({ open, onOpenChange }: NewTaskModalProps) {
         return ensureMainWorkdirId(selectedProject.id, selectedProject.path)
       })()
 
-      const result = await executeTask(trimmed, mode, workdirId)
-      if (mode === "create") {
-        localStorage.setItem(draftKey(result.workdir_id, result.task_id), JSON.stringify({ text: result.prompt }))
+      const settled = await Promise.allSettled(
+        attachments.map((att) =>
+          uploadAttachment({
+            workspaceId: workdirId,
+            file: att.file,
+            kind: att.kind === "image" ? "image" : "file",
+          }),
+        ),
+      )
+
+      const uploaded: AttachmentRef[] = []
+      let failed = 0
+      for (const entry of settled) {
+        if (entry.status === "fulfilled") uploaded.push(entry.value)
+        else failed += 1
       }
+      if (failed > 0) {
+        toast.error(`${failed} attachment(s) failed to upload; proceeding without them`)
+      }
+
+      const result = await executeTask(trimmed, mode, workdirId, uploaded)
 
       await openWorkdir(result.workdir_id)
       await activateTask(result.task_id)
+
+      if (mode === "create") {
+        localStorage.setItem(
+          draftKey(result.workdir_id, result.task_id),
+          JSON.stringify({ text: result.prompt, attachments: uploaded }),
+        )
+      }
       focusChatInput()
 
       toast(mode === "create" ? "Draft created" : "Task started")
 
       setInput("")
+      revokeAttachmentUrls(attachments)
+      setAttachments([])
       onOpenChange(false)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
     } finally {
+      submitInFlightRef.current = false
       setExecutingMode(null)
     }
   }
 
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
     setInput("")
+    revokeAttachmentUrls(attachments)
+    setAttachments([])
     setSelectedProjectId("")
     setSelectedWorkdirId(null)
     onOpenChange(false)
-  }
+  }, [attachments, onOpenChange])
+
+  useEffect(() => {
+    if (!open) return
+
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return
+      e.preventDefault()
+      e.stopPropagation()
+      handleClose()
+    }
+
+    window.addEventListener("keydown", handler, { capture: true })
+    return () => window.removeEventListener("keydown", handler, { capture: true } as AddEventListenerOptions)
+  }, [handleClose, open])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") {
+      e.preventDefault()
+      e.stopPropagation()
       handleClose()
+      return
     }
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault()
+      e.stopPropagation()
       if (canExecute && !executingMode) {
         void handleSubmit("start")
       }
@@ -532,6 +664,7 @@ export function NewTaskModal({ open, onOpenChange }: NewTaskModalProps) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             placeholder="Add task description..."
             className="w-full text-[15px] resize-none focus:outline-none"
             style={{
@@ -542,6 +675,35 @@ export function NewTaskModal({ open, onOpenChange }: NewTaskModalProps) {
             }}
             disabled={executingMode != null}
           />
+
+          {attachments.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2" data-testid="new-task-attachments">
+              {attachments.map((att) => (
+                <div
+                  key={att.id}
+                  data-testid="new-task-attachment-tile"
+                  className="group relative w-16 h-16 rounded-lg overflow-hidden border border-[#e5e5e5] bg-[#fafafa] flex items-center justify-center"
+                >
+                  {att.kind === "image" && att.url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={att.url} alt={att.name} className="w-full h-full object-cover" />
+                  ) : (
+                    <span className="text-[10px] text-[#666] px-1 text-center break-all">{att.name}</span>
+                  )}
+                  <button
+                    type="button"
+                    aria-label="Remove attachment"
+                    data-testid="new-task-attachment-remove"
+                    onClick={() => removeAttachment(att.id)}
+                    disabled={executingMode != null}
+                    className="absolute top-1 right-1 w-5 h-5 flex items-center justify-center rounded bg-white/90 border border-[#e5e5e5] opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-40"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Footer */}
@@ -550,10 +712,23 @@ export function NewTaskModal({ open, onOpenChange }: NewTaskModalProps) {
           style={{ borderTop: "1px solid #eee" }}
         >
           {/* Left: Attachment */}
+          <input
+            ref={fileInputRef}
+            data-testid="new-task-attachment-input"
+            type="file"
+            multiple
+            accept="image/*,.pdf,.txt,.md,.json,.csv,.xml,.yaml,.yml"
+            className="hidden"
+            onChange={(e) => handleFileSelect(e.target.files)}
+          />
           <button
+            data-testid="new-task-attach-button"
             className="w-7 h-7 flex items-center justify-center hover:bg-[#f5f5f5] transition-colors"
             style={{ color: "#666", borderRadius: "5px" }}
             title="Attach file"
+            onClick={() => fileInputRef.current?.click()}
+            onMouseDown={(e) => e.preventDefault()}
+            disabled={executingMode != null}
           >
             <Paperclip className="w-4 h-4" />
           </button>

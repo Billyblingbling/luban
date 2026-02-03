@@ -56,6 +56,19 @@ export const Markdown = memo(
               {...props}
             />
           ),
+          img: ({ className, src, alt, ...props }) => {
+            if (!src) return null
+            // eslint-disable-next-line @next/next/no-img-element
+            return (
+              <img
+                className={cn("my-2 max-w-full h-auto rounded-md border border-border/50", className)}
+                src={String(src)}
+                alt={alt ?? ""}
+                loading="lazy"
+                {...props}
+              />
+            )
+          },
           code: ({ className, children, ...props }) => {
             const isBlock = typeof className === "string" && className.includes("language-")
             if (isBlock) {

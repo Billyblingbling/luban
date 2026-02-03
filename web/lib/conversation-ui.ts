@@ -364,7 +364,6 @@ function buildMessagesGroupedTurns(conversation: ConversationSnapshot): Message[
     }
   }
 
-  const tailStart = Math.max(0, conversation.entries.length - 3)
   const agentMessageById = new Map<string, Message>()
   const turnMessageById = new Map<string, Message>()
   const turnActivityById = new Map<
@@ -403,6 +402,10 @@ function buildMessagesGroupedTurns(conversation: ConversationSnapshot): Message[
 
     const existingRowId = state.latestByKey.get(args.key) ?? null
     if (existingRowId == null || existingRowId !== args.rowId) {
+      if (existingRowId != null) {
+        state.latestByRowId.delete(existingRowId)
+        state.order = state.order.filter((id) => id !== existingRowId)
+      }
       if (!state.latestByRowId.has(args.rowId)) {
         state.order.push(args.rowId)
       }
@@ -497,7 +500,7 @@ function buildMessagesGroupedTurns(conversation: ConversationSnapshot): Message[
         ensureTurnMessage(turnId)
         const status = inferActivityStatusFromPayload(ev.payload)
         const activityKey = `item_${ev.id}`
-        const rowId = i >= tailStart ? `${activityKey}_${entry.entry_id}` : activityKey
+        const rowId = activityKey
         const activity = activityFromAgentItemLike({
           id: rowId,
           kind: String(ev.kind ?? "item"),
@@ -589,7 +592,6 @@ function buildMessagesGroupedTurns(conversation: ConversationSnapshot): Message[
 
 function buildMessagesFlatEvents(conversation: ConversationSnapshot): Message[] {
   const out: Message[] = []
-  const tailStart = Math.max(0, conversation.entries.length - 3)
 
   const unixMsToIso = (unixMs: number | null | undefined): string | undefined => {
     if (typeof unixMs !== "number" || !Number.isFinite(unixMs)) return undefined
@@ -620,7 +622,6 @@ function buildMessagesFlatEvents(conversation: ConversationSnapshot): Message[] 
 
   for (let i = 0; i < conversation.entries.length; i += 1) {
     const entry = conversation.entries[i]!
-    const isInTail = i >= tailStart
     if (entry.type === "system_event") {
       const ev = entry.event as any
       const eventType = (() => {
@@ -670,31 +671,21 @@ function buildMessagesFlatEvents(conversation: ConversationSnapshot): Message[] 
       const ev = entry.event
       if (ev.type === "message") {
         const baseId = `a_${ev.id}`
-        if (isInTail) {
+        const existing = agentMessageIndexById.get(baseId)
+        if (typeof existing === "number") {
+          const prev = out[existing]
+          if (prev && prev.type === "assistant") {
+            prev.content = ev.text.trim()
+          }
+        } else {
           out.push({
-            id: `${baseId}_${entry.entry_id}`,
+            id: baseId,
             type: "assistant",
             eventSource: "agent",
             content: ev.text.trim(),
             timestamp: new Date().toISOString(),
           })
-        } else {
-          const existing = agentMessageIndexById.get(baseId)
-          if (typeof existing === "number") {
-            const prev = out[existing]
-            if (prev && prev.type === "assistant") {
-              prev.content = ev.text.trim()
-            }
-          } else {
-            out.push({
-              id: baseId,
-              type: "assistant",
-              eventSource: "agent",
-              content: ev.text.trim(),
-              timestamp: new Date().toISOString(),
-            })
-            agentMessageIndexById.set(baseId, out.length - 1)
-          }
+          agentMessageIndexById.set(baseId, out.length - 1)
         }
         continue
       }
@@ -703,34 +694,23 @@ function buildMessagesFlatEvents(conversation: ConversationSnapshot): Message[] 
         const activity = activityFromAgentItem(ev)
         const status = inferActivityStatusFromPayload(ev.payload)
         const baseId = `ae_${ev.id}`
-        if (isInTail) {
+        const existing = agentEventIndexById.get(baseId)
+        if (typeof existing === "number") {
+          const prev = out[existing]
+          if (prev && prev.type === "event") {
+            prev.status = status
+            prev.content = activity.title
+          }
+        } else {
           out.push({
-            id: `${baseId}_${entry.entry_id}`,
+            id: baseId,
             type: "event",
             eventSource: "agent",
             status,
             content: activity.title,
             timestamp: new Date().toISOString(),
           })
-        } else {
-          const existing = agentEventIndexById.get(baseId)
-          if (typeof existing === "number") {
-            const prev = out[existing]
-            if (prev && prev.type === "event") {
-              prev.status = status
-              prev.content = activity.title
-            }
-          } else {
-            out.push({
-              id: baseId,
-              type: "event",
-              eventSource: "agent",
-              status,
-              content: activity.title,
-              timestamp: new Date().toISOString(),
-            })
-            agentEventIndexById.set(baseId, out.length - 1)
-          }
+          agentEventIndexById.set(baseId, out.length - 1)
         }
         continue
       }

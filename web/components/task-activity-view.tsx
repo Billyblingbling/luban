@@ -11,6 +11,7 @@ import {
   Clock,
   Copy,
   FileCode,
+  FileText,
   Loader2,
   Pause,
   Pencil,
@@ -25,6 +26,7 @@ import type { Message, ActivityEvent } from "@/lib/conversation-ui"
 import { Markdown } from "@/components/markdown"
 import { AnsiOutput } from "@/components/shared/ansi-output"
 import { useActivityTiming } from "@/lib/activity-timing"
+import { attachmentHref } from "@/lib/attachment-href"
 
 /**
  * Linear Design System (extracted from Linear app via agent-browser):
@@ -398,9 +400,10 @@ function CollapsedEventsGroup({ events, onExpand }: CollapsedEventsGroupProps) {
 
 interface UserActivityEventProps {
   message: Message
+  workspaceId?: number
 }
 
-function UserActivityEvent({ message }: UserActivityEventProps) {
+function UserActivityEvent({ message, workspaceId }: UserActivityEventProps) {
   return (
     <div 
       className="group/activity"
@@ -441,6 +444,45 @@ function UserActivityEvent({ message }: UserActivityEventProps) {
           className="ml-auto opacity-0 group-hover/activity:opacity-100 transition-opacity"
         />
       </div>
+
+      {message.attachments && message.attachments.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-2">
+          {message.attachments.map((attachment) => {
+            const href = workspaceId != null ? attachmentHref({ workspaceId, attachment }) : null
+            const ext = attachment.extension.toLowerCase()
+            const isJson = ext === "json"
+            return (
+              <a
+                key={`${attachment.kind}:${attachment.id}`}
+                data-testid="activity-user-attachment"
+                href={href ?? undefined}
+                target={href ? "_blank" : undefined}
+                rel={href ? "noreferrer" : undefined}
+                className="group/att block w-20"
+              >
+                <div className="w-20 h-20 rounded-lg overflow-hidden border border-border/50 hover:border-border transition-colors bg-muted/40 flex items-center justify-center">
+                  {attachment.kind === "image" && href ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={href} alt={attachment.name} className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="flex flex-col items-center gap-1.5 px-2">
+                      {isJson ? (
+                        <FileCode className="w-6 h-6 text-base09" />
+                      ) : (
+                        <FileText className="w-6 h-6 text-muted-foreground" />
+                      )}
+                      <span className="text-[9px] text-muted-foreground uppercase font-medium tracking-wide truncate w-full text-center">
+                        {attachment.extension}
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <div className="mt-1 text-[10px] text-muted-foreground truncate">{attachment.name}</div>
+              </a>
+            )
+          })}
+        </div>
+      )}
       
       {/* Message content */}
       <div
@@ -778,7 +820,8 @@ function ActivityStreamSection({
   messages,
   isLoading,
   onCancelAgentTurn,
-}: ActivityStreamSectionProps & { onCancelAgentTurn?: () => void }) {
+  workspaceId,
+}: ActivityStreamSectionProps & { onCancelAgentTurn?: () => void; workspaceId?: number }) {
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set())
   const groups = groupMessages(messages)
 
@@ -833,7 +876,7 @@ function ActivityStreamSection({
               return (
                 <div key={group.message.id} className="relative">
                   {group.message.type === "user" ? (
-                    <UserActivityEvent message={group.message} />
+                    <UserActivityEvent message={group.message} workspaceId={workspaceId} />
                   ) : group.message.type === "assistant" ? (
                     <AgentActivityEvent message={group.message} />
                   ) : group.message.type === "agent_turn" ? (
@@ -898,6 +941,7 @@ function ActivityStreamSection({
 export interface TaskActivityViewProps {
   title: string
   description?: string
+  workspaceId?: number
   messages: Message[]
   isLoading?: boolean
   onTitleChange?: (title: string) => void
@@ -910,6 +954,7 @@ export interface TaskActivityViewProps {
 export function TaskActivityView({
   title,
   description,
+  workspaceId,
   messages,
   isLoading,
   onTitleChange,
@@ -942,7 +987,12 @@ export function TaskActivityView({
           />
 
           {/* Activity stream */}
-          <ActivityStreamSection messages={messages} isLoading={isLoading} onCancelAgentTurn={onCancelAgentTurn} />
+          <ActivityStreamSection
+            messages={messages}
+            isLoading={isLoading}
+            onCancelAgentTurn={onCancelAgentTurn}
+            workspaceId={workspaceId}
+          />
           
           {/* Input at bottom of activity - aligned with cards */}
           {inputComponent && (

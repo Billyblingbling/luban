@@ -43,7 +43,7 @@ export async function runLatestEventsVisible({ page }) {
   await latestTurn.getByTestId('agent-turn-toggle').click();
 
   const progressEvents = latestTurn.getByTestId('agent-turn-event').filter({ hasText: 'Progress update' });
-  await waitForLocatorCount(progressEvents, 3, 20_000);
+  await waitForLocatorCount(progressEvents, 1, 20_000);
 
   const alignmentRow = progressEvents.first();
   const avatar = latestTurn.getByTestId('agent-turn-avatar');
@@ -108,7 +108,13 @@ export async function runLatestEventsVisible({ page }) {
     }
   }
 
-  await progressEvents.filter({ hasText: 'Progress update 2' }).first().waitFor({ state: 'visible' });
+  const dedupeRows = latestTurn.getByTestId('agent-turn-event').filter({ hasText: 'Dedupe update' });
+  await waitForLocatorCount(dedupeRows, 1, 20_000);
+  const dedupeRunningIcons = await dedupeRows.first().getByTestId('event-running-icon').count();
+  if (dedupeRunningIcons !== 0) {
+    throw new Error('expected dedupe update to be done, but it is still running');
+  }
+
   const runningRow = progressEvents.filter({ hasText: 'Progress update 3' }).first();
   await runningRow.waitFor({ state: 'visible' });
   await runningRow.getByTestId('event-running-icon').waitFor({ state: 'visible' });

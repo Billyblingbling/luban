@@ -498,6 +498,7 @@ export function TaskActivityPanel({
         <TaskActivityView
           title={taskTitle}
           description={taskDescription}
+          workspaceId={activeWorkspaceId ?? undefined}
           messages={messages}
           isLoading={isAgentRunning}
           onCancelAgentTurn={isAgentRunning ? () => cancelAgentTurn() : undefined}

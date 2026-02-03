@@ -156,6 +156,15 @@ update this section.
 - `ClaudeConfigReadFile`
 - `ClaudeConfigWriteFile`
 
+## Selected payload details
+
+### `ClientAction::TaskExecute`
+
+- Adds optional `attachments: AttachmentRef[]` (default: `[]`).
+- Semantics:
+  - `mode=start`: server sends the initial user message with `attachments`.
+  - `mode=create`: attachments are ignored (no message is sent).
+
 ## Event inventory (tracked)
 
 All `ServerEvent` variants are part of this contract surface:

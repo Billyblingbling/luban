@@ -18,7 +18,7 @@ See `docs/cs-web-architecture.md`.
 
 - The UI sends user intent as actions over a single WebSocket (`/api/events`).
 - The server applies actions via `luban_domain` reducers and emits rev-stamped incremental events.
-- Query APIs exist for hydration and resync (`/api/app`, `/api/workspaces/...`).
+- Query APIs exist for hydration and resync (`/api/app`, `/api/workdirs/...`).
 
 See `docs/cs-web-architecture.md`.
 

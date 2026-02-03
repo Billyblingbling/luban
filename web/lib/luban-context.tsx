@@ -71,7 +71,12 @@ type LubanContextValue = {
   archiveWorkdir: (workdirId: number) => void
   toggleProjectExpanded: (projectId: ProjectId) => void
 
-  executeTask: (prompt: string, mode: TaskExecuteMode, workdirId: WorkspaceId) => Promise<TaskExecuteResult>
+  executeTask: (
+    prompt: string,
+    mode: TaskExecuteMode,
+    workdirId: WorkspaceId,
+    attachments?: AttachmentRef[],
+  ) => Promise<TaskExecuteResult>
   setTaskStarred: (workdirId: WorkspaceId, taskId: WorkspaceThreadId, starred: boolean) => void
   setTaskStatus: (workdirId: WorkspaceId, taskId: WorkspaceThreadId, taskStatus: TaskStatus) => void
   submitFeedback: (args: {

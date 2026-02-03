@@ -51,6 +51,7 @@ Legend:
 ## Notes
 
 - `C-WS-EVENTS`: `ClientAction::ChatRunnerChanged` and `ClientAction::ChatAmpModeChanged` are implemented in mock + provider and enforced in CI via `crates/luban_server/src/engine.rs` unit tests (see `agent_turn_uses_pinned_chat_runner_and_amp_mode`).
+- `C-WS-EVENTS`: `ClientAction::TaskExecute` accepts optional `attachments` and forwards them to the initial `SendAgentMessage` when `mode=start` (enforced via `task_execute_start_passes_attachments_to_agent_turn`).
 - `C-WS-EVENTS`: `ClientAction::SidebarWorktreeOrderChanged` was removed (task-first UI no longer persists worktree ordering).
 - `C-WS-EVENTS`: `ClientAction::TaskPreview` and `ServerEvent::TaskPreviewReady` were removed; task execution is prompt-based.
 - `C-WS-EVENTS`: `ClientAction::TaskStarSet` is implemented in mock + provider and verified in CI via `crates/luban_server/tests/contracts_http.rs` (roundtrip: WS toggle then `GET /api/tasks`).

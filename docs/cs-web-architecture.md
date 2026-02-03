@@ -80,10 +80,10 @@ The engine is the only component that mutates `AppState`.
 Minimal initial endpoints:
 
 - `GET /api/app` -> `AppSnapshot`
-- `GET /api/workspaces/:workspace_id/threads` -> `ThreadsSnapshot`
-- `GET /api/workspaces/:workspace_id/conversations/:thread_id` -> `ConversationSnapshot`
-- `POST /api/workspaces/:workspace_id/attachments` -> upload (multipart) -> `AttachmentRef`
-- `GET /api/workspaces/:workspace_id/attachments/:attachment_id?ext=...` -> bytes + content-type
+- `GET /api/workdirs/:workdir_id/tasks` -> `ThreadsSnapshot`
+- `GET /api/workdirs/:workdir_id/conversations/:task_id` -> `ConversationSnapshot`
+- `POST /api/workdirs/:workdir_id/attachments` -> upload (multipart) -> `AttachmentRef`
+- `GET /api/workdirs/:workdir_id/attachments/:attachment_id?ext=...` -> bytes + content-type
 
 ### Subscription + actions (WebSocket)
 

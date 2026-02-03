@@ -323,6 +323,7 @@ impl Engine {
         prompt: String,
         mode: luban_api::TaskExecuteMode,
         workdir_id: Option<luban_api::WorkspaceId>,
+        attachments: Vec<luban_api::AttachmentRef>,
     ) -> Result<luban_api::TaskExecuteResult, String> {
         let Some(workdir_id) = workdir_id else {
             return Err("workdir_id is required".to_owned());
@@ -370,11 +371,12 @@ impl Engine {
         .await;
 
         if mode == luban_api::TaskExecuteMode::Start {
+            let attachments = attachments.into_iter().map(map_api_attachment).collect();
             self.process_action_queue(Action::SendAgentMessage {
                 workspace_id,
                 thread_id,
                 text: prompt.clone(),
-                attachments: Vec::new(),
+                attachments,
                 runner: None,
                 amp_mode: None,
             })
@@ -706,13 +708,18 @@ impl Engine {
                     prompt,
                     mode,
                     workdir_id,
+                    attachments,
                 } = &action
                 {
                     let prompt = prompt.clone();
                     let mode = *mode;
                     let workdir_id = *workdir_id;
+                    let attachments = attachments.clone();
 
-                    match self.execute_task_prompt(prompt, mode, workdir_id).await {
+                    match self
+                        .execute_task_prompt(prompt, mode, workdir_id, attachments)
+                        .await
+                    {
                         Ok(result) => {
                             let _ = self.events.send(WsServerMessage::Event {
                                 rev: self.rev,
@@ -815,6 +822,7 @@ impl Engine {
                                     prompt,
                                     luban_api::TaskExecuteMode::Create,
                                     workdir_id,
+                                    Vec::new(),
                                 )
                                 .await
                             {
@@ -6811,6 +6819,76 @@ mod tests {
         assert!(request.amp_mode.is_none());
         assert_eq!(request.model.as_deref(), Some("not-a-real-model"));
         assert_eq!(request.model_reasoning_effort.as_deref(), Some("medium"));
+    }
+
+    #[tokio::test]
+    async fn task_execute_start_passes_attachments_to_agent_turn() {
+        let (sender, receiver) = std::sync::mpsc::channel::<luban_domain::RunAgentTurnRequest>();
+        let services: Arc<dyn ProjectWorkspaceService> =
+            Arc::new(CaptureRunAgentTurnServices { sender });
+
+        let mut state = AppState::new();
+        let _ = state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/luban-server-task-execute-attachments-test"),
+            is_git: true,
+        });
+        let project_id = state.projects[0].id;
+        let _ = state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "main".to_owned(),
+            branch_name: "main".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban-server-task-execute-attachments-test"),
+        });
+
+        let workspace_id = state.projects[0].workspaces[0].id;
+
+        let (events, _) = broadcast::channel::<WsServerMessage>(16);
+        let (tx, _rx) = mpsc::channel::<EngineCommand>(16);
+        let mut engine = Engine {
+            state,
+            rev: 1,
+            services,
+            events,
+            tx,
+            branch_watch: BranchWatchHandle::disabled(),
+            cancel_flags: HashMap::new(),
+            pull_requests: HashMap::new(),
+            pull_requests_in_flight: HashSet::new(),
+        };
+
+        let api_attachment = luban_api::AttachmentRef {
+            id: "att-test-1".to_owned(),
+            kind: luban_api::AttachmentKind::Image,
+            name: "screenshot.png".to_owned(),
+            extension: "png".to_owned(),
+            mime: Some("image/png".to_owned()),
+            byte_len: 123,
+        };
+
+        let _ = engine
+            .execute_task_prompt(
+                "hello".to_owned(),
+                luban_api::TaskExecuteMode::Start,
+                Some(luban_api::WorkspaceId(workspace_id.as_u64())),
+                vec![api_attachment.clone()],
+            )
+            .await
+            .expect("task execute prompt should succeed");
+
+        let request = receiver
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("expected agent turn request");
+
+        assert_eq!(request.attachments.len(), 1);
+        assert_eq!(request.attachments[0].id, api_attachment.id);
+        assert_eq!(request.attachments[0].name, api_attachment.name);
+        assert_eq!(request.attachments[0].extension, api_attachment.extension);
+        assert_eq!(request.attachments[0].mime, api_attachment.mime);
+        assert_eq!(request.attachments[0].byte_len, api_attachment.byte_len);
+        assert_eq!(
+            request.attachments[0].kind,
+            luban_domain::AttachmentKind::Image
+        );
     }
 
     #[tokio::test]

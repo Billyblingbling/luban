@@ -67,7 +67,12 @@ export type LubanActions = {
   readClaudeConfigFile: (path: string) => Promise<string>
   writeClaudeConfigFile: (path: string, contents: string) => Promise<void>
 
-  executeTask: (prompt: string, mode: TaskExecuteMode, workdirId: WorkspaceId) => Promise<TaskExecuteResult>
+  executeTask: (
+    prompt: string,
+    mode: TaskExecuteMode,
+    workdirId: WorkspaceId,
+    attachments?: AttachmentRef[],
+  ) => Promise<TaskExecuteResult>
   setTaskStarred: (workdirId: WorkspaceId, taskId: WorkspaceThreadId, starred: boolean) => void
   setTaskStatus: (workdirId: WorkspaceId, taskId: WorkspaceThreadId, taskStatus: TaskStatus) => void
   submitFeedback: (args: {
@@ -349,8 +354,19 @@ export function createLubanActions(args: {
     await args.request<null>({ type: "claude_config_write_file", path, contents })
   }
 
-  function executeTask(prompt: string, mode: TaskExecuteMode, workdirId: WorkspaceId): Promise<TaskExecuteResult> {
-    return args.request<TaskExecuteResult>({ type: "task_execute", prompt, mode, workdir_id: workdirId })
+  function executeTask(
+    prompt: string,
+    mode: TaskExecuteMode,
+    workdirId: WorkspaceId,
+    attachments: AttachmentRef[] = [],
+  ): Promise<TaskExecuteResult> {
+    return args.request<TaskExecuteResult>({
+      type: "task_execute",
+      prompt,
+      mode,
+      workdir_id: workdirId,
+      attachments,
+    })
   }
 
   function setTaskStarred(workdirId: WorkspaceId, taskId: WorkspaceThreadId, starred: boolean) {

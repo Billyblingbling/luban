@@ -363,7 +363,13 @@ export type ClientAction =
   | { type: "pick_project_path" }
   | { type: "add_project"; path: string }
   | { type: "add_project_and_open"; path: string }
-  | { type: "task_execute"; prompt: string; mode: TaskExecuteMode; workdir_id: WorkspaceId }
+  | {
+      type: "task_execute"
+      prompt: string
+      mode: TaskExecuteMode
+      workdir_id: WorkspaceId
+      attachments?: AttachmentRef[]
+    }
   | { type: "task_star_set"; workdir_id: WorkspaceId; task_id: WorkspaceThreadId; starred: boolean }
   | { type: "task_status_set"; workdir_id: WorkspaceId; task_id: WorkspaceThreadId; task_status: TaskStatus }
   | {

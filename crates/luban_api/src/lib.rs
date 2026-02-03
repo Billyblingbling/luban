@@ -728,6 +728,8 @@ pub enum ClientAction {
         mode: TaskExecuteMode,
         #[serde(default, rename = "workdir_id", alias = "workspace_id")]
         workdir_id: Option<WorkspaceId>,
+        #[serde(default)]
+        attachments: Vec<AttachmentRef>,
     },
     TaskStarSet {
         #[serde(rename = "workdir_id", alias = "workspace_id")]

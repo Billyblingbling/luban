@@ -8,6 +8,7 @@ import path from 'node:path';
 import { BrowserManager } from 'agent-browser/dist/browser.js';
 
 import { waitForHttpOk } from './lib/utils.mjs';
+import { runActivityAttachments } from './scenarios/activity-attachments.mjs';
 import { runInboxRead } from './scenarios/inbox-read.mjs';
 import { runLatestEventsVisible } from './scenarios/latest-events-visible.mjs';
 import { runNewTaskModal } from './scenarios/new-task-modal.mjs';
@@ -143,6 +144,7 @@ async function main() {
     await page.getByTestId('task-list-view').waitFor({ state: 'visible' });
 
     await runNewTaskModal({ page, baseUrl });
+    await runActivityAttachments({ page, baseUrl });
     await runInboxRead({ page, baseUrl });
     await runStarFavorites({ page, baseUrl });
     await runSettingsPanel({ page, baseUrl });
