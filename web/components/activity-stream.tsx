@@ -4,7 +4,6 @@ import { useState } from "react"
 import {
   Brain,
   CheckCircle2,
-  ChevronDown,
   ChevronRight,
   Eye,
   Loader2,
@@ -153,9 +152,6 @@ export function ActivityStream({
               ? `Cancelled after ${completedCount} steps`
               : `Completed ${completedCount} steps`}
         </span>
-        <ChevronDown
-          className={cn("w-3.5 h-3.5 text-muted-foreground/50 transition-transform", isExpanded && "rotate-180")}
-        />
       </button>
 
       {isExpanded && (
