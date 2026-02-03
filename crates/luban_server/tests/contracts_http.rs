@@ -1,6 +1,8 @@
 use futures::{SinkExt as _, StreamExt as _};
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio_tungstenite::tungstenite::Message;
 
@@ -22,6 +24,12 @@ impl EnvGuard {
     }
 
     fn set(&self, key: &'static str, value: &std::path::Path) {
+        unsafe {
+            std::env::set_var(key, value);
+        }
+    }
+
+    fn set_str(&self, key: &'static str, value: &str) {
         unsafe {
             std::env::set_var(key, value);
         }
@@ -61,6 +69,15 @@ async fn recv_ws_msg(
     serde_json::from_str(&text).expect("failed to parse ws server message")
 }
 
+fn run_git(dir: &PathBuf, args: &[&str]) {
+    let status = std::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .status()
+        .expect("spawn git");
+    assert!(status.success(), "git command failed: {args:?}");
+}
+
 fn create_git_project() -> PathBuf {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -73,15 +90,6 @@ fn create_git_project() -> PathBuf {
     ));
     std::fs::create_dir_all(&dir).expect("create temp project dir");
 
-    fn run_git(dir: &PathBuf, args: &[&str]) {
-        let status = std::process::Command::new("git")
-            .args(args)
-            .current_dir(dir)
-            .status()
-            .expect("spawn git");
-        assert!(status.success(), "git command failed: {args:?}");
-    }
-
     run_git(&dir, &["init"]);
     run_git(&dir, &["config", "user.email", "contracts@example.com"]);
     run_git(&dir, &["config", "user.name", "luban-contracts"]);
@@ -91,6 +99,72 @@ fn create_git_project() -> PathBuf {
     run_git(&dir, &["commit", "-m", "init"]);
 
     dir
+}
+
+fn create_git_project_with_github_remote(owner: &str, repo: &str) -> PathBuf {
+    let dir = create_git_project();
+    let remote = format!("https://github.com/{owner}/{repo}.git");
+    run_git(&dir, &["remote", "add", "origin", &remote]);
+    dir
+}
+
+struct StartedTestServer {
+    addr: SocketAddr,
+    handle: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl Drop for StartedTestServer {
+    fn drop(&mut self) {
+        if let Some(handle) = self.handle.take() {
+            handle.abort();
+        }
+    }
+}
+
+async fn start_avatar_upstream(counter: Arc<AtomicUsize>) -> StartedTestServer {
+    const PNG_1X1: &[u8] = &[
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f,
+        0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x60,
+        0x00, 0x00, 0x00, 0x02, 0x00, 0x01, 0xe2, 0x21, 0xbc, 0x33, 0x00, 0x00, 0x00, 0x00, 0x49,
+        0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    ];
+
+    #[derive(Clone)]
+    struct AppState {
+        counter: Arc<AtomicUsize>,
+    }
+
+    async fn avatar(
+        axum::extract::State(state): axum::extract::State<AppState>,
+        axum::extract::Path(_owner): axum::extract::Path<String>,
+    ) -> impl axum::response::IntoResponse {
+        state.counter.fetch_add(1, Ordering::SeqCst);
+        (
+            [
+                (axum::http::header::CONTENT_TYPE, "image/png"),
+                (axum::http::header::CACHE_CONTROL, "no-store"),
+            ],
+            PNG_1X1.to_vec(),
+        )
+    }
+
+    let app = axum::Router::new()
+        .route("/{owner}", axum::routing::get(avatar))
+        .with_state(AppState { counter });
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind avatar upstream");
+    let addr = listener.local_addr().expect("avatar local addr");
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("avatar serve");
+    });
+
+    StartedTestServer {
+        addr,
+        handle: Some(handle),
+    }
 }
 
 async fn create_workdir_via_ws(server_addr: SocketAddr, project_path: &str) -> (u64, String) {
@@ -428,11 +502,23 @@ async fn upload_text_attachment(
 
 #[tokio::test]
 async fn http_contracts_smoke() {
-    let env = EnvGuard::lock(vec![luban_domain::paths::LUBAN_CODEX_ROOT_ENV]);
+    let env = EnvGuard::lock(vec![
+        luban_domain::paths::LUBAN_CODEX_ROOT_ENV,
+        luban_domain::paths::LUBAN_ROOT_ENV,
+        "LUBAN_GITHUB_AVATAR_BASE_URL",
+    ]);
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
+
+    let luban_root = std::env::temp_dir().join(format!(
+        "luban-contracts-http-root-{}-{}",
+        std::process::id(),
+        unique
+    ));
+    env.set(luban_domain::paths::LUBAN_ROOT_ENV, &luban_root);
+
     let codex_root = std::env::temp_dir().join(format!(
         "luban-contracts-http-codex-root-{}-{}",
         std::process::id(),
@@ -446,6 +532,11 @@ async fn http_contracts_smoke() {
     )
     .expect("write prompt");
     env.set(luban_domain::paths::LUBAN_CODEX_ROOT_ENV, &codex_root);
+
+    let avatar_hits = Arc::new(AtomicUsize::new(0));
+    let avatar_upstream = start_avatar_upstream(avatar_hits.clone()).await;
+    let avatar_base_url = format!("http://{}", avatar_upstream.addr);
+    env.set_str("LUBAN_GITHUB_AVATAR_BASE_URL", &avatar_base_url);
 
     let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
     let server =
@@ -498,9 +589,47 @@ async fn http_contracts_smoke() {
         );
     }
 
-    let project_dir = create_git_project();
+    let project_dir = create_git_project_with_github_remote("octocat", "hello-world");
     let project_path = project_dir.to_string_lossy().to_string();
-    let (workdir_id, _project_id) = create_workdir_via_ws(server.addr, &project_path).await;
+    let (workdir_id, project_id) = create_workdir_via_ws(server.addr, &project_path).await;
+
+    // C-HTTP-PROJECTS-AVATAR
+    {
+        let url = reqwest::Url::parse_with_params(
+            &format!("{base}/api/projects/avatar"),
+            [("project_id", project_id.clone())],
+        )
+        .expect("avatar url");
+
+        let res = client
+            .get(url.clone())
+            .send()
+            .await
+            .expect("GET /api/projects/avatar");
+        assert_eq!(res.status(), reqwest::StatusCode::OK);
+        assert_eq!(
+            res.headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok()),
+            Some("image/png")
+        );
+        let first = res.bytes().await.expect("avatar bytes").to_vec();
+        assert!(!first.is_empty(), "expected avatar bytes to be non-empty");
+
+        let res = client
+            .get(url)
+            .send()
+            .await
+            .expect("GET /api/projects/avatar (cached)");
+        assert_eq!(res.status(), reqwest::StatusCode::OK);
+        let second = res.bytes().await.expect("avatar bytes").to_vec();
+        assert_eq!(second, first, "expected cached avatar to match");
+        assert_eq!(
+            avatar_hits.load(Ordering::SeqCst),
+            1,
+            "expected avatar to be fetched once and then cached"
+        );
+    }
 
     // C-HTTP-WORKDIR-TASKS
     let mut threads: luban_api::ThreadsSnapshot = client
@@ -529,6 +658,16 @@ async fn http_contracts_smoke() {
     }
 
     let task_id = threads.tabs.active_tab.0;
+    for meta in &threads.threads {
+        assert!(
+            meta.created_at_unix_seconds > 0,
+            "expected ThreadMeta.created_at_unix_seconds to be present"
+        );
+        assert!(
+            meta.created_at_unix_seconds <= meta.updated_at_unix_seconds,
+            "expected ThreadMeta.created_at_unix_seconds <= updated_at_unix_seconds"
+        );
+    }
 
     // C-HTTP-TASKS
     {
@@ -552,6 +691,14 @@ async fn http_contracts_smoke() {
             .iter()
             .find(|t| t.workspace_id.0 == workdir_id && t.thread_id.0 == task_id)
             .expect("task should exist in tasks snapshot");
+        assert!(
+            active.created_at_unix_seconds > 0,
+            "expected TaskSummarySnapshot.created_at_unix_seconds to be present"
+        );
+        assert!(
+            active.created_at_unix_seconds <= active.updated_at_unix_seconds,
+            "expected TaskSummarySnapshot.created_at_unix_seconds <= updated_at_unix_seconds"
+        );
         assert!(
             !active.is_starred,
             "expected tasks to be unstarred by default"

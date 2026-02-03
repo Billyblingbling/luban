@@ -104,12 +104,19 @@ function Section({ title, defaultExpanded = true, children }: SectionProps) {
 interface ProjectItemProps {
   name: string
   color?: string
+  avatarUrl?: string
   active?: boolean
   testId?: string
   onClick?: () => void
 }
 
-function ProjectItem({ name, color = "bg-[#5e6ad2]", active, testId, onClick }: ProjectItemProps) {
+function ProjectItem({ name, color = "bg-[#5e6ad2]", avatarUrl, active, testId, onClick }: ProjectItemProps) {
+  const [avatarLoadFailed, setAvatarLoadFailed] = useState(false)
+
+  useEffect(() => {
+    setAvatarLoadFailed(false)
+  }, [avatarUrl])
+
   return (
     <button
       data-testid={testId}
@@ -119,14 +126,25 @@ function ProjectItem({ name, color = "bg-[#5e6ad2]", active, testId, onClick }: 
         active ? "bg-[#e8e8e8]" : "hover:bg-[#eeeeee]"
       )}
     >
-      <span
-        className={cn(
-          "w-[18px] h-[18px] rounded flex items-center justify-center text-[10px] font-semibold text-white",
-          color
-        )}
-      >
-        {name.charAt(0).toUpperCase()}
-      </span>
+      {avatarUrl && !avatarLoadFailed ? (
+        <img
+          src={avatarUrl}
+          alt=""
+          width={18}
+          height={18}
+          className="w-[18px] h-[18px] rounded overflow-hidden flex-shrink-0"
+          onError={() => setAvatarLoadFailed(true)}
+        />
+      ) : (
+        <span
+          className={cn(
+            "w-[18px] h-[18px] rounded flex items-center justify-center text-[10px] font-semibold text-white flex-shrink-0",
+            color
+          )}
+        >
+          {name.charAt(0).toUpperCase()}
+        </span>
+      )}
       <span className="text-[13px] truncate" style={{ color: '#1b1b1b' }}>{name}</span>
     </button>
   )
@@ -300,6 +318,7 @@ export function LubanSidebar({
                 <ProjectItem
                   name={p.displayName}
                   color={color}
+                  avatarUrl={p.avatarUrl}
                   active={active}
                   testId={`sidebar-project-${p.id}`}
                   onClick={() => {

@@ -8,6 +8,7 @@ pub mod engine;
 mod git_changes;
 mod idempotency;
 mod mentions;
+mod project_avatars;
 pub mod pty;
 pub mod server;
 

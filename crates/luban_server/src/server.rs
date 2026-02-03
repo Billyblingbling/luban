@@ -2,6 +2,7 @@ use crate::auth;
 use crate::engine::{Engine, EngineHandle, new_default_services};
 use crate::idempotency::{Begin, IdempotencyStore};
 use crate::mentions;
+use crate::project_avatars;
 use crate::pty::PtyManager;
 use anyhow::Context as _;
 use axum::middleware;
@@ -19,7 +20,7 @@ use luban_api::{
 use luban_domain::paths;
 use luban_domain::{ContextImage, ProjectWorkspaceService};
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::broadcast;
 use tower_http::services::{ServeDir, ServeFile};
 
@@ -27,11 +28,20 @@ pub async fn router(config: crate::ServerConfig) -> anyhow::Result<Router> {
     let services = new_default_services()?;
     let (engine, events) = Engine::start(services.clone());
 
+    let avatar_http = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .connect_timeout(Duration::from_secs(3))
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .user_agent("luban")
+        .build()
+        .context("failed to build avatar http client")?;
+
     let state = AppStateHolder {
         engine,
         events,
         pty: PtyManager::new(),
         services,
+        avatar_http,
         auth: auth::AuthState::new(config.auth),
         idempotency_attachments: IdempotencyStore::new(
             std::time::Duration::from_secs(10 * 60),
@@ -43,6 +53,7 @@ pub async fn router(config: crate::ServerConfig) -> anyhow::Result<Router> {
 
     let api_protected = Router::new()
         .route("/app", get(get_app))
+        .route("/projects/avatar", get(get_project_avatar))
         .route("/codex/prompts", get(get_codex_prompts))
         .route("/tasks", get(get_tasks))
         .route("/workdirs/{workdir_id}/tasks", get(get_threads))
@@ -129,6 +140,7 @@ pub(crate) struct AppStateHolder {
     events: broadcast::Sender<WsServerMessage>,
     pty: PtyManager,
     services: std::sync::Arc<dyn ProjectWorkspaceService>,
+    avatar_http: reqwest::Client,
     pub(crate) auth: auth::AuthState,
     idempotency_attachments: IdempotencyStore<luban_api::AttachmentRef>,
 }
@@ -141,6 +153,100 @@ async fn get_app(State(state): State<AppStateHolder>) -> impl IntoResponse {
             err.to_string(),
         )
             .into_response(),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct ProjectAvatarQuery {
+    project_id: String,
+}
+
+fn is_safe_project_id(id: &str) -> bool {
+    let id = id.trim();
+    if id.is_empty() || id.len() > 4096 {
+        return false;
+    }
+    !id.chars().any(|c| c.is_control())
+}
+
+async fn get_project_avatar(
+    State(state): State<AppStateHolder>,
+    Query(query): Query<ProjectAvatarQuery>,
+) -> impl IntoResponse {
+    if !is_safe_project_id(&query.project_id) {
+        return (axum::http::StatusCode::BAD_REQUEST, "invalid project_id").into_response();
+    }
+
+    let snapshot = match state.engine.app_snapshot().await {
+        Ok(snapshot) => snapshot,
+        Err(err) => {
+            return (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                err.to_string(),
+            )
+                .into_response();
+        }
+    };
+    let Some(project) = snapshot
+        .projects
+        .iter()
+        .find(|p| p.id.0 == query.project_id)
+    else {
+        return (axum::http::StatusCode::NOT_FOUND, "project not found").into_response();
+    };
+
+    let project_path = PathBuf::from(&project.path);
+    let services = state.services.clone();
+    let identity =
+        match tokio::task::spawn_blocking(move || services.project_identity(project_path)).await {
+            Ok(Ok(identity)) => identity,
+            Ok(Err(err)) => {
+                tracing::warn!(error = %err, "failed to load project identity for avatar");
+                return (axum::http::StatusCode::NOT_FOUND, "avatar not available").into_response();
+            }
+            Err(err) => {
+                return (
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("failed to resolve project identity: {err}"),
+                )
+                    .into_response();
+            }
+        };
+
+    let Some(github_repo) = identity.github_repo.as_deref() else {
+        return (axum::http::StatusCode::NOT_FOUND, "avatar not available").into_response();
+    };
+    let Some(owner) = project_avatars::github_owner_from_repo_id(github_repo) else {
+        return (axum::http::StatusCode::NOT_FOUND, "avatar not available").into_response();
+    };
+
+    let luban_root = match resolve_luban_root() {
+        Ok(root) => root,
+        Err(err) => {
+            return (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                err.to_string(),
+            )
+                .into_response();
+        }
+    };
+
+    match project_avatars::get_or_fetch_owner_avatar_png(&state.avatar_http, &luban_root, owner)
+        .await
+    {
+        Ok(Some(bytes)) => (
+            [
+                (axum::http::header::CONTENT_TYPE, "image/png"),
+                (axum::http::header::CACHE_CONTROL, "private, max-age=86400"),
+            ],
+            bytes,
+        )
+            .into_response(),
+        Ok(None) => (axum::http::StatusCode::NOT_FOUND, "avatar not available").into_response(),
+        Err(err) => {
+            tracing::warn!(error = %err, owner, "failed to load project avatar");
+            (axum::http::StatusCode::BAD_GATEWAY, "avatar fetch failed").into_response()
+        }
     }
 }
 
@@ -306,6 +412,7 @@ async fn get_tasks(
                     workspace_id: w.id,
                     thread_id: t.thread_id,
                     title: t.title,
+                    created_at_unix_seconds: t.created_at_unix_seconds,
                     updated_at_unix_seconds: t.updated_at_unix_seconds,
                     branch_name: w.branch_name.clone(),
                     workspace_name: w.workspace_name.clone(),

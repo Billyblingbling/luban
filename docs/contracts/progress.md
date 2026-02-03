@@ -29,6 +29,7 @@ Legend:
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | C-HTTP-HEALTH | `GET /api/health` | `crates/luban_server/src/server.rs:health` | n/a | Draft | n/a | ✅ | ✅ |
 | C-HTTP-APP | `GET /api/app` | `crates/luban_server/src/server.rs:get_app` | `web/lib/luban-http.ts:fetchApp` | Draft | ✅ | ✅ | ✅ |
+| C-HTTP-PROJECTS-AVATAR | `GET /api/projects/avatar` | `crates/luban_server/src/server.rs:get_project_avatar` | `web/components/luban-sidebar.tsx` | Draft | n/a | ✅ | ✅ |
 | C-HTTP-CODEX-PROMPTS | `GET /api/codex/prompts` | `crates/luban_server/src/server.rs:get_codex_prompts` | `web/lib/luban-http.ts:fetchCodexCustomPrompts` | Draft | ✅ | ✅ | ✅ |
 | C-HTTP-WORKDIR-TASKS | `GET /api/workdirs/{workdir_id}/tasks` | `crates/luban_server/src/server.rs:get_threads` | `web/lib/luban-http.ts:fetchThreads` | Draft | ✅ | ✅ | ✅ |
 | C-HTTP-TASKS | `GET /api/tasks` | `crates/luban_server/src/server.rs:get_tasks` | `web/lib/luban-http.ts:fetchTasks` | Draft | ✅ | ✅ | ✅ |
@@ -61,6 +62,7 @@ Legend:
 - `C-HTTP-CONVERSATION`: `ConversationSnapshot.entries` is a timeline of `ConversationEntry` values tagged by `type` (`system_event` / `user_event` / `agent_event`). Each entry includes a stable `entry_id`, and streaming/tool updates are appended as additional `agent_event` entries (clients may fold by `AgentEvent.id` if desired).
 - `C-HTTP-CONVERSATION`: `ConversationSnapshot.title` matches `ThreadMeta.title` and may be updated after the first user message.
 - `C-HTTP-TASKS`: `TaskSummarySnapshot` includes `is_starred` for rendering Favorites and in-view star toggles.
+- `C-HTTP-TASKS` / `C-HTTP-WORKDIR-TASKS`: thread metadata includes `created_at_unix_seconds` for stable creation-time sorting.
 - `C-HTTP-TASKS` / `C-HTTP-WORKDIR-TASKS`: thread metadata includes `task_status`, `turn_status`, and `last_turn_result` (see `docs/task-and-turn-status.md`).
 
 ## Feature contracts
@@ -68,6 +70,7 @@ Legend:
 - `docs/contracts/features/c-auth-single-user.md`
 - `docs/contracts/features/c-http-health.md`
 - `docs/contracts/features/c-http-app.md`
+- `docs/contracts/features/c-http-projects-avatar.md`
 - `docs/contracts/features/c-http-codex-prompts.md`
 - `docs/contracts/features/c-http-workdir-tasks.md`
 - `docs/contracts/features/c-http-tasks.md`
