@@ -2739,6 +2739,7 @@ impl SqliteDatabase {
     ) -> anyhow::Result<ConversationSnapshot> {
         self.ensure_conversation(project_slug, workspace_name, thread_local_id)?;
         let (
+            title,
             thread_id,
             task_status,
             queue_paused,
@@ -2751,20 +2752,21 @@ impl SqliteDatabase {
         ) = self
             .conn
             .query_row(
-                "SELECT thread_id, task_status, queue_paused, run_started_at_unix_ms, run_finished_at_unix_ms, agent_runner, agent_model_id, thinking_effort, amp_mode FROM conversations
+                "SELECT title, thread_id, task_status, queue_paused, run_started_at_unix_ms, run_finished_at_unix_ms, agent_runner, agent_model_id, thinking_effort, amp_mode FROM conversations
                  WHERE project_slug = ?1 AND workspace_name = ?2 AND thread_local_id = ?3",
                 params![project_slug, workspace_name, thread_local_id as i64],
                 |row| {
                     Ok((
                         row.get::<_, Option<String>>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, i64>(2)?,
-                        row.get::<_, Option<i64>>(3)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
                         row.get::<_, Option<i64>>(4)?,
-                        row.get::<_, Option<String>>(5)?,
+                        row.get::<_, Option<i64>>(5)?,
                         row.get::<_, Option<String>>(6)?,
                         row.get::<_, Option<String>>(7)?,
                         row.get::<_, Option<String>>(8)?,
+                        row.get::<_, Option<String>>(9)?,
                     ))
                 },
             )
@@ -2772,6 +2774,7 @@ impl SqliteDatabase {
             .context("failed to load conversation meta")?
             .map(
                 |(
+                    title,
                     thread_id,
                     task_status,
                     queue_paused,
@@ -2782,6 +2785,11 @@ impl SqliteDatabase {
                     thinking_effort,
                     amp_mode,
                 )| {
+                let title = title
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                    .map(ToOwned::to_owned);
                 let thinking_effort = thinking_effort
                     .as_deref()
                     .and_then(luban_domain::parse_thinking_effort);
@@ -2791,6 +2799,7 @@ impl SqliteDatabase {
                 let task_status = luban_domain::parse_task_status(&task_status)
                     .unwrap_or(luban_domain::TaskStatus::Todo);
                 (
+                    title,
                     thread_id,
                     task_status,
                     queue_paused != 0,
@@ -2804,6 +2813,7 @@ impl SqliteDatabase {
             },
             )
             .unwrap_or((
+                None,
                 None,
                 luban_domain::TaskStatus::Todo,
                 false,
@@ -2856,6 +2866,7 @@ impl SqliteDatabase {
 
         let entries_total = entries.len() as u64;
         Ok(ConversationSnapshot {
+            title,
             thread_id,
             task_status,
             runner: agent_runner,
@@ -2883,6 +2894,7 @@ impl SqliteDatabase {
         self.ensure_conversation(project_slug, workspace_name, thread_local_id)?;
 
         let (
+            title,
             thread_id,
             task_status,
             queue_paused,
@@ -2895,20 +2907,21 @@ impl SqliteDatabase {
         ) = self
             .conn
             .query_row(
-                "SELECT thread_id, task_status, queue_paused, run_started_at_unix_ms, run_finished_at_unix_ms, agent_runner, agent_model_id, thinking_effort, amp_mode FROM conversations
+                "SELECT title, thread_id, task_status, queue_paused, run_started_at_unix_ms, run_finished_at_unix_ms, agent_runner, agent_model_id, thinking_effort, amp_mode FROM conversations
                  WHERE project_slug = ?1 AND workspace_name = ?2 AND thread_local_id = ?3",
                 params![project_slug, workspace_name, thread_local_id as i64],
                 |row| {
                     Ok((
                         row.get::<_, Option<String>>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, i64>(2)?,
-                        row.get::<_, Option<i64>>(3)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
                         row.get::<_, Option<i64>>(4)?,
-                        row.get::<_, Option<String>>(5)?,
+                        row.get::<_, Option<i64>>(5)?,
                         row.get::<_, Option<String>>(6)?,
                         row.get::<_, Option<String>>(7)?,
                         row.get::<_, Option<String>>(8)?,
+                        row.get::<_, Option<String>>(9)?,
                     ))
                 },
             )
@@ -2916,6 +2929,7 @@ impl SqliteDatabase {
             .context("failed to load conversation meta")?
             .map(
                 |(
+                    title,
                     thread_id,
                     task_status,
                     queue_paused,
@@ -2926,6 +2940,11 @@ impl SqliteDatabase {
                     thinking_effort,
                     amp_mode,
                 )| {
+                let title = title
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                    .map(ToOwned::to_owned);
                 let thinking_effort = thinking_effort
                     .as_deref()
                     .and_then(luban_domain::parse_thinking_effort);
@@ -2935,6 +2954,7 @@ impl SqliteDatabase {
                 let task_status = luban_domain::parse_task_status(&task_status)
                     .unwrap_or(luban_domain::TaskStatus::Todo);
                 (
+                    title,
                     thread_id,
                     task_status,
                     queue_paused != 0,
@@ -2948,6 +2968,7 @@ impl SqliteDatabase {
             },
             )
             .unwrap_or((
+                None,
                 None,
                 luban_domain::TaskStatus::Todo,
                 false,
@@ -3027,6 +3048,7 @@ impl SqliteDatabase {
         }
 
         Ok(ConversationSnapshot {
+            title,
             thread_id,
             task_status,
             runner: agent_runner,
@@ -3633,6 +3655,34 @@ mod tests {
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
         assert_eq!(version as u32, LATEST_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn load_conversation_page_includes_title() {
+        let path = temp_db_path("load_conversation_page_includes_title");
+        let mut db = open_db(&path);
+
+        db.ensure_conversation("p", "w", 1).unwrap();
+
+        let snapshot = db.load_conversation_page("p", "w", 1, None, 100).unwrap();
+        assert_eq!(snapshot.title.as_deref(), Some("Thread 1"));
+
+        db.append_conversation_entries(
+            "p",
+            "w",
+            1,
+            &[ConversationEntry::UserEvent {
+                entry_id: String::new(),
+                event: luban_domain::UserEvent::Message {
+                    text: "Hello world".to_owned(),
+                    attachments: Vec::new(),
+                },
+            }],
+        )
+        .unwrap();
+
+        let snapshot = db.load_conversation_page("p", "w", 1, None, 100).unwrap();
+        assert_eq!(snapshot.title.as_deref(), Some("Hello world"));
     }
 
     fn create_db_at_schema_version(path: &Path, target_version: u32) {

@@ -578,6 +578,14 @@ impl AppState {
                 let mut snapshot = snapshot;
                 snapshot.ensure_entry_ids();
                 let conversation = self.ensure_conversation_mut(workspace_id, thread_id);
+                if let Some(title) = snapshot
+                    .title
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                {
+                    conversation.title = title.to_owned();
+                }
                 let snapshot_model_id = snapshot
                     .agent_model_id
                     .as_deref()
@@ -2655,6 +2663,7 @@ mod tests {
         assert_eq!(conversation.agent_model_id, "gpt-5");
 
         let snapshot = ConversationSnapshot {
+            title: None,
             thread_id: None,
             task_status: crate::TaskStatus::Todo,
             runner: None,
@@ -2890,6 +2899,7 @@ mod tests {
         let thread_id = default_thread_id();
 
         let snapshot = ConversationSnapshot {
+            title: None,
             thread_id: None,
             task_status: crate::TaskStatus::Todo,
             runner: None,
@@ -3949,6 +3959,7 @@ mod tests {
             workspace_id: w1,
             thread_id,
             snapshot: ConversationSnapshot {
+                title: None,
                 thread_id: None,
                 task_status: crate::TaskStatus::Todo,
                 runner: None,
@@ -4113,6 +4124,7 @@ mod tests {
             workspace_id,
             thread_id,
             snapshot: ConversationSnapshot {
+                title: None,
                 thread_id: Some("thread_0".to_owned()),
                 task_status: crate::TaskStatus::Todo,
                 runner: None,
@@ -4171,6 +4183,7 @@ mod tests {
             workspace_id,
             thread_id,
             snapshot: ConversationSnapshot {
+                title: None,
                 thread_id: None,
                 task_status: crate::TaskStatus::Todo,
                 runner: None,
@@ -4221,6 +4234,7 @@ mod tests {
             workspace_id,
             thread_id,
             snapshot: ConversationSnapshot {
+                title: None,
                 thread_id: None,
                 task_status: crate::TaskStatus::Todo,
                 runner: None,
@@ -4247,6 +4261,7 @@ mod tests {
             workspace_id,
             thread_id,
             snapshot: ConversationSnapshot {
+                title: None,
                 thread_id: None,
                 task_status: crate::TaskStatus::Todo,
                 runner: None,
@@ -4301,6 +4316,7 @@ mod tests {
             workspace_id,
             thread_id,
             snapshot: ConversationSnapshot {
+                title: None,
                 thread_id: None,
                 task_status: crate::TaskStatus::Todo,
                 runner: None,
@@ -4344,6 +4360,7 @@ mod tests {
             workspace_id,
             thread_id,
             snapshot: ConversationSnapshot {
+                title: None,
                 thread_id: None,
                 task_status: crate::TaskStatus::Todo,
                 runner: None,

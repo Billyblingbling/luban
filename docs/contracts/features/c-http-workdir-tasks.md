@@ -14,7 +14,7 @@ List task metadata and tab state for a workdir.
 
 Task titles are user-facing and should be short:
 
-- Default title is `"Task {task_id}"`.
+- Default title is `"Thread {task_id}"`.
 - After the first user message, the provider may update the title based on:
   - A deterministic first-line derivation (immediate).
   - An asynchronous AI-generated title (may arrive later).

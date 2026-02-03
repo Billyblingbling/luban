@@ -82,6 +82,14 @@ For `event.type=item`:
 
 - `snapshot.task_status`: explicit lifecycle stage (`TaskStatus`, see `docs/task-and-turn-status.md`)
 
+### Title
+
+The response includes the user-facing thread title:
+
+- `snapshot.title`: same semantics as `ThreadMeta.title` in `C-HTTP-WORKDIR-TASKS`.
+  - Default is `"Thread {task_id}"`.
+  - After the first user message, the provider may update the title (deterministic first-line derivation and/or an asynchronous AI-generated title).
+
 ### Run config fields
 
 The response includes the effective per-thread run configuration used by the next agent turn:

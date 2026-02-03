@@ -168,6 +168,8 @@ pub(crate) fn entries_is_suffix(suffix: &[ConversationEntry], full: &[Conversati
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ConversationSnapshot {
+    #[serde(default)]
+    pub title: Option<String>,
     pub thread_id: Option<String>,
     #[serde(default = "default_task_status")]
     pub task_status: TaskStatus,
