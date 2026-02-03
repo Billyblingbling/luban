@@ -12,6 +12,7 @@ import { runActivityAttachments } from './scenarios/activity-attachments.mjs';
 import { runInboxRead } from './scenarios/inbox-read.mjs';
 import { runLatestEventsVisible } from './scenarios/latest-events-visible.mjs';
 import { runNewTaskModal } from './scenarios/new-task-modal.mjs';
+import { runNewTaskDoubleSubmitNoDuplicate } from './scenarios/new-task-double-submit-no-duplicate.mjs';
 import { runSettingsPanel } from './scenarios/settings-panel.mjs';
 import { runStarFavorites } from './scenarios/star-favorites.mjs';
 import { runTaskStatusChange } from './scenarios/task-status-change.mjs';
@@ -152,6 +153,7 @@ async function main() {
     await runTaskStatusChange({ page, baseUrl });
     await runQueuedPrompts({ page, baseUrl });
     await runLatestEventsVisible({ page, baseUrl });
+    await runNewTaskDoubleSubmitNoDuplicate({ page, baseUrl });
   } catch (err) {
     if (logFile) {
       process.stderr.write(`ui smoke failed; log: ${logFile}\n`);

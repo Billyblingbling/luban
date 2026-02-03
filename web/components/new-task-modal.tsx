@@ -397,6 +397,11 @@ export function NewTaskModal({ open, onOpenChange }: NewTaskModalProps) {
       return
     }
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      if (e.repeat) {
+        e.preventDefault()
+        e.stopPropagation()
+        return
+      }
       e.preventDefault()
       e.stopPropagation()
       if (canExecute && !executingMode) {
