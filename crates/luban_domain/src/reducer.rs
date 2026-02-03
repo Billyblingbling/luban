@@ -46,6 +46,105 @@ fn cancel_running_turn(conversation: &mut WorkspaceConversation) -> Option<u64> 
     Some(run_id)
 }
 
+fn runner_is_enabled(state: &AppState, runner: crate::AgentRunnerKind) -> bool {
+    match runner {
+        crate::AgentRunnerKind::Codex => state.agent_codex_enabled,
+        crate::AgentRunnerKind::Amp => state.agent_amp_enabled,
+        crate::AgentRunnerKind::Claude => state.agent_claude_enabled,
+    }
+}
+
+fn truncate_for_system_task(input: &str, max_chars: usize) -> String {
+    if max_chars == 0 {
+        return String::new();
+    }
+    let mut out = String::new();
+    for ch in input.chars().take(max_chars) {
+        out.push(ch);
+    }
+    out
+}
+
+fn task_status_auto_update_input(
+    conversation: &WorkspaceConversation,
+    turn_outcome: &str,
+) -> String {
+    const MAX_TEXT_CHARS: usize = 1800;
+
+    let mut last_user_message: Option<String> = None;
+    let mut last_agent_message: Option<String> = None;
+    let mut last_turn_error: Option<String> = None;
+
+    for entry in conversation.entries.iter().rev() {
+        match entry {
+            ConversationEntry::UserEvent {
+                event: crate::UserEvent::Message { text, .. },
+                ..
+            } => {
+                if last_user_message.is_none() {
+                    last_user_message = Some(text.trim().to_owned());
+                }
+            }
+            ConversationEntry::AgentEvent { event, .. } => match event {
+                crate::AgentEvent::Message { text, .. } => {
+                    if last_agent_message.is_none() {
+                        last_agent_message = Some(text.trim().to_owned());
+                    }
+                }
+                crate::AgentEvent::TurnError { message } => {
+                    if last_turn_error.is_none() {
+                        last_turn_error = Some(message.trim().to_owned());
+                    }
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+
+        if last_user_message.is_some() && last_agent_message.is_some() && last_turn_error.is_some()
+        {
+            break;
+        }
+    }
+
+    let mut out = String::new();
+    out.push_str("Current task_status: ");
+    out.push_str(conversation.task_status.as_str());
+    out.push('\n');
+    out.push_str("Turn outcome: ");
+    out.push_str(turn_outcome);
+    out.push('\n');
+
+    if let Some(message) = last_user_message {
+        let trimmed = message.trim();
+        if !trimmed.is_empty() {
+            out.push_str("\nLast user message:\n");
+            out.push_str(&truncate_for_system_task(trimmed, MAX_TEXT_CHARS));
+            out.push('\n');
+        }
+    }
+
+    if let Some(message) = last_agent_message {
+        let trimmed = message.trim();
+        if !trimmed.is_empty() {
+            out.push_str("\nLast agent message:\n");
+            out.push_str(&truncate_for_system_task(trimmed, MAX_TEXT_CHARS));
+            out.push('\n');
+        }
+    }
+
+    if let Some(message) = last_turn_error {
+        let trimmed = message.trim();
+        if !trimmed.is_empty() {
+            out.push_str("\nLast turn error:\n");
+            out.push_str(&truncate_for_system_task(trimmed, MAX_TEXT_CHARS));
+            out.push('\n');
+        }
+    }
+
+    out
+}
+
 impl AppState {
     const MAIN_WORKSPACE_NAME: &'static str = "main";
     const MAIN_WORKSPACE_BRANCH: &'static str = "main";
@@ -472,6 +571,7 @@ impl AppState {
                 workspace_id,
                 thread_id,
             } => {
+                let default_amp_mode = self.agent_amp_mode.clone();
                 let Some((project_idx, workspace_idx)) = self.find_workspace_indices(workspace_id)
                 else {
                     return Vec::new();
@@ -486,18 +586,21 @@ impl AppState {
                     return Vec::new();
                 }
 
-                let workspace = &mut self.projects[project_idx].workspaces[workspace_idx];
-                if workspace.branch_rename_status == OperationStatus::Running {
+                let current_branch_name = self.projects[project_idx].workspaces[workspace_idx]
+                    .branch_name
+                    .clone();
+                if self.projects[project_idx].workspaces[workspace_idx].branch_rename_status
+                    == OperationStatus::Running
+                {
                     return Vec::new();
                 }
-                workspace.branch_rename_status = OperationStatus::Running;
 
-                let input = self
+                let (runner, model_id, thinking_effort, amp_mode, input) = self
                     .conversations
                     .get(&(workspace_id, thread_id))
                     .map(|conversation| {
                         const MAX_USER_MESSAGES: usize = 6;
-                        conversation
+                        let input = conversation
                             .entries
                             .iter()
                             .filter_map(|entry| match entry {
@@ -511,14 +614,54 @@ impl AppState {
                             .filter(|text| !text.is_empty())
                             .take(MAX_USER_MESSAGES)
                             .collect::<Vec<_>>()
+                            .join("\n\n");
+
+                        let runner = conversation.agent_runner;
+                        let model_id = conversation.agent_model_id.clone();
+                        let thinking_effort = conversation.thinking_effort;
+                        let amp_mode = if runner == crate::AgentRunnerKind::Amp {
+                            conversation
+                                .amp_mode
+                                .clone()
+                                .or(Some(default_amp_mode.clone()))
+                        } else {
+                            None
+                        };
+
+                        (runner, model_id, thinking_effort, amp_mode, input)
                     })
-                    .filter(|messages| !messages.is_empty())
-                    .map(|messages| messages.join("\n\n"))
-                    .unwrap_or_else(|| workspace.branch_name.clone());
+                    .unwrap_or_else(|| {
+                        let runner = self.agent_default_runner;
+                        let model_id = self.agent_default_model_id.clone();
+                        let thinking_effort = self.agent_default_thinking_effort;
+                        let amp_mode = if runner == crate::AgentRunnerKind::Amp {
+                            Some(default_amp_mode.clone())
+                        } else {
+                            None
+                        };
+                        (runner, model_id, thinking_effort, amp_mode, String::new())
+                    });
+
+                if !runner_is_enabled(self, runner) {
+                    return Vec::new();
+                }
+
+                let workspace = &mut self.projects[project_idx].workspaces[workspace_idx];
+                workspace.branch_rename_status = OperationStatus::Running;
+
+                let input = if input.trim().is_empty() {
+                    current_branch_name
+                } else {
+                    input
+                };
 
                 vec![Effect::AiRenameWorkspaceBranch {
                     workspace_id,
                     input,
+                    runner,
+                    model_id,
+                    thinking_effort,
+                    amp_mode,
                 }]
             }
             Action::WorkspaceBranchRenamed {
@@ -770,6 +913,7 @@ impl AppState {
                 if conversation.pending_prompts.is_empty() {
                     conversation.queue_paused = false;
                     let mut effects = task_status_effects;
+                    let run_config_for_system_tasks = run_config.clone();
                     effects.push(start_agent_run(
                         conversation,
                         workspace_id,
@@ -780,12 +924,16 @@ impl AppState {
                     ));
                     if should_auto_title {
                         effects.push(Effect::LoadWorkspaceThreads { workspace_id });
-                        if self.agent_codex_enabled {
+                        if runner_is_enabled(self, run_config_for_system_tasks.runner) {
                             effects.push(Effect::AiAutoTitleThread {
                                 workspace_id,
                                 thread_id,
                                 input: input_for_auto_title,
                                 expected_current_title,
+                                runner: run_config_for_system_tasks.runner,
+                                model_id: run_config_for_system_tasks.model_id.clone(),
+                                thinking_effort: run_config_for_system_tasks.thinking_effort,
+                                amp_mode: run_config_for_system_tasks.amp_mode.clone(),
                             });
                         }
                     }
@@ -1251,85 +1399,166 @@ impl AppState {
                 run_id,
                 event,
             } => {
-                let conversation = self.ensure_conversation_mut(workspace_id, thread_id);
+                let agent_codex_enabled = self.agent_codex_enabled;
+                let agent_amp_enabled = self.agent_amp_enabled;
+                let agent_claude_enabled = self.agent_claude_enabled;
+                let mut last_error_message: Option<String> = None;
+                let effects = {
+                    let conversation = self.ensure_conversation_mut(workspace_id, thread_id);
+                    match event {
+                        CodexThreadEvent::ThreadStarted { thread_id } => {
+                            if conversation.thread_id.is_none() {
+                                conversation.thread_id = Some(thread_id);
+                            }
+                            Vec::new()
+                        }
+                        CodexThreadEvent::TurnStarted => Vec::new(),
+                        CodexThreadEvent::TurnCompleted { usage } => {
+                            if conversation.active_run_id != Some(run_id) {
+                                return Vec::new();
+                            }
+                            let _ = usage;
+                            let finished_run_config = conversation
+                                .current_run_config
+                                .clone()
+                                .unwrap_or(AgentRunConfig {
+                                    runner: conversation.agent_runner,
+                                    model_id: conversation.agent_model_id.clone(),
+                                    thinking_effort: conversation.thinking_effort,
+                                    amp_mode: conversation.amp_mode.clone(),
+                                });
+                            conversation.run_status = OperationStatus::Idle;
+                            conversation.current_run_config = None;
+                            let next =
+                                start_next_queued_prompt(conversation, workspace_id, thread_id);
+                            if let Some(effect) = next {
+                                return vec![effect];
+                            }
 
-                match event {
-                    CodexThreadEvent::ThreadStarted { thread_id } => {
-                        if conversation.thread_id.is_none() {
-                            conversation.thread_id = Some(thread_id);
+                            if !matches!(
+                                conversation.task_status,
+                                crate::TaskStatus::Iterating | crate::TaskStatus::Validating
+                            ) {
+                                return Vec::new();
+                            }
+                            let runner_enabled = match finished_run_config.runner {
+                                crate::AgentRunnerKind::Codex => agent_codex_enabled,
+                                crate::AgentRunnerKind::Amp => agent_amp_enabled,
+                                crate::AgentRunnerKind::Claude => agent_claude_enabled,
+                            };
+                            if !runner_enabled {
+                                return Vec::new();
+                            }
+
+                            vec![Effect::AiAutoUpdateTaskStatus {
+                                workspace_id,
+                                thread_id,
+                                input: task_status_auto_update_input(conversation, "completed"),
+                                expected_current_task_status: conversation.task_status,
+                                runner: finished_run_config.runner,
+                                model_id: finished_run_config.model_id.clone(),
+                                thinking_effort: finished_run_config.thinking_effort,
+                                amp_mode: finished_run_config.amp_mode.clone(),
+                            }]
                         }
-                        Vec::new()
-                    }
-                    CodexThreadEvent::TurnStarted => Vec::new(),
-                    CodexThreadEvent::TurnCompleted { usage } => {
-                        if conversation.active_run_id != Some(run_id) {
-                            return Vec::new();
+                        CodexThreadEvent::TurnDuration { duration_ms } => {
+                            if conversation.active_run_id != Some(run_id) {
+                                return Vec::new();
+                            }
+                            conversation.push_entry(ConversationEntry::AgentEvent {
+                                entry_id: String::new(),
+                                event: crate::AgentEvent::TurnDuration { duration_ms },
+                            });
+                            Vec::new()
                         }
-                        let _ = usage;
-                        conversation.run_status = OperationStatus::Idle;
-                        conversation.current_run_config = None;
-                        start_next_queued_prompt(conversation, workspace_id, thread_id)
-                            .into_iter()
-                            .collect()
-                    }
-                    CodexThreadEvent::TurnDuration { duration_ms } => {
-                        if conversation.active_run_id != Some(run_id) {
-                            return Vec::new();
+                        CodexThreadEvent::TurnFailed { error } => {
+                            if conversation.active_run_id != Some(run_id) {
+                                return Vec::new();
+                            }
+                            let finished_run_config = conversation
+                                .current_run_config
+                                .clone()
+                                .unwrap_or(AgentRunConfig {
+                                    runner: conversation.agent_runner,
+                                    model_id: conversation.agent_model_id.clone(),
+                                    thinking_effort: conversation.thinking_effort,
+                                    amp_mode: conversation.amp_mode.clone(),
+                                });
+                            let error_message = error.message.clone();
+                            conversation.push_entry(ConversationEntry::AgentEvent {
+                                entry_id: String::new(),
+                                event: crate::AgentEvent::TurnError {
+                                    message: error_message.clone(),
+                                },
+                            });
+                            conversation.run_status = OperationStatus::Idle;
+                            conversation.current_run_config = None;
+                            conversation.queue_paused = true;
+                            last_error_message = Some(error_message);
+
+                            let should_auto_update = matches!(
+                                conversation.task_status,
+                                crate::TaskStatus::Iterating | crate::TaskStatus::Validating
+                            );
+                            let runner_enabled = match finished_run_config.runner {
+                                crate::AgentRunnerKind::Codex => agent_codex_enabled,
+                                crate::AgentRunnerKind::Amp => agent_amp_enabled,
+                                crate::AgentRunnerKind::Claude => agent_claude_enabled,
+                            };
+
+                            if should_auto_update && runner_enabled {
+                                vec![Effect::AiAutoUpdateTaskStatus {
+                                    workspace_id,
+                                    thread_id,
+                                    input: task_status_auto_update_input(conversation, "failed"),
+                                    expected_current_task_status: conversation.task_status,
+                                    runner: finished_run_config.runner,
+                                    model_id: finished_run_config.model_id.clone(),
+                                    thinking_effort: finished_run_config.thinking_effort,
+                                    amp_mode: finished_run_config.amp_mode.clone(),
+                                }]
+                            } else {
+                                Vec::new()
+                            }
                         }
-                        conversation.push_entry(ConversationEntry::AgentEvent {
-                            entry_id: String::new(),
-                            event: crate::AgentEvent::TurnDuration { duration_ms },
-                        });
-                        Vec::new()
-                    }
-                    CodexThreadEvent::TurnFailed { error } => {
-                        if conversation.active_run_id != Some(run_id) {
-                            return Vec::new();
+                        CodexThreadEvent::ItemStarted { item }
+                        | CodexThreadEvent::ItemUpdated { item } => {
+                            if conversation.active_run_id != Some(run_id) {
+                                return Vec::new();
+                            }
+                            conversation.push_codex_item(item);
+                            Vec::new()
                         }
-                        conversation.push_entry(ConversationEntry::AgentEvent {
-                            entry_id: String::new(),
-                            event: crate::AgentEvent::TurnError {
-                                message: error.message.clone(),
-                            },
-                        });
-                        conversation.run_status = OperationStatus::Idle;
-                        conversation.current_run_config = None;
-                        conversation.queue_paused = true;
-                        self.last_error = Some(error.message);
-                        Vec::new()
-                    }
-                    CodexThreadEvent::ItemStarted { item }
-                    | CodexThreadEvent::ItemUpdated { item } => {
-                        if conversation.active_run_id != Some(run_id) {
-                            return Vec::new();
+                        CodexThreadEvent::ItemCompleted { item } => {
+                            if conversation.active_run_id != Some(run_id) {
+                                return Vec::new();
+                            }
+                            conversation.push_codex_item(item);
+                            Vec::new()
                         }
-                        conversation.push_codex_item(item);
-                        Vec::new()
-                    }
-                    CodexThreadEvent::ItemCompleted { item } => {
-                        if conversation.active_run_id != Some(run_id) {
-                            return Vec::new();
+                        CodexThreadEvent::Error { message } => {
+                            if conversation.active_run_id != Some(run_id) {
+                                return Vec::new();
+                            }
+                            conversation.push_entry(ConversationEntry::AgentEvent {
+                                entry_id: String::new(),
+                                event: crate::AgentEvent::TurnError {
+                                    message: message.clone(),
+                                },
+                            });
+                            conversation.run_status = OperationStatus::Idle;
+                            conversation.current_run_config = None;
+                            conversation.queue_paused = true;
+                            last_error_message = Some(message);
+                            Vec::new()
                         }
-                        conversation.push_codex_item(item);
-                        Vec::new()
                     }
-                    CodexThreadEvent::Error { message } => {
-                        if conversation.active_run_id != Some(run_id) {
-                            return Vec::new();
-                        }
-                        conversation.push_entry(ConversationEntry::AgentEvent {
-                            entry_id: String::new(),
-                            event: crate::AgentEvent::TurnError {
-                                message: message.clone(),
-                            },
-                        });
-                        conversation.run_status = OperationStatus::Idle;
-                        conversation.current_run_config = None;
-                        conversation.queue_paused = true;
-                        self.last_error = Some(message);
-                        Vec::new()
-                    }
+                };
+                if let Some(message) = last_error_message {
+                    self.last_error = Some(message);
                 }
+
+                effects
             }
             Action::AgentTurnFinished {
                 workspace_id,
@@ -1880,6 +2109,48 @@ impl AppState {
                         workspace_id,
                         thread_id,
                         task_status,
+                    },
+                    Effect::LoadWorkspaceThreads { workspace_id },
+                ]
+            }
+            Action::TaskStatusAutoUpdateSuggested {
+                workspace_id,
+                thread_id,
+                expected_current_task_status,
+                suggested_task_status,
+            } => {
+                let Some(conversation) = self.conversations.get_mut(&(workspace_id, thread_id))
+                else {
+                    return Vec::new();
+                };
+                if conversation.task_status != expected_current_task_status {
+                    return Vec::new();
+                }
+                if suggested_task_status == expected_current_task_status {
+                    return Vec::new();
+                }
+                if matches!(
+                    expected_current_task_status,
+                    crate::TaskStatus::Done | crate::TaskStatus::Canceled
+                ) {
+                    return Vec::new();
+                }
+
+                let from_status = conversation.task_status;
+                conversation.task_status = suggested_task_status;
+                conversation.push_entry(ConversationEntry::SystemEvent {
+                    entry_id: format!("sys_{}", conversation.entries_total.saturating_add(1)),
+                    created_at_unix_ms: now_unix_ms(),
+                    event: crate::ConversationSystemEvent::TaskStatusChanged {
+                        from: from_status,
+                        to: suggested_task_status,
+                    },
+                });
+                vec![
+                    Effect::StoreConversationTaskStatus {
+                        workspace_id,
+                        thread_id,
+                        task_status: suggested_task_status,
                     },
                     Effect::LoadWorkspaceThreads { workspace_id },
                 ]
@@ -3037,6 +3308,94 @@ mod tests {
                 .iter()
                 .any(|e| matches!(e, Effect::AiRenameWorkspaceBranch { .. })),
             "unexpected AiRenameWorkspaceBranch effect"
+        );
+    }
+
+    #[test]
+    fn turn_completed_triggers_ai_task_status_auto_update() {
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+            is_git: true,
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::CreateWorkspace {
+            project_id,
+            branch_name_hint: None,
+        });
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "w1".to_owned(),
+            branch_name: "luban/random-name".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/w1"),
+        });
+
+        let workspace_id = workspace_id_by_name(&state, "w1");
+        let thread_id = default_thread_id();
+        let effects = state.apply(Action::SendAgentMessage {
+            workspace_id,
+            thread_id,
+            text: "Implement feature X".to_owned(),
+            attachments: Vec::new(),
+            runner: None,
+            amp_mode: None,
+        });
+
+        let (run_id, run_config) = effects
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::RunAgentTurn {
+                    run_id, run_config, ..
+                } => Some((*run_id, run_config.clone())),
+                _ => None,
+            })
+            .expect("missing RunAgentTurn effect");
+
+        let completed_effects = state.apply(Action::AgentEventReceived {
+            workspace_id,
+            thread_id,
+            run_id,
+            event: CodexThreadEvent::TurnCompleted {
+                usage: CodexUsage {
+                    input_tokens: 0,
+                    cached_input_tokens: 0,
+                    output_tokens: 0,
+                },
+            },
+        });
+
+        let auto_update = completed_effects
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::AiAutoUpdateTaskStatus {
+                    input,
+                    expected_current_task_status,
+                    runner,
+                    model_id,
+                    thinking_effort,
+                    amp_mode,
+                    ..
+                } => Some((
+                    input.as_str(),
+                    *expected_current_task_status,
+                    *runner,
+                    model_id.as_str(),
+                    *thinking_effort,
+                    amp_mode.as_deref(),
+                )),
+                _ => None,
+            })
+            .expect("missing AiAutoUpdateTaskStatus effect");
+
+        assert_eq!(auto_update.1, crate::TaskStatus::Iterating);
+        assert_eq!(auto_update.2, run_config.runner);
+        assert_eq!(auto_update.3, run_config.model_id.as_str());
+        assert_eq!(auto_update.4, run_config.thinking_effort);
+        assert_eq!(auto_update.5, run_config.amp_mode.as_deref());
+        assert!(
+            auto_update.0.contains("Current task_status: iterating"),
+            "{}",
+            auto_update.0
         );
     }
 
@@ -4994,7 +5353,8 @@ mod tests {
                 },
             },
         });
-        assert!(effects.is_empty());
+        assert_eq!(effects.len(), 1);
+        assert!(matches!(effects[0], Effect::AiAutoUpdateTaskStatus { .. }));
 
         let conversation = state.workspace_conversation(workspace_id).unwrap();
         assert_eq!(conversation.run_status, OperationStatus::Idle);

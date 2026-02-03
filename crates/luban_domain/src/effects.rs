@@ -100,12 +100,30 @@ pub enum Effect {
     AiRenameWorkspaceBranch {
         workspace_id: WorkspaceId,
         input: String,
+        runner: crate::AgentRunnerKind,
+        model_id: String,
+        thinking_effort: crate::ThinkingEffort,
+        amp_mode: Option<String>,
     },
     AiAutoTitleThread {
         workspace_id: WorkspaceId,
         thread_id: WorkspaceThreadId,
         input: String,
         expected_current_title: String,
+        runner: crate::AgentRunnerKind,
+        model_id: String,
+        thinking_effort: crate::ThinkingEffort,
+        amp_mode: Option<String>,
+    },
+    AiAutoUpdateTaskStatus {
+        workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
+        input: String,
+        expected_current_task_status: crate::TaskStatus,
+        runner: crate::AgentRunnerKind,
+        model_id: String,
+        thinking_effort: crate::ThinkingEffort,
+        amp_mode: Option<String>,
     },
 
     LoadWorkspaceThreads {

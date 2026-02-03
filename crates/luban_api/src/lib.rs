@@ -114,6 +114,7 @@ pub enum SystemTaskKind {
     InferType,
     RenameBranch,
     AutoTitleThread,
+    AutoUpdateTaskStatus,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

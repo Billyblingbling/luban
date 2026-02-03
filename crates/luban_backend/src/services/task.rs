@@ -1,8 +1,9 @@
 use crate::services::GitWorkspaceService;
 use anyhow::anyhow;
 use luban_domain::{
-    ProjectWorkspaceService, SystemTaskKind, THREAD_TITLE_MAX_CHARS, TaskIntentKind,
-    default_system_prompt_template, derive_thread_title,
+    AgentRunnerKind, ProjectWorkspaceService, SystemTaskKind, THREAD_TITLE_MAX_CHARS,
+    TaskIntentKind, TaskStatus, ThinkingEffort, default_system_prompt_template,
+    derive_thread_title, parse_task_status,
 };
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -120,9 +121,124 @@ pub(super) fn render_task_prompt_template(
     out
 }
 
+fn run_system_task_and_collect_messages(
+    service: &GitWorkspaceService,
+    runner: AgentRunnerKind,
+    model_id: String,
+    thinking_effort: ThinkingEffort,
+    amp_mode: Option<String>,
+    prompt: String,
+) -> anyhow::Result<Vec<String>> {
+    let cancel = Arc::new(AtomicBool::new(false));
+    let mut agent_messages: Vec<String> = Vec::new();
+
+    let worktree_path = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+
+    match runner {
+        AgentRunnerKind::Codex => {
+            let model = model_id.trim();
+            service.run_codex_turn_streamed_via_cli(
+                super::CodexTurnParams {
+                    thread_id: None,
+                    worktree_path,
+                    prompt,
+                    image_paths: Vec::new(),
+                    model: if model.is_empty() {
+                        None
+                    } else {
+                        Some(model.to_owned())
+                    },
+                    model_reasoning_effort: Some(thinking_effort.as_str().to_owned()),
+                    sandbox_mode: Some("read-only".to_owned()),
+                },
+                cancel,
+                |event| {
+                    if let luban_domain::CodexThreadEvent::ItemCompleted {
+                        item: luban_domain::CodexThreadItem::AgentMessage { text, .. },
+                    } = event
+                    {
+                        agent_messages.push(text);
+                    }
+                    Ok(())
+                },
+            )?;
+        }
+        AgentRunnerKind::Amp => {
+            service.run_amp_turn_streamed_via_cli(
+                super::AmpTurnParams {
+                    thread_id: None,
+                    worktree_path,
+                    prompt,
+                    mode: amp_mode,
+                },
+                cancel,
+                |event| {
+                    if let luban_domain::CodexThreadEvent::ItemCompleted {
+                        item: luban_domain::CodexThreadItem::AgentMessage { text, .. },
+                    } = event
+                    {
+                        agent_messages.push(text);
+                    }
+                    Ok(())
+                },
+            )?;
+        }
+        AgentRunnerKind::Claude => {
+            service.run_claude_turn_streamed_via_cli(
+                super::ClaudeTurnParams {
+                    thread_id: None,
+                    worktree_path,
+                    prompt,
+                    add_dirs: Vec::new(),
+                },
+                cancel,
+                |event| {
+                    if let luban_domain::CodexThreadEvent::ItemCompleted {
+                        item: luban_domain::CodexThreadItem::AgentMessage { text, .. },
+                    } = event
+                    {
+                        agent_messages.push(text);
+                    }
+                    Ok(())
+                },
+            )?;
+        }
+    }
+
+    Ok(agent_messages)
+}
+
+fn run_system_task_and_find_last_message(
+    service: &GitWorkspaceService,
+    runner: AgentRunnerKind,
+    model_id: String,
+    thinking_effort: ThinkingEffort,
+    amp_mode: Option<String>,
+    prompt: String,
+) -> anyhow::Result<String> {
+    let agent_messages = run_system_task_and_collect_messages(
+        service,
+        runner,
+        model_id,
+        thinking_effort,
+        amp_mode,
+        prompt,
+    )?;
+
+    agent_messages
+        .into_iter()
+        .rev()
+        .find(|s| !s.trim().is_empty())
+        .ok_or_else(|| anyhow!("runner returned no agent_message output"))
+}
+
 pub(super) fn task_suggest_branch_name(
     service: &GitWorkspaceService,
     input: String,
+    runner: AgentRunnerKind,
+    model_id: String,
+    thinking_effort: ThinkingEffort,
+    amp_mode: Option<String>,
 ) -> anyhow::Result<String> {
     let context_json = serde_json::json!({
         "kind": "rename_branch",
@@ -136,35 +252,14 @@ pub(super) fn task_suggest_branch_name(
         &context_json,
     );
 
-    let cancel = Arc::new(AtomicBool::new(false));
-    let mut agent_messages: Vec<String> = Vec::new();
-    service.run_codex_turn_streamed_via_cli(
-        super::CodexTurnParams {
-            thread_id: None,
-            worktree_path: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-            prompt,
-            image_paths: Vec::new(),
-            model: Some("gpt-5.1-codex-mini".to_owned()),
-            model_reasoning_effort: Some("low".to_owned()),
-            sandbox_mode: Some("read-only".to_owned()),
-        },
-        cancel,
-        |event| {
-            if let luban_domain::CodexThreadEvent::ItemCompleted {
-                item: luban_domain::CodexThreadItem::AgentMessage { text, .. },
-            } = event
-            {
-                agent_messages.push(text);
-            }
-            Ok(())
-        },
+    let raw = run_system_task_and_find_last_message(
+        service,
+        runner,
+        model_id,
+        thinking_effort,
+        amp_mode,
+        prompt,
     )?;
-
-    let raw = agent_messages
-        .into_iter()
-        .rev()
-        .find(|s| !s.trim().is_empty())
-        .ok_or_else(|| anyhow!("codex returned no agent_message output"))?;
 
     let branch_name = extract_branch_candidate(raw.trim())
         .and_then(|candidate| normalize_branch_name(&candidate))
@@ -176,6 +271,10 @@ pub(super) fn task_suggest_branch_name(
 pub(super) fn task_suggest_thread_title(
     service: &GitWorkspaceService,
     input: String,
+    runner: AgentRunnerKind,
+    model_id: String,
+    thinking_effort: ThinkingEffort,
+    amp_mode: Option<String>,
 ) -> anyhow::Result<String> {
     let input_trimmed = input.trim();
     let fallback = derive_thread_title(input_trimmed);
@@ -196,35 +295,15 @@ pub(super) fn task_suggest_thread_title(
         &context_json,
     );
 
-    let cancel = Arc::new(AtomicBool::new(false));
-    let mut agent_messages: Vec<String> = Vec::new();
-    service.run_codex_turn_streamed_via_cli(
-        super::CodexTurnParams {
-            thread_id: None,
-            worktree_path: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-            prompt,
-            image_paths: Vec::new(),
-            model: Some("gpt-5.1-codex-mini".to_owned()),
-            model_reasoning_effort: Some("low".to_owned()),
-            sandbox_mode: Some("read-only".to_owned()),
-        },
-        cancel,
-        |event| {
-            if let luban_domain::CodexThreadEvent::ItemCompleted {
-                item: luban_domain::CodexThreadItem::AgentMessage { text, .. },
-            } = event
-            {
-                agent_messages.push(text);
-            }
-            Ok(())
-        },
-    )?;
-
-    let raw = agent_messages
-        .into_iter()
-        .rev()
-        .find(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| fallback.clone());
+    let raw = run_system_task_and_find_last_message(
+        service,
+        runner,
+        model_id,
+        thinking_effort,
+        amp_mode,
+        prompt,
+    )
+    .unwrap_or_else(|_| fallback.clone());
 
     let mut candidate = raw.trim().to_owned();
     if (candidate.starts_with('"') && candidate.ends_with('"') && candidate.len() >= 2)
@@ -243,6 +322,83 @@ pub(super) fn task_suggest_thread_title(
         return Ok(fallback);
     }
     Ok("Thread".to_owned())
+}
+
+fn strip_json_fences(raw: &str) -> &str {
+    let trimmed = raw.trim();
+    let without_prefix = trimmed.strip_prefix("```json").unwrap_or(trimmed);
+    let without_prefix = without_prefix.strip_prefix("```").unwrap_or(without_prefix);
+    let without_suffix = without_prefix.strip_suffix("```").unwrap_or(without_prefix);
+    without_suffix.trim()
+}
+
+fn extract_json_object(raw: &str) -> Option<&str> {
+    let trimmed = raw.trim();
+    if trimmed.starts_with('{') && trimmed.ends_with('}') {
+        return Some(trimmed);
+    }
+    let start = trimmed.find('{')?;
+    let end = trimmed.rfind('}')?;
+    if end <= start {
+        return None;
+    }
+    Some(&trimmed[start..=end])
+}
+
+pub(super) fn task_suggest_task_status(
+    service: &GitWorkspaceService,
+    input: String,
+    runner: AgentRunnerKind,
+    model_id: String,
+    thinking_effort: ThinkingEffort,
+    amp_mode: Option<String>,
+) -> anyhow::Result<TaskStatus> {
+    let input_trimmed = input.trim();
+    let context_json = serde_json::json!({
+        "allowed_task_status": [
+            "backlog",
+            "todo",
+            "iterating",
+            "validating",
+            "done",
+            "canceled"
+        ],
+    })
+    .to_string();
+
+    let prompt = system_prompt_for_task(
+        service,
+        SystemTaskKind::AutoUpdateTaskStatus,
+        input_trimmed,
+        &context_json,
+    );
+
+    let raw = run_system_task_and_find_last_message(
+        service,
+        runner,
+        model_id,
+        thinking_effort,
+        amp_mode,
+        prompt,
+    )?;
+
+    let raw = strip_json_fences(&raw);
+    if let Some(status) = parse_task_status(raw) {
+        return Ok(status);
+    }
+
+    let Some(obj) = extract_json_object(raw) else {
+        return Err(anyhow!("runner returned no json output"));
+    };
+    let value: serde_json::Value = serde_json::from_str(obj)?;
+    let status = value
+        .as_object()
+        .and_then(|obj| obj.get("task_status"))
+        .and_then(|v| v.as_str())
+        .and_then(parse_task_status)
+        .ok_or_else(|| anyhow!("missing or invalid task_status in json output"))?;
+
+    Ok(status)
 }
 
 #[cfg(test)]

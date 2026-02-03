@@ -2105,12 +2105,40 @@ impl ProjectWorkspaceService for GitWorkspaceService {
         }
     }
 
-    fn task_suggest_branch_name(&self, input: String) -> Result<String, String> {
-        task::task_suggest_branch_name(self, input).map_err(anyhow_error_to_string)
+    fn task_suggest_branch_name(
+        &self,
+        input: String,
+        runner: luban_domain::AgentRunnerKind,
+        model_id: String,
+        thinking_effort: luban_domain::ThinkingEffort,
+        amp_mode: Option<String>,
+    ) -> Result<String, String> {
+        task::task_suggest_branch_name(self, input, runner, model_id, thinking_effort, amp_mode)
+            .map_err(anyhow_error_to_string)
     }
 
-    fn task_suggest_thread_title(&self, input: String) -> Result<String, String> {
-        task::task_suggest_thread_title(self, input).map_err(anyhow_error_to_string)
+    fn task_suggest_thread_title(
+        &self,
+        input: String,
+        runner: luban_domain::AgentRunnerKind,
+        model_id: String,
+        thinking_effort: luban_domain::ThinkingEffort,
+        amp_mode: Option<String>,
+    ) -> Result<String, String> {
+        task::task_suggest_thread_title(self, input, runner, model_id, thinking_effort, amp_mode)
+            .map_err(anyhow_error_to_string)
+    }
+
+    fn task_suggest_task_status(
+        &self,
+        input: String,
+        runner: luban_domain::AgentRunnerKind,
+        model_id: String,
+        thinking_effort: luban_domain::ThinkingEffort,
+        amp_mode: Option<String>,
+    ) -> Result<luban_domain::TaskStatus, String> {
+        task::task_suggest_task_status(self, input, runner, model_id, thinking_effort, amp_mode)
+            .map_err(anyhow_error_to_string)
     }
 
     fn conversation_update_title_if_matches(

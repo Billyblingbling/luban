@@ -5,13 +5,15 @@ pub enum SystemTaskKind {
     InferType,
     RenameBranch,
     AutoTitleThread,
+    AutoUpdateTaskStatus,
 }
 
 impl SystemTaskKind {
-    pub const ALL: [SystemTaskKind; 3] = [
+    pub const ALL: [SystemTaskKind; 4] = [
         SystemTaskKind::InferType,
         SystemTaskKind::RenameBranch,
         SystemTaskKind::AutoTitleThread,
+        SystemTaskKind::AutoUpdateTaskStatus,
     ];
 
     pub fn as_key(self) -> &'static str {
@@ -19,6 +21,7 @@ impl SystemTaskKind {
             SystemTaskKind::InferType => "infer-type",
             SystemTaskKind::RenameBranch => "rename-branch",
             SystemTaskKind::AutoTitleThread => "auto-title-thread",
+            SystemTaskKind::AutoUpdateTaskStatus => "auto-update-task-status",
         }
     }
 
@@ -27,6 +30,7 @@ impl SystemTaskKind {
             SystemTaskKind::InferType => "Infer Type",
             SystemTaskKind::RenameBranch => "Rename Branch",
             SystemTaskKind::AutoTitleThread => "Auto Title Thread",
+            SystemTaskKind::AutoUpdateTaskStatus => "Auto Update Task Status",
         }
     }
 }
@@ -113,6 +117,38 @@ Input:
 
 Context (JSON):
 {{context_json}}
+"#
+            .to_owned()
+        }
+        SystemTaskKind::AutoUpdateTaskStatus => {
+            r#"You are updating a task status for a conversation thread based on the latest progress.
+
+Rules:
+- Do NOT run commands.
+- Do NOT modify files.
+- Output ONLY a single JSON object, no markdown, no extra text.
+- Do NOT include rationale, notes, or any extra fields in the output.
+- Always output a result, even if the input is vague: keep the current status.
+- Prefer conservative updates: do not mark as "done" unless the task is clearly finished.
+
+Allowed task_status values:
+- backlog
+- todo
+- iterating
+- validating
+- done
+- canceled
+
+Input:
+{{task_input}}
+
+Context (JSON):
+{{context_json}}
+
+Output JSON schema:
+{
+  "task_status": "<one of the allowed values>"
+}
 "#
             .to_owned()
         }

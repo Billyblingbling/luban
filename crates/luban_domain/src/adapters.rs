@@ -447,11 +447,36 @@ pub trait ProjectWorkspaceService: Send + Sync {
         Ok(())
     }
 
-    fn task_suggest_branch_name(&self, _input: String) -> Result<String, String> {
+    fn task_suggest_branch_name(
+        &self,
+        _input: String,
+        _runner: AgentRunnerKind,
+        _model_id: String,
+        _thinking_effort: ThinkingEffort,
+        _amp_mode: Option<String>,
+    ) -> Result<String, String> {
         Err("unimplemented".to_owned())
     }
 
-    fn task_suggest_thread_title(&self, _input: String) -> Result<String, String> {
+    fn task_suggest_thread_title(
+        &self,
+        _input: String,
+        _runner: AgentRunnerKind,
+        _model_id: String,
+        _thinking_effort: ThinkingEffort,
+        _amp_mode: Option<String>,
+    ) -> Result<String, String> {
+        Err("unimplemented".to_owned())
+    }
+
+    fn task_suggest_task_status(
+        &self,
+        _input: String,
+        _runner: AgentRunnerKind,
+        _model_id: String,
+        _thinking_effort: ThinkingEffort,
+        _amp_mode: Option<String>,
+    ) -> Result<TaskStatus, String> {
         Err("unimplemented".to_owned())
     }
 

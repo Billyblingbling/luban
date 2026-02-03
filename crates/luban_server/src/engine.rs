@@ -2278,6 +2278,10 @@ impl Engine {
             Effect::AiRenameWorkspaceBranch {
                 workspace_id,
                 input,
+                runner,
+                model_id,
+                thinking_effort,
+                amp_mode,
             } => {
                 if workspace_scope(&self.state, workspace_id).is_none() {
                     return Ok(VecDeque::from([Action::WorkspaceBranchRenameFailed {
@@ -2296,7 +2300,13 @@ impl Engine {
                 let tx = self.tx.clone();
                 tokio::spawn(async move {
                     let result = tokio::task::spawn_blocking(move || {
-                        let suggested = services.task_suggest_branch_name(input)?;
+                        let suggested = services.task_suggest_branch_name(
+                            input,
+                            runner,
+                            model_id,
+                            thinking_effort,
+                            amp_mode,
+                        )?;
                         services.rename_workspace_branch(worktree_path, suggested)
                     })
                     .await
@@ -2329,6 +2339,10 @@ impl Engine {
                 thread_id,
                 input,
                 expected_current_title,
+                runner,
+                model_id,
+                thinking_effort,
+                amp_mode,
             } => {
                 let Some(scope) = workspace_scope(&self.state, workspace_id) else {
                     return Ok(VecDeque::new());
@@ -2357,7 +2371,13 @@ impl Engine {
                                 derived
                             }
                         } else {
-                            services_for_suggest.task_suggest_thread_title(input)?
+                            services_for_suggest.task_suggest_thread_title(
+                                input,
+                                runner,
+                                model_id,
+                                thinking_effort,
+                                amp_mode,
+                            )?
                         };
 
                         let suggested = luban_domain::derive_thread_title(&suggested);
@@ -2406,6 +2426,52 @@ impl Engine {
                             action: Box::new(Action::WorkspaceThreadsLoaded {
                                 workspace_id,
                                 threads,
+                            }),
+                        })
+                        .await;
+                });
+
+                Ok(VecDeque::new())
+            }
+            Effect::AiAutoUpdateTaskStatus {
+                workspace_id,
+                thread_id,
+                input,
+                expected_current_task_status,
+                runner,
+                model_id,
+                thinking_effort,
+                amp_mode,
+            } => {
+                let services = self.services.clone();
+                let tx = self.tx.clone();
+                tokio::spawn(async move {
+                    let result = tokio::task::spawn_blocking(move || {
+                        services.task_suggest_task_status(
+                            input,
+                            runner,
+                            model_id,
+                            thinking_effort,
+                            amp_mode,
+                        )
+                    })
+                    .await
+                    .ok()
+                    .unwrap_or_else(|| {
+                        Err("failed to join auto update task status task".to_owned())
+                    });
+
+                    let Ok(suggested_task_status) = result else {
+                        return;
+                    };
+
+                    let _ = tx
+                        .send(EngineCommand::DispatchAction {
+                            action: Box::new(Action::TaskStatusAutoUpdateSuggested {
+                                workspace_id,
+                                thread_id,
+                                expected_current_task_status,
+                                suggested_task_status,
                             }),
                         })
                         .await;
@@ -3742,6 +3808,9 @@ fn map_system_task_kind(kind: luban_domain::SystemTaskKind) -> luban_api::System
         luban_domain::SystemTaskKind::InferType => luban_api::SystemTaskKind::InferType,
         luban_domain::SystemTaskKind::RenameBranch => luban_api::SystemTaskKind::RenameBranch,
         luban_domain::SystemTaskKind::AutoTitleThread => luban_api::SystemTaskKind::AutoTitleThread,
+        luban_domain::SystemTaskKind::AutoUpdateTaskStatus => {
+            luban_api::SystemTaskKind::AutoUpdateTaskStatus
+        }
     }
 }
 
@@ -4605,6 +4674,9 @@ fn map_client_action(action: luban_api::ClientAction) -> Option<Action> {
                     }
                     luban_api::SystemTaskKind::AutoTitleThread => {
                         luban_domain::SystemTaskKind::AutoTitleThread
+                    }
+                    luban_api::SystemTaskKind::AutoUpdateTaskStatus => {
+                        luban_domain::SystemTaskKind::AutoUpdateTaskStatus
                     }
                 },
                 template,
