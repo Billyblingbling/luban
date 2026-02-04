@@ -164,6 +164,7 @@ struct TelegramGateway {
     runtime: TelegramRuntimeConfig,
     session: TelegramSession,
     last_seen_entry_index: HashMap<(i64, Option<i64>, u64, u64), u64>,
+    progress_messages: HashMap<(i64, Option<i64>, u64, u64), ProgressMessageState>,
     reply_routes: HashMap<i64, ReplyRoute>,
     topic_bindings: HashMap<i64, TopicBinding>,
     inbox_initialized_workspaces: HashSet<u64>,
@@ -178,6 +179,17 @@ struct TelegramSession {
     keyboard_routes: HashMap<String, KeyboardRoute>,
     pending_comment_target: Option<(u64, u64)>,
     pending_new_task_project_slug: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+struct ProgressMessageState {
+    message_id: i64,
+    created_at: Instant,
+    task_title: String,
+    recent_events: Vec<String>,
+    final_text: Option<String>,
+    dirty: bool,
+    last_edited_at: Instant,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -234,6 +246,7 @@ impl TelegramGateway {
             },
             session: TelegramSession::default(),
             last_seen_entry_index: HashMap::new(),
+            progress_messages: HashMap::new(),
             reply_routes: HashMap::new(),
             topic_bindings: HashMap::new(),
             inbox_initialized_workspaces: HashSet::new(),
@@ -342,6 +355,9 @@ impl TelegramGateway {
         self.refresh_runtime_config().await;
 
         let mut update_offset = 0i64;
+        let mut progress_tick = tokio::time::interval(Duration::from_secs(10));
+        progress_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        progress_tick.tick().await;
 
         loop {
             let token = self.runtime.bot_token.clone();
@@ -382,6 +398,9 @@ impl TelegramGateway {
                             tokio::time::sleep(Duration::from_secs(1)).await;
                         }
                     }
+                }
+                _ = progress_tick.tick() => {
+                    let _ = self.flush_progress_message_edits().await;
                 }
             }
         }
@@ -552,6 +571,184 @@ impl TelegramGateway {
         );
     }
 
+    fn prune_progress_messages(&mut self) {
+        let now = Instant::now();
+        let ttl = Duration::from_secs(TELEGRAM_REPLY_ROUTE_TTL_SECS);
+        self.progress_messages
+            .retain(|_, state| now.duration_since(state.created_at) <= ttl);
+    }
+
+    async fn flush_progress_message_edits(&mut self) -> anyhow::Result<()> {
+        self.prune_progress_messages();
+
+        let now = Instant::now();
+        let mut dirty = self
+            .progress_messages
+            .iter()
+            .filter(|(_, state)| {
+                state.dirty && now.duration_since(state.last_edited_at) >= Duration::from_secs(10)
+            })
+            .map(|(k, v)| (*k, v.created_at))
+            .collect::<Vec<_>>();
+        dirty.sort_by_key(|(_, created_at)| *created_at);
+
+        for (key, _) in dirty.into_iter().take(5) {
+            self.edit_progress_message(key).await?;
+        }
+
+        Ok(())
+    }
+
+    async fn edit_progress_message(
+        &mut self,
+        key: (i64, Option<i64>, u64, u64),
+    ) -> anyhow::Result<()> {
+        let chat_id = key.0;
+        let workspace_id = key.2;
+        let thread_id = key.3;
+
+        let Some((existing_message_id, task_title, final_text, recent_events)) =
+            self.progress_messages.get(&key).map(|state| {
+                (
+                    state.message_id,
+                    state.task_title.clone(),
+                    state.final_text.clone(),
+                    state.recent_events.clone(),
+                )
+            })
+        else {
+            return Ok(());
+        };
+
+        let kb = inline_keyboard(vec![vec![InlineButton::new(
+            "Comment",
+            &format!("comment:{workspace_id}:{thread_id}"),
+        )]]);
+        let text = render_progress_message(&task_title, &final_text, &recent_events);
+
+        match self
+            .edit_message_with_id(
+                chat_id,
+                existing_message_id,
+                &text,
+                Some(kb.clone()),
+                Some(TELEGRAM_PARSE_MODE_MARKDOWN_V2),
+            )
+            .await
+        {
+            Ok(()) => {
+                if let Some(state) = self.progress_messages.get_mut(&key) {
+                    state.dirty = false;
+                    state.last_edited_at = Instant::now();
+                }
+                Ok(())
+            }
+            Err(err) => {
+                let _ = self
+                    .set_last_error(format!("telegram editMessageText failed: {err}"))
+                    .await;
+                let message_id = self
+                    .send_message_with_id(
+                        chat_id,
+                        key.1,
+                        &text,
+                        Some(kb),
+                        Some(TELEGRAM_PARSE_MODE_MARKDOWN_V2),
+                    )
+                    .await?
+                    .unwrap_or(existing_message_id);
+                if let Some(state) = self.progress_messages.get_mut(&key) {
+                    state.message_id = message_id;
+                    state.dirty = false;
+                    state.last_edited_at = Instant::now();
+                }
+                self.insert_reply_route(message_id, workspace_id, thread_id);
+                Ok(())
+            }
+        }
+    }
+
+    async fn task_title_and_last_entry_index(
+        &mut self,
+        workspace_id: u64,
+        thread_id: u64,
+    ) -> (String, Option<u64>) {
+        let snapshot = self
+            .engine
+            .conversation_snapshot(
+                luban_api::WorkspaceId(workspace_id),
+                luban_api::WorkspaceThreadId(thread_id),
+                None,
+                Some(1),
+            )
+            .await;
+        match snapshot {
+            Ok(snapshot) => {
+                let title = snapshot.title.trim();
+                let title = if title.is_empty() {
+                    "Task".to_owned()
+                } else {
+                    truncate_label(title, 48)
+                };
+                let last = snapshot
+                    .entries
+                    .len()
+                    .checked_sub(1)
+                    .map(|idx| snapshot.entries_start.saturating_add(idx as u64));
+                (title, last)
+            }
+            Err(_) => ("Task".to_owned(), None),
+        }
+    }
+
+    async fn begin_turn_progress_message(
+        &mut self,
+        chat_id: i64,
+        message_thread_id: Option<i64>,
+        workspace_id: u64,
+        thread_id: u64,
+    ) {
+        let (title, last_idx) = self
+            .task_title_and_last_entry_index(workspace_id, thread_id)
+            .await;
+        let formatted = render_progress_message(&title, &None, &[]);
+        let kb = inline_keyboard(vec![vec![InlineButton::new(
+            "Comment",
+            &format!("comment:{workspace_id}:{thread_id}"),
+        )]]);
+
+        let sent = self
+            .send_message_with_id(
+                chat_id,
+                message_thread_id,
+                &formatted,
+                Some(kb),
+                Some(TELEGRAM_PARSE_MODE_MARKDOWN_V2),
+            )
+            .await;
+        let Ok(Some(message_id)) = sent else {
+            return;
+        };
+
+        let key = (chat_id, message_thread_id, workspace_id, thread_id);
+        if let Some(last_idx) = last_idx {
+            self.last_seen_entry_index.insert(key, last_idx);
+        }
+        self.progress_messages.insert(
+            key,
+            ProgressMessageState {
+                message_id,
+                created_at: Instant::now(),
+                task_title: title,
+                recent_events: Vec::new(),
+                final_text: None,
+                dirty: false,
+                last_edited_at: Instant::now(),
+            },
+        );
+        self.insert_reply_route(message_id, workspace_id, thread_id);
+    }
+
     async fn handle_updates(&mut self, updates: Vec<TelegramUpdate>) {
         for update in updates {
             if let Some(cb) = update.callback_query {
@@ -643,8 +840,9 @@ impl TelegramGateway {
         if let Some((wid, tid)) = self.session.pending_comment_target.take() {
             self.session.active_workspace_id = Some(wid);
             self.session.active_thread_id = Some(tid);
+            self.begin_turn_progress_message(chat_id, None, wid, tid)
+                .await;
             self.send_agent_message(wid, tid, text).await;
-            self.send_home(chat_id).await?;
             return Ok(());
         }
 
@@ -653,6 +851,8 @@ impl TelegramGateway {
                 Ok((wid, tid)) => {
                     self.session.active_workspace_id = Some(wid);
                     self.session.active_thread_id = Some(tid);
+                    self.begin_turn_progress_message(chat_id, None, wid, tid)
+                        .await;
                     self.send_agent_message(wid, tid, text).await;
                     return Ok(());
                 }
@@ -665,7 +865,6 @@ impl TelegramGateway {
                             None,
                         )
                         .await;
-                    self.send_home(chat_id).await?;
                     return Ok(());
                 }
             }
@@ -686,6 +885,8 @@ impl TelegramGateway {
         self.session.active_workspace_id = Some(wid);
         self.session.active_thread_id = Some(tid);
 
+        self.begin_turn_progress_message(chat_id, None, wid, tid)
+            .await;
         self.send_agent_message(wid, tid, text).await;
         Ok(())
     }
@@ -1635,6 +1836,9 @@ impl TelegramGateway {
         let last_seen = self.last_seen_entry_index.get(&key).copied();
 
         let mut candidate = None::<(u64, String)>;
+        let mut max_seen = last_seen;
+        let mut needs_immediate_edit = false;
+        let has_progress_message = self.progress_messages.contains_key(&key);
         for (idx, entry) in snapshot.entries.iter().enumerate() {
             let global_idx = start.saturating_add(idx as u64);
             if let Some(last_seen) = last_seen
@@ -1643,9 +1847,40 @@ impl TelegramGateway {
                 continue;
             }
 
+            max_seen = Some(max_seen.unwrap_or(0).max(global_idx));
+            if has_progress_message {
+                if let Some(update) = format_conversation_entry_for_progress(entry) {
+                    let Some(state) = self.progress_messages.get_mut(&key) else {
+                        continue;
+                    };
+                    match update {
+                        ProgressUpdate::Event(line) => {
+                            push_recent_progress_event(&mut state.recent_events, line, 5);
+                            state.dirty = true;
+                        }
+                        ProgressUpdate::Final(text) => {
+                            state.final_text = Some(text);
+                            state.dirty = true;
+                            needs_immediate_edit = true;
+                        }
+                    }
+                }
+                continue;
+            }
+
             if let Some(text) = format_conversation_entry_for_telegram(entry) {
                 candidate = Some((global_idx, text));
             }
+        }
+
+        if has_progress_message {
+            if let Some(max_seen) = max_seen {
+                self.last_seen_entry_index.insert(key, max_seen);
+            }
+            if needs_immediate_edit {
+                let _ = self.edit_progress_message(key).await;
+            }
+            return;
         }
 
         let Some((global_idx, text)) = candidate else {
@@ -1677,7 +1912,8 @@ impl TelegramGateway {
         };
 
         self.insert_reply_route(message_id, snapshot.workspace_id.0, snapshot.thread_id.0);
-        self.last_seen_entry_index.insert(key, global_idx);
+        let updated = max_seen.unwrap_or(global_idx).max(global_idx);
+        self.last_seen_entry_index.insert(key, updated);
     }
 
     async fn send_message(
@@ -1756,6 +1992,63 @@ impl TelegramGateway {
         }
 
         Ok(Some(parsed.result.message_id))
+    }
+
+    async fn edit_message_with_id(
+        &mut self,
+        chat_id: i64,
+        message_id: i64,
+        text: &str,
+        reply_markup: Option<serde_json::Value>,
+        parse_mode: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let Some(token) = self.runtime.bot_token.as_deref() else {
+            return Ok(());
+        };
+        let url = format!(
+            "{}/bot{}/editMessageText",
+            self.api_base.trim_end_matches('/'),
+            token
+        );
+
+        let mut body = serde_json::json!({
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": text,
+            "disable_web_page_preview": true,
+        });
+        if let Some(markup) = reply_markup {
+            body["reply_markup"] = markup;
+        }
+        if let Some(parse_mode) = parse_mode {
+            body["parse_mode"] = serde_json::json!(parse_mode);
+        }
+
+        let res = self.http.post(url).json(&body).send().await;
+        let res = match res {
+            Ok(res) => res,
+            Err(err) => {
+                anyhow::bail!("telegram editMessageText request failed: {err}");
+            }
+        };
+
+        let parsed = res
+            .json::<TelegramApiResponse<serde_json::Value>>()
+            .await
+            .map_err(|err| {
+                anyhow::anyhow!("telegram editMessageText response parse failed: {err}")
+            })?;
+
+        if !parsed.ok {
+            anyhow::bail!(
+                "{}",
+                parsed
+                    .description
+                    .unwrap_or_else(|| "telegram editMessageText failed".to_owned())
+            );
+        }
+
+        Ok(())
     }
 
     async fn edit_forum_topic(
@@ -2265,13 +2558,177 @@ fn sanitize_telegram_topic_name(raw: &str) -> String {
     trimmed.chars().take(LIMIT).collect()
 }
 
+#[derive(Clone, Debug)]
+enum ProgressUpdate {
+    Event(String),
+    Final(String),
+}
+
+fn format_conversation_entry_for_progress(entry: &ConversationEntry) -> Option<ProgressUpdate> {
+    match entry {
+        ConversationEntry::AgentEvent(v) => match &v.event {
+            luban_api::AgentEvent::Message(msg) => Some(ProgressUpdate::Final(msg.text.clone())),
+            luban_api::AgentEvent::Item(item) => {
+                format_agent_item_for_progress(item).map(ProgressUpdate::Event)
+            }
+            luban_api::AgentEvent::TurnError { message } => {
+                Some(ProgressUpdate::Final(format!("Turn failed: {message}")))
+            }
+            luban_api::AgentEvent::TurnCanceled => {
+                Some(ProgressUpdate::Final("Turn canceled.".to_owned()))
+            }
+            luban_api::AgentEvent::TurnDuration { .. } => None,
+            luban_api::AgentEvent::TurnUsage { .. } => None,
+        },
+        _ => None,
+    }
+}
+
+fn push_recent_progress_event(out: &mut Vec<String>, line: String, limit: usize) {
+    let line = line.trim().to_owned();
+    if line.is_empty() {
+        return;
+    }
+    if out.last().is_some_and(|prev| prev == &line) {
+        return;
+    }
+    out.push(line);
+    while out.len() > limit {
+        out.remove(0);
+    }
+}
+
+fn render_progress_message(
+    task_title: &str,
+    final_text: &Option<String>,
+    recent: &[String],
+) -> String {
+    let mut lines = Vec::new();
+    if let Some(text) = final_text.as_deref() {
+        lines.push(text.to_owned());
+        return format_task_push_markdown(task_title, &lines.join("\n"));
+    }
+
+    lines.push("Working...".to_owned());
+    if !recent.is_empty() {
+        lines.push(String::new());
+        for item in recent {
+            lines.push(format!("• {item}"));
+        }
+    }
+    format_task_push_markdown(task_title, &lines.join("\n"))
+}
+
+fn format_agent_item_for_progress(item: &luban_api::AgentItem) -> Option<String> {
+    let payload = &item.payload;
+    let status = payload
+        .get("status")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let status = match status {
+        "in_progress" => "running",
+        "completed" => "done",
+        other => other,
+    };
+    let status_suffix = if status.is_empty() {
+        String::new()
+    } else {
+        format!(" ({status})")
+    };
+
+    let line = match item.kind {
+        luban_api::AgentItemKind::CommandExecution => {
+            let command = payload
+                .get("command")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Command");
+            Some(format!(
+                "Command: {}{status_suffix}",
+                truncate_label(command, 120)
+            ))
+        }
+        luban_api::AgentItemKind::FileChange => {
+            let changes = payload
+                .get("changes")
+                .and_then(|v| v.as_array())
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            let mut paths = Vec::new();
+            let mut seen = std::collections::HashSet::new();
+            for change in changes {
+                let path = change
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .trim();
+                if path.is_empty() {
+                    continue;
+                }
+                if !seen.insert(path) {
+                    continue;
+                }
+                paths.push(path.to_owned());
+            }
+            if paths.is_empty() {
+                Some(format!("File changes: {}{status_suffix}", changes.len()))
+            } else {
+                let shown = paths.iter().take(3).cloned().collect::<Vec<_>>();
+                let remaining = paths.len().saturating_sub(shown.len());
+                let suffix = if remaining > 0 {
+                    format!(", +{remaining}")
+                } else {
+                    String::new()
+                };
+                Some(format!(
+                    "File changes: {}{suffix}{status_suffix}",
+                    shown.join(", ")
+                ))
+            }
+        }
+        luban_api::AgentItemKind::McpToolCall => {
+            let server = payload
+                .get("server")
+                .and_then(|v| v.as_str())
+                .unwrap_or("mcp");
+            let tool = payload
+                .get("tool")
+                .and_then(|v| v.as_str())
+                .unwrap_or("tool");
+            Some(format!("MCP: {server}.{tool}{status_suffix}"))
+        }
+        luban_api::AgentItemKind::WebSearch => {
+            let query = payload
+                .get("query")
+                .and_then(|v| v.as_str())
+                .unwrap_or("query");
+            Some(format!(
+                "Web search: {}{status_suffix}",
+                truncate_label(query, 120)
+            ))
+        }
+        luban_api::AgentItemKind::TodoList => Some(format!("Todo list updated{status_suffix}")),
+        luban_api::AgentItemKind::Error => {
+            let message = payload
+                .get("message")
+                .and_then(|v| v.as_str())
+                .or_else(|| payload.get("error").and_then(|v| v.as_str()))
+                .unwrap_or("error");
+            Some(format!(
+                "Error: {}{status_suffix}",
+                truncate_label(message, 160)
+            ))
+        }
+        luban_api::AgentItemKind::Reasoning => None,
+    };
+
+    line.map(|v| truncate_label(&v, 180))
+}
+
 fn format_conversation_entry_for_telegram(entry: &ConversationEntry) -> Option<String> {
     match entry {
         ConversationEntry::AgentEvent(v) => match &v.event {
             luban_api::AgentEvent::Message(msg) => Some(msg.text.clone()),
-            luban_api::AgentEvent::TurnDuration { duration_ms } => {
-                Some(format!("Turn completed ({duration_ms} ms)"))
-            }
+            luban_api::AgentEvent::TurnDuration { .. } => None,
             luban_api::AgentEvent::TurnError { message } => Some(format!("Turn failed: {message}")),
             luban_api::AgentEvent::TurnCanceled => Some("Turn canceled.".to_owned()),
             _ => None,
@@ -2580,5 +3037,15 @@ mod tests {
         assert!(matches!(session.ui_state, TelegramUiState::Home));
         assert!(session.keyboard_routes.is_empty());
         assert_eq!(session.pending_comment_target, Some((3, 4)));
+    }
+
+    #[test]
+    fn format_conversation_entry_skips_turn_duration() {
+        let entry = ConversationEntry::AgentEvent(luban_api::AgentEventEntry {
+            entry_id: "e".to_owned(),
+            event: luban_api::AgentEvent::TurnDuration { duration_ms: 123 },
+        });
+        assert_eq!(format_conversation_entry_for_telegram(&entry), None);
+        assert!(format_conversation_entry_for_progress(&entry).is_none());
     }
 }
