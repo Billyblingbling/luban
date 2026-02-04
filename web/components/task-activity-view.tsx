@@ -316,7 +316,7 @@ function SystemEventItem({ message, actor }: SystemEventItemProps) {
           width: ACTIVITY_ICON_SIZE_PX,
           height: ACTIVITY_ICON_SLOT_HEIGHT_PX,
           marginLeft: ACTIVITY_AXIS_X_PX - ACTIVITY_ICON_RADIUS_PX,
-          marginRight: '4px',
+          marginRight: '11px',
           backgroundColor: COLORS.background
         }}
       >
@@ -350,7 +350,9 @@ function SystemEventItem({ message, actor }: SystemEventItemProps) {
         className="flex items-center flex-wrap"
         style={{ fontSize: '12px', lineHeight: '16.8px', color: COLORS.textMuted }}
       >
-        <b style={{ fontWeight: 500 }}>{eventActor.name}</b>
+        <b data-testid="activity-simple-author" style={{ fontWeight: 500 }}>
+          {eventActor.name}
+        </b>
         <span style={{ marginLeft: '4px' }}>{message.content}</span>
         <span style={{ margin: '0 4px' }}>·</span>
         <span className="inline-flex items-center gap-1">
@@ -388,7 +390,7 @@ function CollapsedEventsGroup({ events, onExpand }: CollapsedEventsGroupProps) {
             style={{ 
               width: ACTIVITY_ICON_SIZE_PX,
               marginLeft: ACTIVITY_AXIS_X_PX - ACTIVITY_ICON_RADIUS_PX,
-              marginRight: '4px',
+              marginRight: '11px',
               backgroundColor: COLORS.background
             }}
           >
@@ -453,22 +455,29 @@ function UserActivityEvent({ message, workspaceId }: UserActivityEventProps) {
       }}
     >
       {/* Header row: Avatar + Username + Timestamp */}
-      <div className="flex items-center gap-2.5 mb-2">
+      <div className="flex items-center gap-2 mb-2">
         {/* Avatar - 20x20 circular (Linear style) */}
         <div
-          className="flex items-center justify-center text-white flex-shrink-0"
-          style={{ 
-            width: '20px', 
-            height: '20px', 
-            borderRadius: '50%',
-            backgroundColor: COLORS.accent,
-            fontSize: '9px',
-            fontWeight: 500
-          }}
+          className="flex items-center justify-center flex-shrink-0"
+          style={{ width: "20px", height: "20px" }}
         >
-          U
+          <div
+            data-testid="activity-card-avatar-inner"
+            className="flex items-center justify-center text-white"
+            style={{
+              width: "16px",
+              height: "16px",
+              borderRadius: "50%",
+              backgroundColor: COLORS.accent,
+              fontSize: "8px",
+              fontWeight: 500,
+              lineHeight: "16px",
+            }}
+          >
+            U
+          </div>
         </div>
-        <span style={{ fontSize: '14px', fontWeight: 500, color: COLORS.textPrimary }}>
+        <span data-testid="activity-card-author" style={{ fontSize: '13px', fontWeight: 500, color: COLORS.textPrimary }}>
           You
         </span>
         <span style={{ fontSize: '14px', fontWeight: 400, color: COLORS.textMuted }}>
@@ -559,23 +568,30 @@ function AgentActivityEvent({ message }: AgentActivityEventProps) {
           }}
         >
           {/* Header row: Avatar + Agent name + Timestamp + Duration */}
-          <div className="flex items-center gap-2.5 mb-2">
+          <div className="flex items-center gap-2 mb-2">
             <div
               className="flex items-center justify-center flex-shrink-0"
-              style={{ 
-                width: '20px', 
-                height: '20px', 
-                borderRadius: '50%',
-                backgroundColor: COLORS.white,
-                border: `1px solid ${COLORS.border}`,
-                color: COLORS.textPrimary,
-                fontSize: '9px',
-                fontWeight: 500
-              }}
+              style={{ width: "20px", height: "20px" }}
             >
-              <AgentRunnerIcon runner={message.agentRunner} className="w-3.5 h-3.5" />
+              <div
+                data-testid="activity-card-avatar-inner"
+                className="flex items-center justify-center"
+                style={{
+                  width: "16px",
+                  height: "16px",
+                  borderRadius: "50%",
+                  backgroundColor: COLORS.white,
+                  border: `1px solid ${COLORS.border}`,
+                  color: COLORS.textPrimary,
+                }}
+              >
+                <AgentRunnerIcon runner={message.agentRunner} className="w-3 h-3" />
+              </div>
             </div>
-            <span style={{ fontSize: '14px', fontWeight: 500, color: COLORS.textPrimary }}>
+            <span
+              data-testid="activity-card-author"
+              style={{ fontSize: '13px', fontWeight: 500, color: COLORS.textPrimary }}
+            >
               {agentName}
             </span>
             <span style={{ fontSize: '14px', fontWeight: 400, color: COLORS.textMuted }}>
@@ -699,31 +715,40 @@ function AgentTurnCardEvent({
         marginRight: "-6px",
       }}
     >
-      <div className="flex items-center gap-2.5">
-        <button
-          data-testid="agent-turn-toggle"
-          type="button"
-          onClick={() => setExpanded(!isExpanded)}
-          className="flex items-center gap-2.5 flex-1 min-w-0 text-left"
-          style={{ color: COLORS.textMuted }}
-        >
+      <div className="flex items-center gap-2">
+	        <button
+	          data-testid="agent-turn-toggle"
+	          type="button"
+	          onClick={() => setExpanded(!isExpanded)}
+	          className="flex items-center gap-2 flex-1 min-w-0 text-left"
+	          style={{ color: COLORS.textMuted }}
+	        >
           <div
             data-testid="agent-turn-avatar"
             className="flex items-center justify-center flex-shrink-0"
             style={{
               width: "20px",
               height: "20px",
-              borderRadius: "50%",
-              backgroundColor: COLORS.white,
-              border: `1px solid ${COLORS.border}`,
-              color: COLORS.textPrimary,
-              fontSize: "9px",
-              fontWeight: 500,
             }}
           >
-            <AgentRunnerIcon runner={message.agentRunner} className="w-3.5 h-3.5" />
+            <div
+              data-testid="activity-card-avatar-inner"
+              className="flex items-center justify-center"
+              style={{
+                width: "16px",
+                height: "16px",
+                borderRadius: "50%",
+                backgroundColor: COLORS.white,
+                border: `1px solid ${COLORS.border}`,
+                color: COLORS.textPrimary,
+              }}
+            >
+              <AgentRunnerIcon runner={message.agentRunner} className="w-3 h-3" />
+            </div>
           </div>
-          <span style={{ fontSize: "14px", fontWeight: 500, color: COLORS.textPrimary }}>{agentName}</span>
+          <span data-testid="activity-card-author" style={{ fontSize: "13px", fontWeight: 500, color: COLORS.textPrimary }}>
+            {agentName}
+          </span>
           <span
             className="flex-1 min-w-0 truncate"
             style={{ fontSize: "12px", fontWeight: 450, color: COLORS.textMuted }}

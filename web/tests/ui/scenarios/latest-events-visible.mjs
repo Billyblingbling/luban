@@ -17,6 +17,10 @@ export async function runLatestEventsVisible({ page }) {
   if (!createdEventText.startsWith('Luban')) {
     throw new Error(`expected system events to be attributed to Luban, got "${createdEventText}"`);
   }
+  const createdAuthor = createdEvent.getByTestId('activity-simple-author');
+  await createdAuthor.waitFor({ state: 'visible' });
+  const createdAuthorBox = await createdAuthor.boundingBox();
+  if (!createdAuthorBox) throw new Error('missing simple event author bounding box');
 
   const containerMetrics = await scrollContainer.evaluate((el) => {
     const rect = el.getBoundingClientRect();
@@ -52,6 +56,30 @@ export async function runLatestEventsVisible({ page }) {
   const agentTurnHeaderText = ((await latestTurn.getByTestId('agent-turn-toggle').textContent()) ?? '').trim();
   if (!agentTurnHeaderText.startsWith('Codex')) {
     throw new Error(`expected agent turns to be attributed to Codex, got "${agentTurnHeaderText}"`);
+  }
+
+  const turnAuthor = latestTurn.getByTestId('activity-card-author').first();
+  await turnAuthor.waitFor({ state: 'visible' });
+  const turnAuthorBox = await turnAuthor.boundingBox();
+  if (!turnAuthorBox) throw new Error('missing card event author bounding box');
+  const authorDeltaX = Math.abs(createdAuthorBox.x - turnAuthorBox.x);
+  const authorTolerance = 1.5;
+  if (authorDeltaX > authorTolerance) {
+    throw new Error(
+      `expected simple/card author names to align within ${authorTolerance}px, got delta=${authorDeltaX.toFixed(2)}px (simple=${createdAuthorBox.x.toFixed(2)}px card=${turnAuthorBox.x.toFixed(2)}px)`,
+    );
+  }
+
+  const turnAvatarInner = latestTurn.getByTestId('activity-card-avatar-inner').first();
+  await turnAvatarInner.waitFor({ state: 'visible' });
+  const turnAvatarInnerBox = await turnAvatarInner.boundingBox();
+  if (!turnAvatarInnerBox) throw new Error('missing card event avatar bounding box');
+  const avatarSizeDelta = Math.max(Math.abs(turnAvatarInnerBox.width - 16), Math.abs(turnAvatarInnerBox.height - 16));
+  const avatarSizeTolerance = 1;
+  if (avatarSizeDelta > avatarSizeTolerance) {
+    throw new Error(
+      `expected card event avatar to be 16px (±${avatarSizeTolerance}px), got ${turnAvatarInnerBox.width.toFixed(2)}x${turnAvatarInnerBox.height.toFixed(2)}`,
+    );
   }
 
   await latestTurn.getByTestId('agent-turn-toggle').click();
