@@ -721,6 +721,63 @@ export function mockDispatchAction(args: { action: ClientAction; onEvent: (event
     return
   }
 
+  if (a.type === "terminal_command_start") {
+    const key = workdirTaskKey(a.workdir_id, a.task_id)
+    const convo = state.conversationsByWorkdirTask.get(key) ?? null
+    if (!convo) return
+
+    const command = a.command.trim()
+    if (!command) return
+
+    const commandId = newEntryId("cmd")
+    const reconnect = newEntryId("reconnect")
+
+    const startedEntry: ConversationEntry = {
+      type: "user_event",
+      entry_id: newEntryId("ue"),
+      event: { type: "terminal_command_started", id: commandId, command, reconnect },
+    }
+
+    const startedEntries = [...convo.entries, startedEntry]
+    const rev = bumpRev(state)
+    state.conversationsByWorkdirTask.set(key, { ...convo, entries: startedEntries, entries_total: startedEntries.length, rev })
+    emitConversationChanged({ state, workdirId: a.workdir_id, taskId: a.task_id, onEvent: args.onEvent })
+
+    const workdirId = a.workdir_id
+    const taskId = a.task_id
+    const onEvent = args.onEvent
+    window.setTimeout(() => {
+      const state = getRuntime()
+      const key = workdirTaskKey(workdirId, taskId)
+      const convo = state.conversationsByWorkdirTask.get(key) ?? null
+      if (!convo) return
+
+      const noOutput = /^(?:true|:|sleep)(?:\\s|$)/.test(command)
+      const outputText = noOutput ? "" : `mock: ${command}\\r\\n`
+      const outputBase64 = outputText ? btoa(outputText) : ""
+      const outputByteLen = outputText ? outputText.length : 0
+
+      const finishedEntry: ConversationEntry = {
+        type: "user_event",
+        entry_id: newEntryId("ue"),
+        event: {
+          type: "terminal_command_finished",
+          id: commandId,
+          command,
+          reconnect,
+          output_base64: outputBase64,
+          output_byte_len: outputByteLen,
+        },
+      }
+
+      const nextEntries = [...convo.entries, finishedEntry]
+      const rev = bumpRev(state)
+      state.conversationsByWorkdirTask.set(key, { ...convo, entries: nextEntries, entries_total: nextEntries.length, rev })
+      emitConversationChanged({ state, workdirId, taskId, onEvent })
+    }, 250)
+    return
+  }
+
   if (a.type === "queue_agent_message") {
     const key = workdirTaskKey(a.workdir_id, a.task_id)
     const convo = state.conversationsByWorkdirTask.get(key) ?? null

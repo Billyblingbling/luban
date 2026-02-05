@@ -1,7 +1,7 @@
 use crate::{
-    AgentRunnerKind, AgentThreadEvent, AttachmentRef, ContextItem, ConversationSnapshot,
-    ConversationThreadMeta, PersistedAppState, QueuedPrompt, SystemTaskKind, TaskStatus,
-    ThinkingEffort,
+    AgentRunnerKind, AgentThreadEvent, AttachmentRef, ContextItem, ConversationEntry,
+    ConversationSnapshot, ConversationThreadMeta, PersistedAppState, QueuedPrompt, SystemTaskKind,
+    TaskStatus, ThinkingEffort,
 };
 use std::collections::HashMap;
 use std::{path::PathBuf, sync::Arc, sync::atomic::AtomicBool};
@@ -310,6 +310,16 @@ pub trait ProjectWorkspaceService: Send + Sync {
         before: Option<u64>,
         limit: u64,
     ) -> Result<ConversationSnapshot, String>;
+
+    fn append_conversation_entries(
+        &self,
+        _project_slug: String,
+        _workspace_name: String,
+        _thread_id: u64,
+        _entries: Vec<ConversationEntry>,
+    ) -> Result<(), String> {
+        Err("unimplemented".to_owned())
+    }
 
     fn delete_conversation_thread(
         &self,

@@ -9,6 +9,7 @@ import { BrowserManager } from 'agent-browser/dist/browser.js';
 
 import { waitForHttpOk } from './lib/utils.mjs';
 import { runActivityAttachments } from './scenarios/activity-attachments.mjs';
+import { runActivityTerminalCommand } from './scenarios/activity-terminal-command.mjs';
 import { runInboxRead } from './scenarios/inbox-read.mjs';
 import { runInboxPreviewLine } from './scenarios/inbox-preview-line.mjs';
 import { runInboxSortStability } from './scenarios/inbox-sort-stability.mjs';
@@ -164,12 +165,13 @@ async function main() {
 	    await runNewTaskModal({ page, baseUrl });
 	    await runNewTaskDrafts({ page, baseUrl });
 	    await runNewTaskProjectAvatars({ page, baseUrl });
-	    await runNewTaskGitProjectWithoutWorkdirs({ page, baseUrl });
-	    await runActivityAttachments({ page, baseUrl });
-	    await runInboxRead({ page, baseUrl });
-	    await runInboxPreviewLine({ page, baseUrl });
-		    await runInboxSortStability({ page, baseUrl });
-		    await runInboxStatusChange({ page, baseUrl });
+		    await runNewTaskGitProjectWithoutWorkdirs({ page, baseUrl });
+		    await runActivityAttachments({ page, baseUrl });
+        await runActivityTerminalCommand({ page, baseUrl });
+		    await runInboxRead({ page, baseUrl });
+		    await runInboxPreviewLine({ page, baseUrl });
+			    await runInboxSortStability({ page, baseUrl });
+			    await runInboxStatusChange({ page, baseUrl });
 		    await runStarFavorites({ page, baseUrl });
     await runNewTaskDefaultProjectFollowsContext({ page, baseUrl });
     await runSettingsPanel({ page, baseUrl });

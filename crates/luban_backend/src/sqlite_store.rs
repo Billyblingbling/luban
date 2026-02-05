@@ -3127,12 +3127,13 @@ impl SqliteDatabase {
         self.ensure_conversation(project_slug, workspace_name, thread_local_id)?;
 
         let derived_title = entries.iter().find_map(|entry| match entry {
-            ConversationEntry::UserEvent { event, .. } => match event {
-                luban_domain::UserEvent::Message { text, .. } => {
-                    let title = luban_domain::derive_thread_title(text);
-                    if title.is_empty() { None } else { Some(title) }
-                }
-            },
+            ConversationEntry::UserEvent {
+                event: luban_domain::UserEvent::Message { text, .. },
+                ..
+            } => {
+                let title = luban_domain::derive_thread_title(text);
+                if title.is_empty() { None } else { Some(title) }
+            }
             _ => None,
         });
 
@@ -3214,12 +3215,13 @@ impl SqliteDatabase {
         )?;
 
         let derived_title = entries.iter().find_map(|entry| match entry {
-            ConversationEntry::UserEvent { event, .. } => match event {
-                luban_domain::UserEvent::Message { text, .. } => {
-                    let title = luban_domain::derive_thread_title(text);
-                    if title.is_empty() { None } else { Some(title) }
-                }
-            },
+            ConversationEntry::UserEvent {
+                event: luban_domain::UserEvent::Message { text, .. },
+                ..
+            } => {
+                let title = luban_domain::derive_thread_title(text);
+                if title.is_empty() { None } else { Some(title) }
+            }
             _ => None,
         });
 
@@ -4387,6 +4389,12 @@ fn conversation_entry_index_fields(
         }
         ConversationEntry::UserEvent { entry_id, event } => match event {
             luban_domain::UserEvent::Message { .. } => ("user_message", None, entry_id.as_str()),
+            luban_domain::UserEvent::TerminalCommandStarted { .. } => {
+                ("terminal_command_started", None, entry_id.as_str())
+            }
+            luban_domain::UserEvent::TerminalCommandFinished { .. } => {
+                ("terminal_command_finished", None, entry_id.as_str())
+            }
         },
         ConversationEntry::AgentEvent { entry_id, event } => match event {
             luban_domain::AgentEvent::Message { id, .. } => {

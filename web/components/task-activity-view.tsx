@@ -30,6 +30,7 @@ import { UnifiedProviderLogo } from "@/components/shared/unified-provider-logo"
 import { extractTurnDurationLabel, useActivityTiming } from "@/lib/activity-timing"
 import { attachmentHref } from "@/lib/attachment-href"
 import { WindowedList, type WindowedListItem } from "@/components/windowed-list"
+import { PtyTerminalSession } from "@/components/pty-terminal"
 
 const AMP_MARK_URL = "/logos/amp.svg"
 
@@ -536,6 +537,99 @@ function UserActivityEvent({ message, workspaceId }: UserActivityEventProps) {
   )
 }
 
+function TerminalCommandCardEvent({
+  message,
+  workspaceId,
+  taskId,
+}: {
+  message: Message
+  workspaceId?: number
+  taskId?: number
+}) {
+  const tc = message.terminalCommand
+  if (!tc || workspaceId == null || taskId == null) {
+    return (
+      <div
+        className="group/activity"
+        data-testid="activity-terminal-command-card"
+        style={{ fontSize: "12px", color: COLORS.textMuted }}
+      >
+        Terminal output unavailable
+      </div>
+    )
+  }
+
+  const isRunning = tc.status === "running"
+  const hasOutput = (tc.outputByteLen ?? 0) > 0
+
+  return (
+    <div
+      className="group/activity"
+      data-testid="activity-terminal-command-card"
+      style={{
+        border: `1px solid ${COLORS.border}`,
+        borderRadius: "8px",
+        backgroundColor: COLORS.white,
+        boxShadow: "rgba(0,0,0,0.022) 0px 3px 6px -2px, rgba(0,0,0,0.044) 0px 1px 1px 0px",
+        padding: "12px 16px",
+        marginLeft: "-6px",
+        marginRight: "-6px",
+      }}
+    >
+      <div className="flex items-center gap-2 mb-2">
+        <div className="flex items-center justify-center flex-shrink-0" style={{ width: "20px", height: "20px" }}>
+          <div
+            className="flex items-center justify-center"
+            style={{
+              width: "16px",
+              height: "16px",
+              borderRadius: "50%",
+              backgroundColor: COLORS.accent,
+              color: COLORS.white,
+            }}
+          >
+            <Terminal className="w-3 h-3" />
+          </div>
+        </div>
+        <span style={{ fontSize: "13px", fontWeight: 500, color: COLORS.textPrimary }}>You</span>
+        <span style={{ fontSize: "14px", fontWeight: 400, color: COLORS.textMuted }}>
+          {isRunning ? "Running" : formatRelativeTime(message.timestamp)}
+        </span>
+        <CopyButton
+          text={tc.command}
+          className="ml-auto opacity-0 group-hover/activity:opacity-100 transition-opacity"
+        />
+      </div>
+
+      <div className="mb-2" style={{ fontSize: "13px", fontWeight: 500, color: COLORS.textPrimary }}>
+        <code data-testid="activity-terminal-command" className="font-mono text-[12px]">
+          {tc.command}
+        </code>
+      </div>
+
+      <div
+        data-testid="activity-terminal-output"
+        style={{
+          height: "260px",
+          border: `1px solid ${COLORS.border}`,
+          borderRadius: "8px",
+          overflow: "hidden",
+          backgroundColor: "#fcfcfc",
+        }}
+      >
+        <PtyTerminalSession
+          workspaceId={workspaceId}
+          threadId={taskId}
+          reconnectToken={tc.reconnect}
+          readOnly={!isRunning}
+          initialBase64={!isRunning && hasOutput ? tc.outputBase64 ?? "" : ""}
+          testId="activity-terminal-pty"
+        />
+      </div>
+    </div>
+  )
+}
+
 interface AgentActivityEventProps {
   message: Message
 }
@@ -903,7 +997,8 @@ function ActivityStreamSection({
   isLoading,
   onCancelAgentTurn,
   workspaceId,
-}: ActivityStreamSectionProps & { onCancelAgentTurn?: () => void; workspaceId?: number }) {
+  taskId,
+}: ActivityStreamSectionProps & { onCancelAgentTurn?: () => void; workspaceId?: number; taskId?: number }) {
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set())
   const [agentTurnUiStateById, setAgentTurnUiStateById] = useState<
     Map<string, { isExpanded: boolean; expandedEvents: Set<string> }>
@@ -931,6 +1026,16 @@ function ActivityStreamSection({
     return groups.map((group) => {
       if (group.type === "message") {
         const msg = group.message
+        if (msg.type === "terminal_command") {
+          return {
+            key: msg.id,
+            node: (
+              <div className="relative">
+                <TerminalCommandCardEvent message={msg} workspaceId={workspaceId} taskId={taskId} />
+              </div>
+            ),
+          }
+        }
         if (msg.type === "user") {
           return {
             key: msg.id,
@@ -1101,6 +1206,7 @@ export interface TaskActivityViewProps {
   title: string
   description?: string
   workspaceId?: number
+  taskId?: number
   messages: Message[]
   isLoading?: boolean
   onTitleChange?: (title: string) => void
@@ -1115,6 +1221,7 @@ export function TaskActivityView({
   title,
   description,
   workspaceId,
+  taskId,
   messages,
   isLoading,
   onTitleChange,
@@ -1157,6 +1264,7 @@ export function TaskActivityView({
             isLoading={isLoading}
             onCancelAgentTurn={onCancelAgentTurn}
             workspaceId={workspaceId}
+            taskId={taskId}
             listKey={listKey}
             scrollElement={scrollContainerEl}
           />

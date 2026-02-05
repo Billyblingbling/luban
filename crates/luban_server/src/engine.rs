@@ -345,16 +345,17 @@ fn task_status_auto_update_input_from_entries(
 
     for entry in entries.iter().rev() {
         match entry {
-            luban_domain::ConversationEntry::UserEvent { event, .. } => match event {
-                luban_domain::UserEvent::Message { text, .. } => {
-                    if recent_user_messages.len() < 5 {
-                        let trimmed = text.trim();
-                        if !trimmed.is_empty() {
-                            recent_user_messages.push(trimmed.to_owned());
-                        }
+            luban_domain::ConversationEntry::UserEvent {
+                event: luban_domain::UserEvent::Message { text, .. },
+                ..
+            } => {
+                if recent_user_messages.len() < 5 {
+                    let trimmed = text.trim();
+                    if !trimmed.is_empty() {
+                        recent_user_messages.push(trimmed.to_owned());
                     }
                 }
-            },
+            }
             luban_domain::ConversationEntry::AgentEvent { event, .. } => match event {
                 luban_domain::AgentEvent::Message { text, .. } => {
                     if recent_agent_messages.len() < 5 {
@@ -2489,9 +2490,14 @@ impl Engine {
         while let Some(action) = actions.pop_front() {
             self.rev = self.rev.saturating_add(1);
 
+            let should_persist_latest_conversation_entry = matches!(
+                &action,
+                Action::TerminalCommandStarted { .. } | Action::TerminalCommandFinished { .. }
+            );
             let should_sync_branch_watchers = should_sync_branch_watchers(&action);
             let mut conversation_keys = Vec::<(WorkspaceId, WorkspaceThreadId)>::new();
-            if let Some(key) = conversation_key_for_action(&action) {
+            let action_conversation_key = conversation_key_for_action(&action);
+            if let Some(key) = action_conversation_key {
                 conversation_keys.push(key);
             }
             let queue_state_key = queue_state_key_for_action(&action);
@@ -2525,6 +2531,11 @@ impl Engine {
             if let Some((wid, tid)) = queue_state_key {
                 self.persist_queue_state(wid, tid).await;
             }
+            if should_persist_latest_conversation_entry
+                && let Some((wid, tid)) = action_conversation_key
+            {
+                self.persist_latest_conversation_entry(wid, tid).await;
+            }
 
             effects.extend(new_effects);
 
@@ -2535,6 +2546,50 @@ impl Engine {
                         tracing::error!(error = %err, "effect failed");
                     }
                 }
+            }
+        }
+    }
+
+    async fn persist_latest_conversation_entry(
+        &self,
+        workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
+    ) {
+        let Some(scope) = workspace_scope(&self.state, workspace_id) else {
+            return;
+        };
+        let Some(conversation) = self
+            .state
+            .workspace_thread_conversation(workspace_id, thread_id)
+        else {
+            return;
+        };
+        let Some(entry) = conversation.entries.last() else {
+            return;
+        };
+
+        let services = self.services.clone();
+        let project_slug = scope.project_slug;
+        let workspace_name = scope.workspace_name;
+        let thread_local_id = thread_id.as_u64();
+        let entry = entry.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            services.append_conversation_entries(
+                project_slug,
+                workspace_name,
+                thread_local_id,
+                vec![entry],
+            )
+        })
+        .await;
+
+        match result {
+            Ok(Ok(())) => {}
+            Ok(Err(message)) => {
+                tracing::error!(message = %message, "failed to persist conversation entry");
+            }
+            Err(err) => {
+                tracing::error!(error = %err, "failed to join conversation persistence task");
             }
         }
     }
@@ -4681,6 +4736,16 @@ fn should_sync_branch_watchers(action: &Action) -> bool {
 
 fn conversation_key_for_action(action: &Action) -> Option<(WorkspaceId, WorkspaceThreadId)> {
     match action {
+        Action::TerminalCommandStarted {
+            workspace_id,
+            thread_id,
+            ..
+        } => Some((*workspace_id, *thread_id)),
+        Action::TerminalCommandFinished {
+            workspace_id,
+            thread_id,
+            ..
+        } => Some((*workspace_id, *thread_id)),
         Action::SendAgentMessage {
             workspace_id,
             thread_id,
@@ -5175,6 +5240,32 @@ fn map_conversation_entry(entry: &ConversationEntry) -> luban_api::ConversationE
                         attachments: attachments.iter().map(map_attachment_ref).collect(),
                     })
                 }
+                luban_domain::UserEvent::TerminalCommandStarted {
+                    id,
+                    command,
+                    reconnect,
+                } => luban_api::UserEvent::TerminalCommandStarted(
+                    luban_api::TerminalCommandStarted {
+                        id: id.clone(),
+                        command: command.clone(),
+                        reconnect: reconnect.clone(),
+                    },
+                ),
+                luban_domain::UserEvent::TerminalCommandFinished {
+                    id,
+                    command,
+                    reconnect,
+                    output_base64,
+                    output_byte_len,
+                } => luban_api::UserEvent::TerminalCommandFinished(
+                    luban_api::TerminalCommandFinished {
+                        id: id.clone(),
+                        command: command.clone(),
+                        reconnect: reconnect.clone(),
+                        output_base64: output_base64.clone(),
+                        output_byte_len: *output_byte_len,
+                    },
+                ),
             };
             luban_api::ConversationEntry::UserEvent(luban_api::UserEventEntry {
                 entry_id: entry_id.clone(),
@@ -5400,6 +5491,7 @@ fn map_client_action(action: luban_api::ClientAction) -> Option<Action> {
                 luban_api::ThinkingEffort::XHigh => ThinkingEffort::XHigh,
             },
         }),
+        luban_api::ClientAction::TerminalCommandStart { .. } => None,
         luban_api::ClientAction::SendAgentMessage {
             workspace_id,
             thread_id,

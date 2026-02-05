@@ -22,6 +22,20 @@ pub enum UserEvent {
         #[serde(default)]
         attachments: Vec<AttachmentRef>,
     },
+    TerminalCommandStarted {
+        id: String,
+        command: String,
+        reconnect: String,
+    },
+    TerminalCommandFinished {
+        id: String,
+        command: String,
+        reconnect: String,
+        #[serde(default)]
+        output_base64: String,
+        #[serde(default)]
+        output_byte_len: u64,
+    },
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]

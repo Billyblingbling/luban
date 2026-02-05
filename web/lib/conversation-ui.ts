@@ -37,7 +37,7 @@ export interface SystemEvent {
 
 export interface Message {
   id: string
-  type: "user" | "assistant" | "event" | "agent_turn"
+  type: "user" | "assistant" | "event" | "agent_turn" | "terminal_command"
   eventSource?: "system" | "user" | "agent"
   agentRunner?: AgentRunnerKind
   content: string
@@ -55,6 +55,14 @@ export interface Message {
   }
   codeReferences?: { file: string; line: number }[]
   eventType?: "task_created" | "task_started" | "task_completed" | "task_cancelled" | "status_changed"
+  terminalCommand?: {
+    id: string
+    command: string
+    reconnect: string
+    status: ActivityStatus
+    outputBase64?: string
+    outputByteLen?: number
+  }
 }
 
 function safeStringify(value: unknown): string {
@@ -429,6 +437,8 @@ function buildMessagesGroupedTurns(conversation: ConversationSnapshot): Message[
     msg.turnStatus = status
   }
 
+  const terminalCommandIndexById = new Map<string, number>()
+
   for (let i = 0; i < conversation.entries.length; i += 1) {
     const entry = conversation.entries[i]!
     if (entry.type === "system_event") {
@@ -463,17 +473,120 @@ function buildMessagesGroupedTurns(conversation: ConversationSnapshot): Message[
     }
 
     if (entry.type === "user_event") {
-      if (entry.event.type === "message") {
+      const ev = entry.event
+      if (ev.type === "message") {
         lastUserEntryId = entry.entry_id || null
         out.push({
           id: `u_${entry.entry_id}`,
           type: "user",
           eventSource: "user",
-          content: entry.event.text,
-          attachments: entry.event.attachments,
+          content: ev.text,
+          attachments: ev.attachments,
           timestamp: new Date().toISOString(),
         })
         lastUserOutIndex = out.length - 1
+        continue
+      }
+
+      if (ev.type === "terminal_command_started") {
+        out.push({
+          id: `tc_${ev.id}`,
+          type: "terminal_command",
+          eventSource: "user",
+          content: ev.command,
+          status: "running",
+          timestamp: new Date().toISOString(),
+          terminalCommand: {
+            id: ev.id,
+            command: ev.command,
+            reconnect: ev.reconnect,
+            status: "running",
+          },
+        })
+        terminalCommandIndexById.set(ev.id, out.length - 1)
+        continue
+      }
+
+      if (ev.type === "terminal_command_finished") {
+        const status: ActivityStatus = "done"
+        const existingIndex = terminalCommandIndexById.get(ev.id)
+        const hasOutput = (ev.output_byte_len ?? 0) > 0
+        const timestamp = new Date().toISOString()
+
+        const asSimpleEvent: Message = {
+          id: `tc_ev_${ev.id}`,
+          type: "event",
+          eventSource: "user",
+          status,
+          content: `ran ${ev.command}`,
+          timestamp,
+        }
+
+        if (typeof existingIndex === "number") {
+          if (!hasOutput) {
+            out[existingIndex] = asSimpleEvent
+            continue
+          }
+          const prev = out[existingIndex]
+          if (prev) {
+            prev.type = "terminal_command"
+            prev.eventSource = "user"
+            prev.content = ev.command
+            prev.status = status
+            prev.timestamp = timestamp
+            prev.terminalCommand = {
+              id: ev.id,
+              command: ev.command,
+              reconnect: ev.reconnect,
+              status,
+              outputBase64: ev.output_base64,
+              outputByteLen: ev.output_byte_len,
+            }
+          } else {
+            out.push({
+              id: `tc_${ev.id}`,
+              type: "terminal_command",
+              eventSource: "user",
+              content: ev.command,
+              status,
+              timestamp,
+              terminalCommand: {
+                id: ev.id,
+                command: ev.command,
+                reconnect: ev.reconnect,
+                status,
+                outputBase64: ev.output_base64,
+                outputByteLen: ev.output_byte_len,
+              },
+            })
+            terminalCommandIndexById.set(ev.id, out.length - 1)
+          }
+          continue
+        }
+
+        if (!hasOutput) {
+          out.push(asSimpleEvent)
+          continue
+        }
+
+        out.push({
+          id: `tc_${ev.id}`,
+          type: "terminal_command",
+          eventSource: "user",
+          content: ev.command,
+          status,
+          timestamp,
+          terminalCommand: {
+            id: ev.id,
+            command: ev.command,
+            reconnect: ev.reconnect,
+            status,
+            outputBase64: ev.output_base64,
+            outputByteLen: ev.output_byte_len,
+          },
+        })
+        terminalCommandIndexById.set(ev.id, out.length - 1)
+        continue
       }
       continue
     }
@@ -627,6 +740,7 @@ function buildMessagesFlatEvents(conversation: ConversationSnapshot): Message[] 
 
   const agentMessageIndexById = new Map<string, number>()
   const agentEventIndexById = new Map<string, number>()
+  const terminalCommandIndexById = new Map<string, number>()
 
   for (let i = 0; i < conversation.entries.length; i += 1) {
     const entry = conversation.entries[i]!
@@ -662,15 +776,118 @@ function buildMessagesFlatEvents(conversation: ConversationSnapshot): Message[] 
     }
 
     if (entry.type === "user_event") {
-      if (entry.event.type === "message") {
+      const ev = entry.event
+      if (ev.type === "message") {
         out.push({
           id: `u_${entry.entry_id}`,
           type: "user",
           eventSource: "user",
-          content: entry.event.text,
-          attachments: entry.event.attachments,
+          content: ev.text,
+          attachments: ev.attachments,
           timestamp: new Date().toISOString(),
         })
+        continue
+      }
+
+      if (ev.type === "terminal_command_started") {
+        out.push({
+          id: `tc_${ev.id}`,
+          type: "terminal_command",
+          eventSource: "user",
+          content: ev.command,
+          status: "running",
+          timestamp: new Date().toISOString(),
+          terminalCommand: {
+            id: ev.id,
+            command: ev.command,
+            reconnect: ev.reconnect,
+            status: "running",
+          },
+        })
+        terminalCommandIndexById.set(ev.id, out.length - 1)
+        continue
+      }
+
+      if (ev.type === "terminal_command_finished") {
+        const status: ActivityStatus = "done"
+        const existingIndex = terminalCommandIndexById.get(ev.id)
+        const hasOutput = (ev.output_byte_len ?? 0) > 0
+        const timestamp = new Date().toISOString()
+
+        const asSimpleEvent: Message = {
+          id: `tc_ev_${ev.id}`,
+          type: "event",
+          eventSource: "user",
+          status,
+          content: `ran ${ev.command}`,
+          timestamp,
+        }
+
+        if (typeof existingIndex === "number") {
+          if (!hasOutput) {
+            out[existingIndex] = asSimpleEvent
+            continue
+          }
+          const prev = out[existingIndex]
+          if (prev) {
+            prev.type = "terminal_command"
+            prev.eventSource = "user"
+            prev.content = ev.command
+            prev.status = status
+            prev.timestamp = timestamp
+            prev.terminalCommand = {
+              id: ev.id,
+              command: ev.command,
+              reconnect: ev.reconnect,
+              status,
+              outputBase64: ev.output_base64,
+              outputByteLen: ev.output_byte_len,
+            }
+          } else {
+            out.push({
+              id: `tc_${ev.id}`,
+              type: "terminal_command",
+              eventSource: "user",
+              content: ev.command,
+              status,
+              timestamp,
+              terminalCommand: {
+                id: ev.id,
+                command: ev.command,
+                reconnect: ev.reconnect,
+                status,
+                outputBase64: ev.output_base64,
+                outputByteLen: ev.output_byte_len,
+              },
+            })
+            terminalCommandIndexById.set(ev.id, out.length - 1)
+          }
+          continue
+        }
+
+        if (!hasOutput) {
+          out.push(asSimpleEvent)
+          continue
+        }
+
+        out.push({
+          id: `tc_${ev.id}`,
+          type: "terminal_command",
+          eventSource: "user",
+          content: ev.command,
+          status,
+          timestamp,
+          terminalCommand: {
+            id: ev.id,
+            command: ev.command,
+            reconnect: ev.reconnect,
+            status,
+            outputBase64: ev.output_base64,
+            outputByteLen: ev.output_byte_len,
+          },
+        })
+        terminalCommandIndexById.set(ev.id, out.length - 1)
+        continue
       }
       continue
     }

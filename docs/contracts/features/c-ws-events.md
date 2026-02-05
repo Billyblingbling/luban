@@ -124,6 +124,7 @@ update this section.
 - `RemoveQueuedPrompt`
 - `ReorderQueuedPrompt`
 - `UpdateQueuedPrompt`
+- `TerminalCommandStart`
 - `WorkdirRenameBranch`
 - `WorkdirAiRenameBranch`
 - `CancelAgentTurn`
@@ -176,6 +177,15 @@ update this section.
 - Providers should accept legacy aliases for backward compatibility:
   - `in_progress` -> `iterating`
   - `in_review` -> `validating`
+
+### `ClientAction::TerminalCommandStart`
+
+- Starts a provider-side PTY session that runs a single shell command.
+- Providers append `ConversationEntry.type=user_event` entries to the conversation:
+  - `event.type=terminal_command_started` with `{ id, command, reconnect }`
+  - `event.type=terminal_command_finished` with `{ id, command, reconnect, output_base64, output_byte_len }`
+- `reconnect` can be used to attach a terminal UI to `WS /api/pty/{workdir_id}/{task_id}?reconnect=<token>` while the command is running.
+- `output_base64` is base64-encoded bytes captured from the PTY output history and may be empty when `output_byte_len=0`.
 
 ## Event inventory (tracked)
 

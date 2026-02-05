@@ -617,12 +617,32 @@ pub struct UserEventEntry {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum UserEvent {
     Message(UserMessage),
+    TerminalCommandStarted(TerminalCommandStarted),
+    TerminalCommandFinished(TerminalCommandFinished),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct UserMessage {
     pub text: String,
     pub attachments: Vec<AttachmentRef>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TerminalCommandStarted {
+    pub id: String,
+    pub command: String,
+    pub reconnect: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TerminalCommandFinished {
+    pub id: String,
+    pub command: String,
+    pub reconnect: String,
+    #[serde(default)]
+    pub output_base64: String,
+    #[serde(default)]
+    pub output_byte_len: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -920,6 +940,13 @@ pub enum ClientAction {
         #[serde(rename = "task_id", alias = "thread_id")]
         thread_id: WorkspaceThreadId,
         thinking_effort: ThinkingEffort,
+    },
+    TerminalCommandStart {
+        #[serde(rename = "workdir_id", alias = "workspace_id")]
+        workspace_id: WorkspaceId,
+        #[serde(rename = "task_id", alias = "thread_id")]
+        thread_id: WorkspaceThreadId,
+        command: String,
     },
     SendAgentMessage {
         #[serde(rename = "workdir_id", alias = "workspace_id")]

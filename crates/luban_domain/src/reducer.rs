@@ -593,11 +593,10 @@ impl AppState {
                             .entries
                             .iter()
                             .filter_map(|entry| match entry {
-                                ConversationEntry::UserEvent { event, .. } => match event {
-                                    crate::UserEvent::Message { text, .. } => {
-                                        Some(text.trim().to_owned())
-                                    }
-                                },
+                                ConversationEntry::UserEvent {
+                                    event: crate::UserEvent::Message { text, .. },
+                                    ..
+                                } => Some(text.trim().to_owned()),
                                 _ => None,
                             })
                             .filter(|text| !text.is_empty())
@@ -807,6 +806,52 @@ impl AppState {
                 message,
             } => {
                 self.last_error = Some(message);
+                Vec::new()
+            }
+            Action::TerminalCommandStarted {
+                workspace_id,
+                thread_id,
+                command_id,
+                command,
+                reconnect,
+            } => {
+                let tabs = self.ensure_workspace_tabs_mut(workspace_id);
+                tabs.activate(thread_id);
+
+                let conversation = self.ensure_conversation_mut(workspace_id, thread_id);
+                conversation.push_entry(ConversationEntry::UserEvent {
+                    entry_id: String::new(),
+                    event: crate::UserEvent::TerminalCommandStarted {
+                        id: command_id,
+                        command,
+                        reconnect,
+                    },
+                });
+                Vec::new()
+            }
+            Action::TerminalCommandFinished {
+                workspace_id,
+                thread_id,
+                command_id,
+                command,
+                reconnect,
+                output_base64,
+                output_byte_len,
+            } => {
+                let tabs = self.ensure_workspace_tabs_mut(workspace_id);
+                tabs.activate(thread_id);
+
+                let conversation = self.ensure_conversation_mut(workspace_id, thread_id);
+                conversation.push_entry(ConversationEntry::UserEvent {
+                    entry_id: String::new(),
+                    event: crate::UserEvent::TerminalCommandFinished {
+                        id: command_id,
+                        command,
+                        reconnect,
+                        output_base64,
+                        output_byte_len,
+                    },
+                });
                 Vec::new()
             }
             Action::SendAgentMessage {
@@ -5248,9 +5293,10 @@ mod tests {
             .entries
             .iter()
             .filter_map(|e| match e {
-                ConversationEntry::UserEvent { event, .. } => match event {
-                    crate::UserEvent::Message { text, .. } => Some(text.as_str()),
-                },
+                ConversationEntry::UserEvent {
+                    event: crate::UserEvent::Message { text, .. },
+                    ..
+                } => Some(text.as_str()),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -5579,9 +5625,10 @@ mod tests {
             .entries
             .iter()
             .filter_map(|e| match e {
-                ConversationEntry::UserEvent { event, .. } => match event {
-                    crate::UserEvent::Message { text, .. } => Some(text.as_str()),
-                },
+                ConversationEntry::UserEvent {
+                    event: crate::UserEvent::Message { text, .. },
+                    ..
+                } => Some(text.as_str()),
                 _ => None,
             })
             .collect::<Vec<_>>();

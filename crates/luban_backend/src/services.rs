@@ -824,6 +824,18 @@ impl ProjectWorkspaceService for GitWorkspaceService {
         Ok(snapshot)
     }
 
+    fn append_conversation_entries(
+        &self,
+        project_slug: String,
+        workspace_name: String,
+        thread_id: u64,
+        entries: Vec<ConversationEntry>,
+    ) -> Result<(), String> {
+        self.sqlite
+            .append_conversation_entries(project_slug, workspace_name, thread_id, entries)
+            .map_err(anyhow_error_to_string)
+    }
+
     fn delete_conversation_thread(
         &self,
         project_slug: String,

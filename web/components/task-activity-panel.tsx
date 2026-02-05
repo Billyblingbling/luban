@@ -3,7 +3,7 @@
 import type React from "react"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { ArrowLeft, Clock, X } from "lucide-react"
+import { ArrowLeft, Clock, MessageSquare, Terminal, X } from "lucide-react"
 import { useLuban } from "@/lib/luban-context"
 import { cn } from "@/lib/utils"
 import { buildMessages, type Message } from "@/lib/conversation-ui"
@@ -53,6 +53,7 @@ export function TaskActivityPanel({
     conversation,
     sendAgentMessage,
     queueAgentMessage,
+    runTerminalCommand,
     cancelAgentTurn,
     removeQueuedPrompt,
     setChatModel,
@@ -62,6 +63,7 @@ export function TaskActivityPanel({
   } = useLuban()
 
   const [draftText, setDraftText] = useState("")
+  const [composerMode, setComposerMode] = useState<"chat" | "terminal">("chat")
   const [followTail, setFollowTail] = useState(true)
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([])
   const attachmentScopeRef = useRef<string>("")
@@ -228,15 +230,21 @@ export function TaskActivityPanel({
   const handleSend = () => {
     if (activeWorkspaceId == null || activeThreadId == null) return
     const text = draftText.trim()
+    if (text.length === 0) return
+
+    if (composerMode === "terminal") {
+      runTerminalCommand(text)
+      setDraftText("")
+      setAttachments([])
+      return
+    }
+
     const readyAttachments = attachments.filter((a) => a.status === "ready" && a.attachment)
     const refs = readyAttachments.map((a) => a.attachment as AttachmentRef)
     if (text.length === 0 && refs.length === 0) return
 
-    if (isAgentRunning) {
-      queueAgentMessage(text, refs.length > 0 ? refs : undefined)
-    } else {
-      sendAgentMessage(text, refs.length > 0 ? refs : undefined)
-    }
+    if (isAgentRunning) queueAgentMessage(text, refs.length > 0 ? refs : undefined)
+    else sendAgentMessage(text, refs.length > 0 ? refs : undefined)
     setDraftText("")
     setAttachments([])
   }
@@ -283,11 +291,12 @@ export function TaskActivityPanel({
 
   const canSend = useMemo(() => {
     if (activeWorkspaceId == null || activeThreadId == null) return false
+    if (composerMode === "terminal") return draftText.trim().length > 0
     const hasUploading = attachments.some((a) => a.status === "uploading")
     if (hasUploading) return false
     const hasReady = attachments.some((a) => a.status === "ready" && a.attachment != null)
     return draftText.trim().length > 0 || hasReady
-  }, [activeWorkspaceId, activeThreadId, attachments, draftText])
+  }, [activeWorkspaceId, activeThreadId, attachments, composerMode, draftText])
 
   const handleCancelQueuedPrompt = useCallback(
     (promptId: number) => {
@@ -376,9 +385,10 @@ export function TaskActivityPanel({
         onChange={setDraftText}
         attachments={attachments}
         onRemoveAttachment={removeAttachment}
-        onFileSelect={handleFileSelect}
-        onPaste={handlePaste}
+        onFileSelect={composerMode === "terminal" ? () => {} : handleFileSelect}
+        onPaste={composerMode === "terminal" ? () => {} : handlePaste}
         onAddAttachmentRef={(attachment) => {
+          if (composerMode === "terminal") return
           const isImage = attachment.kind === "image"
           const previewUrl =
             isImage && activeWorkspaceId != null
@@ -401,6 +411,9 @@ export function TaskActivityPanel({
         commands={codexCustomPrompts}
         messageHistory={messageHistory}
         onCommand={handleCommand}
+        placeholder={composerMode === "terminal" ? "Run a command..." : undefined}
+        attachmentsEnabled={composerMode === "chat"}
+        agentSelectorEnabled={composerMode === "chat"}
         disabled={activeWorkspaceId == null || activeThreadId == null}
         agentModelId={conversation?.agent_model_id}
         agentThinkingEffort={conversation?.thinking_effort}
@@ -427,6 +440,23 @@ export function TaskActivityPanel({
         onChangeThinkingEffort={(effort) => {
           if (activeWorkspaceId == null || activeThreadId == null) return
           setThinkingEffort(activeWorkspaceId, activeThreadId, effort)
+        }}
+        secondaryAction={{
+          onClick: () => {
+            setComposerMode((prev) => {
+              const next = prev === "chat" ? "terminal" : "chat"
+              if (next === "terminal") setAttachments([])
+              return next
+            })
+          },
+          ariaLabel: composerMode === "terminal" ? "Switch to chat mode" : "Switch to terminal mode",
+          icon:
+            composerMode === "terminal" ? (
+              <MessageSquare className="w-3.5 h-3.5" />
+            ) : (
+              <Terminal className="w-3.5 h-3.5" />
+            ),
+          testId: "chat-mode-toggle",
         }}
         onSend={handleSend}
         canSend={canSend}
@@ -471,17 +501,18 @@ export function TaskActivityPanel({
           />
         </div>
       ) : (
-	        <TaskActivityView
-	          listKey={`${activeWorkspaceId ?? "none"}:${activeThreadId ?? "none"}`}
-	          title={taskTitle}
-	          description={taskDescription}
-	          workspaceId={activeWorkspaceId ?? undefined}
-	          messages={messages}
-          isLoading={isAgentRunning}
-          onCancelAgentTurn={isAgentRunning ? () => cancelAgentTurn() : undefined}
-          inputComponent={inputComponent}
-          className="flex-1 min-w-0"
-        />
+		        <TaskActivityView
+		          listKey={`${activeWorkspaceId ?? "none"}:${activeThreadId ?? "none"}`}
+		          title={taskTitle}
+		          description={taskDescription}
+		          workspaceId={activeWorkspaceId ?? undefined}
+              taskId={activeThreadId ?? undefined}
+		          messages={messages}
+	          isLoading={isAgentRunning}
+	          onCancelAgentTurn={isAgentRunning ? () => cancelAgentTurn() : undefined}
+	          inputComponent={inputComponent}
+	          className="flex-1 min-w-0"
+	        />
       )}
     </div>
   )

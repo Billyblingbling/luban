@@ -32,7 +32,7 @@ Paginated read for a single conversation thread.
 `snapshot.entries` is an ordered timeline. Each element is a `ConversationEntry` tagged by `type` and includes a stable `entry_id` (unique per entry):
 
 - `system_event`: provider-appended lifecycle transitions (task created, status changes, etc.)
-- `user_event`: user-originated events (today: `event.type=message`)
+- `user_event`: user-originated events (for example: messages, terminal commands)
 - `agent_event`: agent-originated events (messages, tool steps, turn lifecycle events)
 
 Streaming/tool updates are represented as additional appended `agent_event` entries; clients may fold by `AgentEvent.id` if desired.
@@ -55,9 +55,26 @@ User events are structured:
 
 - `type`: `user_event`
 - `entry_id`: stable string identifier (unique within the conversation)
-- `event.type`: `message`
+- `event.type`: `message` | `terminal_command_started` | `terminal_command_finished`
+
+For `event.type=message`:
+
 - `event.text`: string
 - `event.attachments`: array of `AttachmentRef`
+
+For `event.type=terminal_command_started`:
+
+- `event.id`: stable identifier for folding start/finish
+- `event.command`: string
+- `event.reconnect`: string (see `C-WS-PTY`)
+
+For `event.type=terminal_command_finished`:
+
+- `event.id`: stable identifier for folding start/finish
+- `event.command`: string
+- `event.reconnect`: string
+- `event.output_byte_len`: integer
+- `event.output_base64`: base64-encoded bytes (may be empty when `output_byte_len=0`)
 
 ### Agent events
 

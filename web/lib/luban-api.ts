@@ -383,7 +383,17 @@ export type ConversationEntry =
   | { type: "user_event"; entry_id: string; event: UserEvent }
   | { type: "agent_event"; entry_id: string; event: AgentEvent }
 
-export type UserEvent = { type: "message"; text: string; attachments: AttachmentRef[] }
+export type UserEvent =
+  | { type: "message"; text: string; attachments: AttachmentRef[] }
+  | { type: "terminal_command_started"; id: string; command: string; reconnect: string }
+  | {
+      type: "terminal_command_finished"
+      id: string
+      command: string
+      reconnect: string
+      output_base64: string
+      output_byte_len: number
+    }
 
 export type AgentEvent =
   | { type: "message"; id: string; text: string }
@@ -437,6 +447,7 @@ export type ClientAction =
       task_id: WorkspaceThreadId
       thinking_effort: ThinkingEffort
     }
+  | { type: "terminal_command_start"; workdir_id: WorkspaceId; task_id: WorkspaceThreadId; command: string }
   | {
       type: "send_agent_message"
       workdir_id: WorkspaceId

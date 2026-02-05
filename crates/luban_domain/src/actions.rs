@@ -119,6 +119,22 @@ pub enum Action {
         thread_id: WorkspaceThreadId,
         message: String,
     },
+    TerminalCommandStarted {
+        workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
+        command_id: String,
+        command: String,
+        reconnect: String,
+    },
+    TerminalCommandFinished {
+        workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
+        command_id: String,
+        command: String,
+        reconnect: String,
+        output_base64: String,
+        output_byte_len: u64,
+    },
     SendAgentMessage {
         workspace_id: WorkspaceId,
         thread_id: WorkspaceThreadId,
