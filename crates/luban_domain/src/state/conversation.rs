@@ -19,6 +19,7 @@ fn now_unix_ms() -> u64 {
 #[serde(tag = "event_type", rename_all = "snake_case")]
 pub enum ConversationSystemEvent {
     TaskCreated,
+    TaskArchived,
     TaskStatusChanged {
         from: TaskStatus,
         to: TaskStatus,
