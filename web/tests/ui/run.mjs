@@ -172,10 +172,10 @@ async function main() {
 		    await runActivityAttachments({ page, baseUrl });
         await runActivityTerminalCommand({ page, baseUrl });
 		    await runInboxRead({ page, baseUrl });
-		    await runInboxPreviewLine({ page, baseUrl });
-			    await runInboxSortStability({ page, baseUrl });
-			    await runInboxStatusChange({ page, baseUrl });
-		    await runStarFavorites({ page, baseUrl });
+			    await runInboxPreviewLine({ page, baseUrl });
+				    await runInboxSortStability({ page, baseUrl });
+				    await runInboxStatusChange({ page, baseUrl });
+			    await runStarFavorites({ page, baseUrl });
     await runNewTaskDefaultProjectFollowsContext({ page, baseUrl });
     await runSettingsPanel({ page, baseUrl });
     await runTaskListNavigation({ page, baseUrl });
