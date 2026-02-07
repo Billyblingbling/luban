@@ -4335,12 +4335,14 @@ fn migrate_conversation_entries_v17(conn: &mut Connection) -> anyhow::Result<()>
                     ConversationEntry::AgentEvent {
                         entry_id: String::new(),
                         created_at_unix_ms: 0,
+                        runner: None,
                         event: luban_domain::AgentEvent::Message { id, text },
                     }
                 }
                 other => ConversationEntry::AgentEvent {
                     entry_id: String::new(),
                     created_at_unix_ms: 0,
+                    runner: None,
                     event: luban_domain::AgentEvent::Item {
                         item: Box::new(other),
                     },
@@ -4349,23 +4351,27 @@ fn migrate_conversation_entries_v17(conn: &mut Connection) -> anyhow::Result<()>
             LegacyConversationEntry::TurnUsage { usage } => ConversationEntry::AgentEvent {
                 entry_id: String::new(),
                 created_at_unix_ms: 0,
+                runner: None,
                 event: luban_domain::AgentEvent::TurnUsage { usage },
             },
             LegacyConversationEntry::TurnDuration { duration_ms } => {
                 ConversationEntry::AgentEvent {
                     entry_id: String::new(),
                     created_at_unix_ms: 0,
+                    runner: None,
                     event: luban_domain::AgentEvent::TurnDuration { duration_ms },
                 }
             }
             LegacyConversationEntry::TurnCanceled => ConversationEntry::AgentEvent {
                 entry_id: String::new(),
                 created_at_unix_ms: 0,
+                runner: None,
                 event: luban_domain::AgentEvent::TurnCanceled,
             },
             LegacyConversationEntry::TurnError { message } => ConversationEntry::AgentEvent {
                 entry_id: String::new(),
                 created_at_unix_ms: 0,
+                runner: None,
                 event: luban_domain::AgentEvent::TurnError { message },
             },
         }
@@ -4624,6 +4630,7 @@ mod tests {
             &[ConversationEntry::AgentEvent {
                 entry_id: String::new(),
                 created_at_unix_ms: 0,
+                runner: None,
                 event: luban_domain::AgentEvent::Message {
                     id: "m1".to_owned(),
                     text: "hi".to_owned(),
@@ -5091,11 +5098,13 @@ mod tests {
             CodexThreadItem::AgentMessage { id, text } => ConversationEntry::AgentEvent {
                 entry_id: "e_1".to_owned(),
                 created_at_unix_ms: 0,
+                runner: None,
                 event: luban_domain::AgentEvent::Message { id, text },
             },
             other => ConversationEntry::AgentEvent {
                 entry_id: "e_1".to_owned(),
                 created_at_unix_ms: 0,
+                runner: None,
                 event: luban_domain::AgentEvent::Item {
                     item: Box::new(other),
                 },
@@ -5251,6 +5260,7 @@ mod tests {
             let entry = ConversationEntry::AgentEvent {
                 entry_id: String::new(),
                 created_at_unix_ms: 0,
+                runner: None,
                 event: luban_domain::AgentEvent::TurnDuration { duration_ms: idx },
             };
             db.append_conversation_entries("p", "w", 1, std::slice::from_ref(&entry))
@@ -5345,6 +5355,7 @@ mod tests {
         let entry_a = ConversationEntry::AgentEvent {
             entry_id: String::new(),
             created_at_unix_ms: 0,
+            runner: None,
             event: luban_domain::AgentEvent::Message {
                 id: "turn-a/item_0".to_owned(),
                 text: "A".to_owned(),
@@ -5353,6 +5364,7 @@ mod tests {
         let entry_b = ConversationEntry::AgentEvent {
             entry_id: String::new(),
             created_at_unix_ms: 0,
+            runner: None,
             event: luban_domain::AgentEvent::Message {
                 id: "turn-b/item_0".to_owned(),
                 text: "B".to_owned(),
