@@ -2,7 +2,7 @@
 
 import type { AgentRunnerKind, ThinkingEffort } from "@/lib/luban-api"
 
-import { useMemo, useState } from "react"
+import { useCallback, useMemo, useRef, useState } from "react"
 import Image from "next/image"
 import { ChevronDown, Settings } from "lucide-react"
 
@@ -12,6 +12,40 @@ import { agentModelLabel, thinkingEffortLabel } from "@/lib/conversation-ui"
 import { UnifiedProviderLogo } from "@/components/shared/unified-provider-logo"
 
 const AMP_MARK_URL = "/logos/amp.svg"
+
+const DROPDOWN_GAP = 4
+
+// Reason: Compute fixed-position coordinates and max-height for the dropdown
+// based on the trigger button's viewport rect. This avoids overflow clipping
+// when the dropdown is inside a modal or other constrained container.
+function useDropdownPosition(direction: "top" | "bottom") {
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const [pos, setPos] = useState<React.CSSProperties>({})
+
+  const recompute = useCallback(() => {
+    const rect = triggerRef.current?.getBoundingClientRect()
+    if (!rect) return
+    if (direction === "top") {
+      const maxH = rect.top - DROPDOWN_GAP
+      setPos({
+        position: "fixed",
+        left: rect.left,
+        bottom: window.innerHeight - rect.top + DROPDOWN_GAP,
+        maxHeight: Math.max(maxH, 120),
+      })
+    } else {
+      const maxH = window.innerHeight - rect.bottom - DROPDOWN_GAP
+      setPos({
+        position: "fixed",
+        left: rect.left,
+        top: rect.bottom + DROPDOWN_GAP,
+        maxHeight: Math.max(maxH, 120),
+      })
+    }
+  }, [direction])
+
+  return { triggerRef, pos, recompute }
+}
 
 function AmpMark({ className }: { className?: string }) {
   return (
@@ -54,6 +88,7 @@ export function CodexAgentSelector({
 }) {
   const [open, setOpen] = useState(false)
   const [tempModelId, setTempModelId] = useState<string | null>(null)
+  const { triggerRef, pos, recompute } = useDropdownPosition(dropdownPosition)
 
   const currentModelId = modelId ?? ""
   const currentEffort = thinkingEffort ?? null
@@ -83,12 +118,15 @@ export function CodexAgentSelector({
   return (
     <div className={cn("relative", className)}>
       <button
+        ref={triggerRef}
         data-testid={testId}
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => {
           if (disabled) return
-          setOpen((prev) => !prev)
+          const next = !open
+          setOpen(next)
           setTempModelId(null)
+          if (next) recompute()
         }}
         disabled={disabled}
         className={cn(
@@ -107,12 +145,10 @@ export function CodexAgentSelector({
         <>
           <div data-testid={`${testId}-overlay`} className="fixed inset-0 z-40" onClick={() => close()} />
           <div
-            className={cn(
-              "absolute left-0 bg-popover border border-border rounded-lg shadow-xl z-50 overflow-hidden",
-              dropdownPosition === "top" ? "bottom-full mb-1" : "top-full mt-1",
-            )}
+            className="bg-popover border border-border rounded-lg shadow-xl z-50 flex flex-col overflow-hidden"
+            style={pos}
           >
-            <div className="flex divide-x divide-border">
+            <div className="flex divide-x divide-border flex-1 min-h-0 [&>div]:overflow-y-auto">
               <div className="p-1">
                 <div className="px-2.5 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
                   Agent
@@ -245,6 +281,7 @@ export function AgentSelector({
   onChangeAmpMode,
   codexEnabled = true,
   ampEnabled = true,
+  claudeEnabled = true,
   droidEnabled = true,
   runnerDefaultModels,
 }: {
@@ -267,6 +304,7 @@ export function AgentSelector({
   onChangeAmpMode: (mode: AmpMode) => void
   codexEnabled?: boolean
   ampEnabled?: boolean
+  claudeEnabled?: boolean
   droidEnabled?: boolean
   runnerDefaultModels?: Record<string, string> | null
 }) {
@@ -316,6 +354,7 @@ export function AgentSelector({
   const [open, setOpen] = useState(false)
   const [tempModelId, setTempModelId] = useState<string | null>(null)
   const [tempRunner, setTempRunner] = useState<AgentRunnerKind>(resolvedRunner)
+  const { triggerRef, pos, recompute } = useDropdownPosition(dropdownPosition)
 
   const currentModelId = modelId ?? ""
   const currentEffort = thinkingEffort ?? null
@@ -346,7 +385,6 @@ export function AgentSelector({
     onChangeRunner(next)
   }
 
-  const claudeEnabled = true
   const noAgentsEnabled = !codexEnabled && !ampEnabled && !claudeEnabled && !droidEnabled
 
   if (noAgentsEnabled) {
@@ -372,6 +410,7 @@ export function AgentSelector({
   return (
     <div className={cn("relative", className)}>
       <button
+        ref={triggerRef}
         data-testid={testId}
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => {
@@ -381,6 +420,7 @@ export function AgentSelector({
           if (nextOpen) {
             setTempRunner(resolvedRunner)
             setTempModelId(null)
+            recompute()
           }
         }}
         disabled={disabled}
@@ -400,12 +440,10 @@ export function AgentSelector({
         <>
           <div data-testid={`${testId}-overlay`} className="fixed inset-0 z-40" onClick={() => close()} />
           <div
-            className={cn(
-              "absolute left-0 bg-popover border border-border rounded-lg shadow-xl z-50 overflow-hidden",
-              dropdownPosition === "top" ? "bottom-full mb-1" : "top-full mt-1",
-            )}
+            className="bg-popover border border-border rounded-lg shadow-xl z-50 flex flex-col overflow-hidden"
+            style={pos}
           >
-            <div className="flex divide-x divide-border">
+            <div className="flex divide-x divide-border flex-1 min-h-0 [&>div]:overflow-y-auto">
               <div className="p-1">
                 <div className="px-2.5 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
                   Agent
@@ -423,7 +461,7 @@ export function AgentSelector({
                     id: "claude" as const,
                     label: "Claude",
                     icon: <UnifiedProviderLogo providerId="anthropic" className="w-3.5 h-3.5 flex-shrink-0" />,
-                    enabled: true,
+                    enabled: claudeEnabled,
                   },
                   {
                     id: "droid" as const,

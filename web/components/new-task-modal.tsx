@@ -13,7 +13,7 @@ import {
 } from "lucide-react"
 
 import { useLuban } from "@/lib/luban-context"
-import type { AttachmentRef, TaskExecuteMode } from "@/lib/luban-api"
+import type { AgentRunnerKind, AttachmentRef, TaskExecuteMode, ThinkingEffort } from "@/lib/luban-api"
 import { draftKey } from "@/lib/ui-prefs"
 import { focusChatInput } from "@/lib/focus-chat-input"
 import { uploadAttachment } from "@/lib/luban-http"
@@ -32,6 +32,8 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu"
 import type { AppSnapshot } from "@/lib/luban-api"
+import { AGENT_MODELS, DROID_MODELS, supportedThinkingEffortsForModel } from "@/lib/agent-settings"
+import { AgentSelector, type AmpMode } from "@/components/shared/agent-selector"
 
 function escapeXmlText(raw: string): string {
   return raw
@@ -92,6 +94,10 @@ export function NewTaskModal({ open, onOpenChange, onTaskCreated, activeProjectI
   const [selectedWorkdirId, setSelectedWorkdirId] = useState<number | null>(null)
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null)
   const [isExpanded, setIsExpanded] = useState(false)
+  const [selectedModelId, setSelectedModelId] = useState<string | null>(null)
+  const [selectedThinkingEffort, setSelectedThinkingEffort] = useState<ThinkingEffort | null>(null)
+  const [selectedRunner, setSelectedRunner] = useState<AgentRunnerKind | null>(null)
+  const [selectedAmpMode, setSelectedAmpMode] = useState<AmpMode>(null)
   const [projectSearch, setProjectSearch] = useState("")
   const [workdirSearch, setWorkdirSearch] = useState("")
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -142,6 +148,30 @@ export function NewTaskModal({ open, onOpenChange, onTaskCreated, activeProjectI
 
   const effectiveProjectId = selectedProjectId || defaultProjectId || ""
 
+  // Reason: Resolve the actual default model so the AgentSelector shows
+  // the full display (e.g. "GPT-5.3-Codex · High") from the start.
+  const resolvedDefaultModelId = useMemo(() => {
+    const agent = app?.agent
+    if (!agent) return AGENT_MODELS[0]?.id ?? null
+    const runner = agent.default_runner ?? "codex"
+    const perRunner = agent.runner_default_models?.[runner]
+    if (perRunner) return perRunner
+    const globalDefault = agent.default_model_id
+    if (globalDefault) return globalDefault
+    const catalog = runner === "droid" ? DROID_MODELS : AGENT_MODELS
+    return catalog[0]?.id ?? null
+  }, [app?.agent])
+
+  const effectiveModelId = selectedModelId ?? resolvedDefaultModelId
+
+  const resolvedDefaultThinkingEffort = useMemo((): ThinkingEffort | null => {
+    const efforts = supportedThinkingEffortsForModel(effectiveModelId)
+    if (efforts.length === 0) return null
+    const agentDefault = app?.agent?.default_thinking_effort
+    if (agentDefault && efforts.includes(agentDefault)) return agentDefault
+    return efforts.includes("high") ? "high" : efforts[0] ?? null
+  }, [app?.agent?.default_thinking_effort, effectiveModelId])
+
   const pickDefaultWorkdirIdForProjectId = useCallback(
     (projectId: string): number | null => {
       const project = projectOptions.find((p) => p.id === projectId) ?? null
@@ -190,6 +220,10 @@ export function NewTaskModal({ open, onOpenChange, onTaskCreated, activeProjectI
     setIsExpanded(false)
     setProjectSearch("")
     setWorkdirSearch("")
+    setSelectedModelId(null)
+    setSelectedThinkingEffort(null)
+    setSelectedRunner(null)
+    setSelectedAmpMode(null)
     hasUserEditedRef.current = false
     setInput("")
     setEditingDraftId(null)
@@ -530,7 +564,7 @@ export function NewTaskModal({ open, onOpenChange, onTaskCreated, activeProjectI
         toast.error(`${failed} attachment(s) failed to upload; proceeding without them`)
       }
 
-      const result = await executeTask(trimmed, mode, workdirId, uploaded)
+      const result = await executeTask(trimmed, mode, workdirId, uploaded, selectedModelId ?? undefined, selectedThinkingEffort ?? undefined)
 
       await openWorkdir(result.workdir_id)
       await activateTask(result.task_id)
@@ -548,6 +582,10 @@ export function NewTaskModal({ open, onOpenChange, onTaskCreated, activeProjectI
       setInput("")
       revokeAttachmentUrls(attachments)
       setAttachments([])
+      setSelectedModelId(null)
+      setSelectedThinkingEffort(null)
+      setSelectedRunner(null)
+      setSelectedAmpMode(null)
       setEditingDraftId(null)
       void clearNewTaskStash().catch((err) => console.warn("clearNewTaskStash failed", err))
       onTaskCreated?.()
@@ -566,6 +604,10 @@ export function NewTaskModal({ open, onOpenChange, onTaskCreated, activeProjectI
     setAttachments([])
     setSelectedProjectId("")
     setSelectedWorkdirId(null)
+    setSelectedModelId(null)
+    setSelectedThinkingEffort(null)
+    setSelectedRunner(null)
+    setSelectedAmpMode(null)
     setEditingDraftId(null)
     onOpenChange(false)
   }, [attachments, onOpenChange])
@@ -1011,27 +1053,52 @@ export function NewTaskModal({ open, onOpenChange, onTaskCreated, activeProjectI
           className="flex items-center justify-between px-4 py-3"
           style={{ borderTop: "1px solid #eee" }}
         >
-          {/* Left: Attachment */}
-          <input
-            ref={fileInputRef}
-            data-testid="new-task-attachment-input"
-            type="file"
-            multiple
-            accept="image/*,.pdf,.txt,.md,.json,.csv,.xml,.yaml,.yml"
-            className="hidden"
-            onChange={(e) => handleFileSelect(e.target.files)}
-          />
-          <button
-            data-testid="new-task-attach-button"
-            className="w-7 h-7 flex items-center justify-center hover:bg-[#f5f5f5] transition-colors"
-            style={{ color: "#666", borderRadius: "5px" }}
-            title="Attach file"
-            onClick={() => fileInputRef.current?.click()}
-            onMouseDown={(e) => e.preventDefault()}
-            disabled={executingMode != null}
-          >
-            <Paperclip className="w-4 h-4" />
-          </button>
+          {/* Left: Attachment + Model selector */}
+          <div className="flex items-center gap-1">
+            <input
+              ref={fileInputRef}
+              data-testid="new-task-attachment-input"
+              type="file"
+              multiple
+              accept="image/*,.pdf,.txt,.md,.json,.csv,.xml,.yaml,.yml"
+              className="hidden"
+              onChange={(e) => handleFileSelect(e.target.files)}
+            />
+            <button
+              data-testid="new-task-attach-button"
+              className="w-7 h-7 flex items-center justify-center hover:bg-[#f5f5f5] transition-colors"
+              style={{ color: "#666", borderRadius: "5px" }}
+              title="Attach file"
+              onClick={() => fileInputRef.current?.click()}
+              onMouseDown={(e) => e.preventDefault()}
+              disabled={executingMode != null}
+            >
+              <Paperclip className="w-4 h-4" />
+            </button>
+
+            <AgentSelector
+              testId="new-task-agent-selector"
+              dropdownPosition="top"
+              disabled={executingMode != null}
+              modelId={effectiveModelId}
+              thinkingEffort={selectedThinkingEffort ?? resolvedDefaultThinkingEffort}
+              defaultModelId={app?.agent?.default_model_id ?? null}
+              defaultThinkingEffort={app?.agent?.default_thinking_effort ?? null}
+              defaultAmpMode={app?.agent?.amp_mode ?? null}
+              defaultRunner={app?.agent?.default_runner ?? null}
+              runner={selectedRunner}
+              ampMode={selectedAmpMode}
+              onChangeRunner={setSelectedRunner}
+              onChangeAmpMode={setSelectedAmpMode}
+              onChangeModelId={setSelectedModelId}
+              onChangeThinkingEffort={setSelectedThinkingEffort}
+              codexEnabled={app?.agent?.codex_enabled ?? true}
+              ampEnabled={app?.agent?.amp_enabled ?? true}
+              claudeEnabled={app?.agent?.claude_enabled ?? true}
+              droidEnabled={app?.agent?.droid_enabled ?? true}
+              runnerDefaultModels={app?.agent?.runner_default_models ?? null}
+            />
+          </div>
 
           {/* Right: Create button */}
           <div className="flex items-center">
