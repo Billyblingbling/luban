@@ -328,6 +328,33 @@ pub struct WorkspaceDiffSnapshot {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum TaskDocumentKind {
+    Task,
+    Plan,
+    Memory,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TaskDocumentSnapshot {
+    pub kind: TaskDocumentKind,
+    pub rel_path: String,
+    pub content: String,
+    pub content_hash: String,
+    pub byte_len: u64,
+    pub updated_at_unix_ms: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TaskDocumentsSnapshot {
+    #[serde(rename = "workdir_id", alias = "workspace_id")]
+    pub workspace_id: WorkspaceId,
+    #[serde(rename = "task_id", alias = "thread_id")]
+    pub thread_id: WorkspaceThreadId,
+    pub documents: Vec<TaskDocumentSnapshot>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PullRequestState {
     Open,
     Closed,
@@ -894,6 +921,10 @@ pub enum ClientAction {
         workdir_id: Option<WorkspaceId>,
         #[serde(default)]
         attachments: Vec<AttachmentRef>,
+        #[serde(default)]
+        model_id: Option<String>,
+        #[serde(default)]
+        thinking_effort: Option<ThinkingEffort>,
     },
     TelegramBotTokenSet {
         token: String,
@@ -1097,6 +1128,10 @@ pub enum ClientAction {
     CreateWorkspaceThread {
         #[serde(rename = "workdir_id", alias = "workspace_id")]
         workspace_id: WorkspaceId,
+        #[serde(default)]
+        model_id: Option<String>,
+        #[serde(default)]
+        thinking_effort: Option<ThinkingEffort>,
     },
     #[serde(rename = "activate_task", alias = "activate_workspace_thread")]
     ActivateWorkspaceThread {
@@ -1254,6 +1289,13 @@ pub enum ServerEvent {
     },
     ConversationChanged {
         snapshot: Box<ConversationSnapshot>,
+    },
+    TaskDocumentChanged {
+        #[serde(rename = "workdir_id", alias = "workspace_id")]
+        workspace_id: WorkspaceId,
+        #[serde(rename = "task_id", alias = "thread_id")]
+        thread_id: WorkspaceThreadId,
+        kind: TaskDocumentKind,
     },
     Toast {
         message: String,

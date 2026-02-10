@@ -33,7 +33,19 @@ type PersistedChatDraft = {
   attachments?: AttachmentRef[]
 }
 
-export function TaskActivityPanel() {
+type TaskActivityPanelProps = {
+  showInput?: boolean
+  showTaskHeader?: boolean
+  showActivityHeader?: boolean
+  compact?: boolean
+}
+
+export function TaskActivityPanel({
+  showInput = true,
+  showTaskHeader = true,
+  showActivityHeader = true,
+  compact = false,
+}: TaskActivityPanelProps) {
   const [codexCustomPrompts, setCodexCustomPrompts] = useState<CodexCustomPromptSnapshot[]>([])
 
   const {
@@ -252,7 +264,7 @@ export function TaskActivityPanel() {
     [activeWorkspaceId, activeThreadId, canInteract, removeQueuedPrompt],
   )
 
-  const inputComponent = isArchivedTask ? (
+  const inputComponent = !showInput ? null : isArchivedTask ? (
     <div
       className="text-[12px] px-3 py-2 rounded border"
       style={{ borderColor: "#ebebeb", color: "#6b6b6b", backgroundColor: "#fcfcfc" }}
@@ -409,6 +421,8 @@ export function TaskActivityPanel() {
           canSend={canSend}
           codexEnabled={app?.agent.codex_enabled ?? true}
           ampEnabled={app?.agent.amp_enabled ?? true}
+          claudeEnabled={app?.agent.claude_enabled ?? true}
+          droidEnabled={app?.agent.droid_enabled ?? true}
           compact
         />
       ) : (
@@ -475,7 +489,7 @@ export function TaskActivityPanel() {
   const taskDescription = useMemo(() => undefined, [])
 
   return (
-    <div className="flex-1 min-w-0 flex flex-col">
+    <div className="flex-1 min-h-0 min-w-0 flex flex-col">
       <TaskActivityView
         listKey={`${activeWorkspaceId ?? "none"}:${activeThreadId ?? "none"}`}
         title={taskTitle}
@@ -486,7 +500,10 @@ export function TaskActivityPanel() {
         isLoading={isAgentRunning}
         onCancelAgentTurn={isAgentRunning ? () => cancelAgentTurn() : undefined}
         inputComponent={inputComponent}
-        className="flex-1 min-w-0"
+        className="flex-1 min-h-0 min-w-0"
+        showTaskHeader={showTaskHeader}
+        showActivityHeader={showActivityHeader}
+        compact={compact}
       />
     </div>
   )

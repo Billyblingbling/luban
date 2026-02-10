@@ -21,6 +21,9 @@ import type {
   ProjectId,
   ServerEvent,
   TaskStatus,
+  TaskDocumentKind,
+  TaskDocumentSnapshot,
+  TaskDocumentsSnapshot,
   TaskExecuteMode,
   TaskExecuteResult,
   TasksSnapshot,
@@ -44,6 +47,7 @@ type RuntimeState = {
   attachmentUrlsById: Map<string, string>
   workdirChangesById: Map<WorkspaceId, WorkspaceChangesSnapshot>
   workdirDiffById: Map<WorkspaceId, WorkspaceDiffSnapshot>
+  taskDocumentsByWorkdirTask: Map<string, TaskDocumentSnapshot[]>
   codexCustomPrompts: CodexCustomPromptSnapshot[]
   mentionIndex: MentionItemSnapshot[]
   codexConfig: { tree: CodexConfigEntrySnapshot[]; files: Map<string, string> }
@@ -75,6 +79,45 @@ function workdirTaskKey(workdirId: WorkspaceId, taskId: WorkspaceThreadId): stri
 
 function newEntryId(prefix: string): string {
   return `${prefix}_${Math.random().toString(16).slice(2)}`
+}
+
+function taskDocRelPath(taskId: WorkspaceThreadId, kind: TaskDocumentKind): string {
+  const file =
+    kind === "task" ? "TASK.md" : kind === "plan" ? "PLAN.md" : "MEMORY.md"
+  return `tasks/v1/tasks/mock-${taskId}/${file}`
+}
+
+function mockHash(content: string): string {
+  let h = 2166136261
+  for (let i = 0; i < content.length; i++) {
+    h ^= content.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  return `mock-${(h >>> 0).toString(16).padStart(8, "0")}`
+}
+
+function ensureTaskDocuments(
+  state: RuntimeState,
+  workdirId: WorkspaceId,
+  taskId: WorkspaceThreadId,
+): TaskDocumentSnapshot[] {
+  const key = workdirTaskKey(workdirId, taskId)
+  const existing = state.taskDocumentsByWorkdirTask.get(key)
+  if (existing) return existing
+  const now = Date.now()
+  const docs: TaskDocumentSnapshot[] = (["task", "plan", "memory"] as TaskDocumentKind[]).map((kind) => {
+    const content = ""
+    return {
+      kind,
+      rel_path: taskDocRelPath(taskId, kind),
+      content,
+      content_hash: mockHash(content),
+      byte_len: new TextEncoder().encode(content).length,
+      updated_at_unix_ms: now,
+    }
+  })
+  state.taskDocumentsByWorkdirTask.set(key, docs)
+  return docs
 }
 
 function bumpRev(state: RuntimeState): number {
@@ -113,6 +156,8 @@ function initRuntime(): RuntimeState {
   const workdirDiffById = new Map<WorkspaceId, WorkspaceDiffSnapshot>()
   for (const [k, v] of Object.entries(fixtures.workspaceDiffByWorkspace)) workdirDiffById.set(Number(k), clone(v))
 
+  const taskDocumentsByWorkdirTask = new Map<string, TaskDocumentSnapshot[]>()
+
   const codexFiles = new Map<string, string>()
   for (const [k, v] of Object.entries(fixtures.codexConfig.files)) codexFiles.set(k, v)
   const ampFiles = new Map<string, string>()
@@ -134,6 +179,7 @@ function initRuntime(): RuntimeState {
     attachmentUrlsById,
     workdirChangesById,
     workdirDiffById,
+    taskDocumentsByWorkdirTask,
     codexCustomPrompts: clone(fixtures.codexCustomPrompts),
     mentionIndex: clone(fixtures.mentionIndex),
     codexConfig: { tree: clone(fixtures.codexConfig.tree), files: codexFiles },
@@ -379,6 +425,43 @@ export async function mockFetchConversation(
     state.conversationsByWorkdirTask.set(key, snap)
   }
   return clone(snap)
+}
+
+export async function mockFetchTaskDocuments(
+  workdirId: WorkspaceId,
+  taskId: WorkspaceThreadId,
+): Promise<TaskDocumentsSnapshot> {
+  const state = getRuntime()
+  const documents = ensureTaskDocuments(state, workdirId, taskId)
+  return {
+    workdir_id: workdirId,
+    task_id: taskId,
+    documents: clone(documents),
+  }
+}
+
+export async function mockUpdateTaskDocument(
+  workdirId: WorkspaceId,
+  taskId: WorkspaceThreadId,
+  kind: TaskDocumentKind,
+  content: string,
+): Promise<TaskDocumentSnapshot> {
+  const state = getRuntime()
+  const docs = ensureTaskDocuments(state, workdirId, taskId)
+  const idx = docs.findIndex((d) => d.kind === kind)
+  if (idx < 0) throw new Error(`mock: unknown task document kind: ${kind}`)
+  const now = Date.now()
+  const next: TaskDocumentSnapshot = {
+    kind,
+    rel_path: taskDocRelPath(taskId, kind),
+    content,
+    content_hash: mockHash(content),
+    byte_len: new TextEncoder().encode(content).length,
+    updated_at_unix_ms: now,
+  }
+  docs[idx] = next
+  state.taskDocumentsByWorkdirTask.set(workdirTaskKey(workdirId, taskId), docs)
+  return clone(next)
 }
 
 export async function mockFetchWorkspaceChanges(workdirId: WorkspaceId): Promise<WorkspaceChangesSnapshot> {

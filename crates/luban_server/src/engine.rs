@@ -1,4 +1,5 @@
 use crate::branch_watch::BranchWatchHandle;
+use crate::task_document_watch::TaskDocumentWatchHandle;
 use anyhow::Context as _;
 use luban_api::{
     AppSnapshot, ConversationSnapshot, PullRequestCiState, PullRequestSnapshot, PullRequestState,
@@ -9,12 +10,13 @@ use luban_domain::{
     Action, AppState, AttachmentKind, AttachmentRef, CodexThreadEvent, CodexThreadItem,
     ConversationEntry, ConversationThreadMeta, Effect, OpenTarget, OperationStatus,
     ProjectWorkspaceService, PullRequestCiState as DomainPullRequestCiState, PullRequestInfo,
-    PullRequestState as DomainPullRequestState, ThinkingEffort, WorkspaceId, WorkspaceThreadId,
+    PullRequestState as DomainPullRequestState, TaskDocumentKind as DomainTaskDocumentKind,
+    ThinkingEffort, WorkspaceId, WorkspaceTabs, WorkspaceThreadId,
 };
 use rand::RngCore as _;
 use rand::rngs::OsRng;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 #[cfg(target_os = "macos")]
 use std::process::Command;
 use std::sync::{
@@ -233,6 +235,11 @@ pub enum EngineCommand {
         workspace_id: WorkspaceId,
         branch_name: String,
     },
+    TaskDocumentObserved {
+        workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
+        kind: DomainTaskDocumentKind,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -251,7 +258,6 @@ const PULL_REQUEST_REFRESH_INTERVAL_OPEN_CI_PENDING: Duration = Duration::from_s
 const PULL_REQUEST_REFRESH_INTERVAL_OPEN_CI_SUCCESS: Duration = Duration::from_secs(3 * 60);
 const PULL_REQUEST_REFRESH_INTERVAL_OPEN_CI_FAILURE: Duration = Duration::from_secs(60);
 const PULL_REQUEST_REFRESH_INTERVAL_OPEN_CI_UNKNOWN: Duration = Duration::from_secs(60);
-
 const PULL_REQUEST_REFRESH_INTERVAL_EMPTY_INITIAL: Duration = Duration::from_secs(60);
 const PULL_REQUEST_REFRESH_INTERVAL_EMPTY_MEDIUM: Duration = Duration::from_secs(3 * 60);
 const PULL_REQUEST_REFRESH_INTERVAL_EMPTY_MAX: Duration = Duration::from_secs(10 * 60);
@@ -324,6 +330,7 @@ pub struct Engine {
     events: broadcast::Sender<WsServerMessage>,
     tx: mpsc::Sender<EngineCommand>,
     branch_watch: BranchWatchHandle,
+    task_document_watch: TaskDocumentWatchHandle,
     cancel_flags: HashMap<(WorkspaceId, WorkspaceThreadId), CancelFlagEntry>,
     pull_requests: HashMap<WorkspaceId, PullRequestCacheEntry>,
     pull_requests_in_flight: HashSet<WorkspaceId>,
@@ -368,6 +375,7 @@ impl Engine {
         let (events, _) = broadcast::channel::<WsServerMessage>(256);
 
         let branch_watch = BranchWatchHandle::start(tx.clone());
+        let task_document_watch = TaskDocumentWatchHandle::start(tx.clone());
         let mut engine = Self {
             state: AppState::new(),
             rev: 0,
@@ -375,6 +383,7 @@ impl Engine {
             events: events.clone(),
             tx: tx.clone(),
             branch_watch,
+            task_document_watch,
             cancel_flags: HashMap::new(),
             pull_requests: HashMap::new(),
             pull_requests_in_flight: HashSet::new(),
@@ -814,12 +823,100 @@ impl Engine {
         Ok(())
     }
 
+    async fn create_workspace_thread_safe(
+        &mut self,
+        workspace_id: WorkspaceId,
+        model_id: Option<String>,
+        thinking_effort: Option<luban_domain::ThinkingEffort>,
+    ) -> Result<WorkspaceThreadId, String> {
+        let Some(scope) = workspace_scope(&self.state, workspace_id) else {
+            return Err("workspace not found".to_owned());
+        };
+
+        let services = self.services.clone();
+        let allocate_result = tokio::task::spawn_blocking(move || {
+            services.allocate_conversation_thread(scope.project_slug, scope.workspace_name)
+        })
+        .await
+        .ok()
+        .unwrap_or_else(|| Err("failed to join allocate conversation thread task".to_owned()));
+
+        let created_thread_id = match allocate_result {
+            Ok(thread_local_id) => {
+                if thread_local_id == 0 {
+                    return Err("provider returned invalid task id 0".to_owned());
+                }
+                let allocated_thread_id = WorkspaceThreadId::from_u64(thread_local_id);
+                let tabs = self
+                    .state
+                    .workspace_tabs
+                    .entry(workspace_id)
+                    .or_insert_with(WorkspaceTabs::new_empty);
+                tabs.next_thread_id = allocated_thread_id.as_u64();
+
+                self.process_action_queue(Action::CreateWorkspaceThread {
+                    workspace_id,
+                    model_id,
+                    thinking_effort,
+                })
+                .await;
+
+                let created_thread_id = self
+                    .state
+                    .active_thread_id(workspace_id)
+                    .ok_or_else(|| "failed to determine created task id".to_owned())?;
+                if created_thread_id != allocated_thread_id {
+                    tracing::warn!(
+                        workspace_id = workspace_id.as_u64(),
+                        allocated_task_id = allocated_thread_id.as_u64(),
+                        created_task_id = created_thread_id.as_u64(),
+                        "task id allocation mismatch; forcing activation to provider-allocated id"
+                    );
+                    self.process_action_queue(Action::ActivateWorkspaceThread {
+                        workspace_id,
+                        thread_id: allocated_thread_id,
+                    })
+                    .await;
+                }
+
+                allocated_thread_id
+            }
+            Err(message) if message.trim() == "unimplemented" => {
+                self.process_action_queue(Action::CreateWorkspaceThread {
+                    workspace_id,
+                    model_id,
+                    thinking_effort,
+                })
+                .await;
+                self.state
+                    .active_thread_id(workspace_id)
+                    .ok_or_else(|| "failed to determine created task id".to_owned())?
+            }
+            Err(message) => return Err(message),
+        };
+
+        // Keep task document identity stable and ULID-based from task creation time.
+        if let Err(err) = ensure_task_document_identity_for_thread(workspace_id, created_thread_id)
+        {
+            tracing::warn!(
+                workspace_id = workspace_id.as_u64(),
+                thread_id = created_thread_id.as_u64(),
+                error = %err,
+                "failed to ensure task document identity"
+            );
+        }
+
+        Ok(created_thread_id)
+    }
+
     async fn execute_task_prompt(
         &mut self,
         prompt: String,
         mode: luban_api::TaskExecuteMode,
         workdir_id: Option<luban_api::WorkspaceId>,
         attachments: Vec<luban_api::AttachmentRef>,
+        model_id: Option<String>,
+        thinking_effort: Option<luban_domain::ThinkingEffort>,
     ) -> Result<luban_api::TaskExecuteResult, String> {
         let Some(workdir_id) = workdir_id else {
             return Err("workdir_id is required".to_owned());
@@ -843,23 +940,32 @@ impl Engine {
 
         self.process_action_queue(Action::OpenWorkspace { workspace_id })
             .await;
-        self.process_action_queue(Action::CreateWorkspaceThread { workspace_id })
-            .await;
-
-        let Some(thread_id) = self.state.active_thread_id(workspace_id) else {
-            return Err("failed to determine created task id".to_owned());
-        };
+        let thread_id = self
+            .create_workspace_thread_safe(workspace_id, model_id, thinking_effort)
+            .await?;
 
         // Reason: CreateWorkspaceThread already sets the correct per-runner
         // model and thinking effort via resolve_default_model_for_runner, so
         // we no longer override them here with the global Codex default.
 
         if mode == luban_api::TaskExecuteMode::Start {
+            let text = match resolve_task_document_paths(workspace_id, thread_id) {
+                Ok(paths) => inject_task_document_prompt(&prompt, &paths),
+                Err(err) => {
+                    tracing::warn!(
+                        workspace_id = workspace_id.as_u64(),
+                        thread_id = thread_id.as_u64(),
+                        error = %err,
+                        "failed to prepare task documents for prompt injection; falling back to raw prompt"
+                    );
+                    prompt.clone()
+                }
+            };
             let attachments = attachments.into_iter().map(map_api_attachment).collect();
             self.process_action_queue(Action::SendAgentMessage {
                 workspace_id,
                 thread_id,
-                text: prompt.clone(),
+                text,
                 attachments,
                 runner: None,
                 amp_mode: None,
@@ -1261,15 +1367,26 @@ impl Engine {
                     mode,
                     workdir_id,
                     attachments,
+                    model_id,
+                    thinking_effort,
                 } = &action
                 {
                     let prompt = prompt.clone();
                     let mode = *mode;
                     let workdir_id = *workdir_id;
                     let attachments = attachments.clone();
+                    let model_id = model_id.clone();
+                    let thinking_effort = map_api_thinking_effort(*thinking_effort);
 
                     match self
-                        .execute_task_prompt(prompt, mode, workdir_id, attachments)
+                        .execute_task_prompt(
+                            prompt,
+                            mode,
+                            workdir_id,
+                            attachments,
+                            model_id,
+                            thinking_effort,
+                        )
                         .await
                     {
                         Ok(result) => {
@@ -1375,6 +1492,8 @@ impl Engine {
                                     luban_api::TaskExecuteMode::Create,
                                     workdir_id,
                                     Vec::new(),
+                                    None,
+                                    None,
                                 )
                                 .await
                             {
@@ -2430,6 +2549,30 @@ impl Engine {
                         let _ = reply.send(Ok(self.rev));
                         return;
                     }
+                    luban_api::ClientAction::CreateWorkspaceThread {
+                        workspace_id,
+                        model_id,
+                        thinking_effort,
+                    } => {
+                        let workspace_id = WorkspaceId::from_u64(workspace_id.0);
+                        let thinking_effort = map_api_thinking_effort(*thinking_effort);
+                        match self
+                            .create_workspace_thread_safe(
+                                workspace_id,
+                                model_id.clone(),
+                                thinking_effort,
+                            )
+                            .await
+                        {
+                            Ok(_) => {
+                                let _ = reply.send(Ok(self.rev));
+                            }
+                            Err(message) => {
+                                let _ = reply.send(Err(message));
+                            }
+                        }
+                        return;
+                    }
                     luban_api::ClientAction::CancelAndSendAgentMessage {
                         workspace_id,
                         thread_id,
@@ -2549,6 +2692,20 @@ impl Engine {
                     branch_name,
                 })
                 .await;
+            }
+            EngineCommand::TaskDocumentObserved {
+                workspace_id,
+                thread_id,
+                kind,
+            } => {
+                let _ = self.events.send(WsServerMessage::Event {
+                    rev: self.rev,
+                    event: Box::new(luban_api::ServerEvent::TaskDocumentChanged {
+                        workspace_id: luban_api::WorkspaceId(workspace_id.as_u64()),
+                        thread_id: luban_api::WorkspaceThreadId(thread_id.as_u64()),
+                        kind: map_task_document_kind(kind),
+                    }),
+                });
             }
         }
     }
@@ -2765,7 +2922,7 @@ impl Engine {
                     | Action::TerminalCommandFinished { .. }
                     | Action::TaskStatusSuggestionCreated { .. }
             );
-            let should_sync_branch_watchers = should_sync_branch_watchers(&action);
+            let should_sync_workspace_watchers = should_sync_branch_watchers(&action);
             let mut conversation_keys = Vec::<(WorkspaceId, WorkspaceThreadId)>::new();
             let action_conversation_key = conversation_key_for_action(&action);
             if let Some(key) = action_conversation_key {
@@ -2777,8 +2934,9 @@ impl Engine {
 
             let new_effects = self.state.apply(action);
             conversation_keys.extend(conversation_keys_for_effects(&new_effects));
-            if should_sync_branch_watchers {
+            if should_sync_workspace_watchers {
                 self.sync_branch_watchers();
+                self.sync_task_document_watchers();
             }
             self.publish_app_snapshot();
 
@@ -2881,6 +3039,23 @@ impl Engine {
             })
             .collect::<Vec<_>>();
         self.branch_watch.sync_workspaces(workspaces);
+    }
+
+    fn sync_task_document_watchers(&self) {
+        let workspaces = self
+            .state
+            .projects
+            .iter()
+            .flat_map(|p| {
+                p.workspaces.iter().filter_map(|w| {
+                    if w.status != luban_domain::WorkspaceStatus::Active {
+                        return None;
+                    }
+                    Some(w.id)
+                })
+            })
+            .collect::<Vec<_>>();
+        self.task_document_watch.sync_workspaces(workspaces);
     }
 
     async fn persist_queue_state(&self, workspace_id: WorkspaceId, thread_id: WorkspaceThreadId) {
@@ -5129,6 +5304,217 @@ fn workspace_scope(state: &AppState, workspace_id: WorkspaceId) -> Option<Worksp
     None
 }
 
+fn map_task_document_kind(kind: DomainTaskDocumentKind) -> luban_api::TaskDocumentKind {
+    match kind {
+        DomainTaskDocumentKind::Task => luban_api::TaskDocumentKind::Task,
+        DomainTaskDocumentKind::Plan => luban_api::TaskDocumentKind::Plan,
+        DomainTaskDocumentKind::Memory => luban_api::TaskDocumentKind::Memory,
+    }
+}
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct TaskDocumentIndexRecord {
+    task_ulid: String,
+    workspace_id: u64,
+    task_id: u64,
+}
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct TaskDocumentIdentityRecord {
+    schema_version: u32,
+    task_ulid: String,
+    workspace_id: u64,
+    task_id: u64,
+    created_at_unix_ms: u64,
+    updated_at_unix_ms: u64,
+}
+
+const TASK_DOCUMENT_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Clone, Debug)]
+struct TaskDocumentPaths {
+    task_path: PathBuf,
+    plan_path: PathBuf,
+    memory_path: PathBuf,
+}
+
+fn resolve_luban_root() -> anyhow::Result<PathBuf> {
+    if let Some(root) = std::env::var_os(luban_domain::paths::LUBAN_ROOT_ENV) {
+        let root = root.to_string_lossy();
+        let trimmed = root.trim();
+        if trimmed.is_empty() {
+            anyhow::bail!("{} is set but empty", luban_domain::paths::LUBAN_ROOT_ENV);
+        }
+        return Ok(PathBuf::from(trimmed));
+    }
+
+    let home = std::env::var_os("HOME").ok_or_else(|| anyhow::anyhow!("HOME is not set"))?;
+    Ok(PathBuf::from(home).join("luban"))
+}
+
+fn task_documents_v1_root(luban_root: &Path) -> PathBuf {
+    luban_root.join("tasks").join("v1")
+}
+
+fn task_documents_tasks_root(luban_root: &Path) -> PathBuf {
+    task_documents_v1_root(luban_root).join("tasks")
+}
+
+fn task_documents_index_root(luban_root: &Path) -> PathBuf {
+    task_documents_v1_root(luban_root)
+        .join("index")
+        .join("workdir_task")
+}
+
+fn task_document_index_path(luban_root: &Path, workspace_id: u64, task_id: u64) -> PathBuf {
+    task_documents_index_root(luban_root).join(format!("{workspace_id}-{task_id}.json"))
+}
+
+fn task_document_task_dir(luban_root: &Path, task_ulid: &str) -> PathBuf {
+    task_documents_tasks_root(luban_root).join(task_ulid)
+}
+
+fn task_document_meta_path(luban_root: &Path, task_ulid: &str) -> PathBuf {
+    task_document_task_dir(luban_root, task_ulid).join("task.json")
+}
+
+fn write_text_atomic(path: &Path, content: &str) -> anyhow::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("invalid task document path"))?;
+    std::fs::create_dir_all(parent)
+        .with_context(|| format!("failed to create {}", parent.display()))?;
+
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let tmp = parent.join(format!(".tmp-{}-{unique}", std::process::id()));
+    std::fs::write(&tmp, content.as_bytes())
+        .with_context(|| format!("failed to write {}", tmp.display()))?;
+    std::fs::rename(&tmp, path).with_context(|| format!("failed to replace {}", path.display()))?;
+    Ok(())
+}
+
+fn read_task_document_identity(
+    luban_root: &Path,
+    workspace_id: u64,
+    task_id: u64,
+) -> anyhow::Result<Option<TaskDocumentIdentityRecord>> {
+    let index_path = task_document_index_path(luban_root, workspace_id, task_id);
+    if !index_path.exists() {
+        return Ok(None);
+    }
+
+    let index_content = std::fs::read_to_string(&index_path)
+        .with_context(|| format!("failed to read {}", index_path.display()))?;
+    let index: TaskDocumentIndexRecord = serde_json::from_str(&index_content)
+        .with_context(|| format!("failed to parse {}", index_path.display()))?;
+    if index.workspace_id != workspace_id || index.task_id != task_id {
+        return Ok(None);
+    }
+
+    let meta_path = task_document_meta_path(luban_root, &index.task_ulid);
+    if !meta_path.exists() {
+        return Ok(None);
+    }
+
+    let meta_content = std::fs::read_to_string(&meta_path)
+        .with_context(|| format!("failed to read {}", meta_path.display()))?;
+    let identity: TaskDocumentIdentityRecord = serde_json::from_str(&meta_content)
+        .with_context(|| format!("failed to parse {}", meta_path.display()))?;
+    if identity.workspace_id != workspace_id || identity.task_id != task_id {
+        return Ok(None);
+    }
+
+    Ok(Some(identity))
+}
+
+fn write_task_document_identity(
+    luban_root: &Path,
+    identity: &TaskDocumentIdentityRecord,
+) -> anyhow::Result<()> {
+    let task_dir = task_document_task_dir(luban_root, &identity.task_ulid);
+    std::fs::create_dir_all(&task_dir)
+        .with_context(|| format!("failed to create {}", task_dir.display()))?;
+
+    let meta_path = task_document_meta_path(luban_root, &identity.task_ulid);
+    let meta_json = serde_json::to_string_pretty(identity)?;
+    write_text_atomic(&meta_path, &meta_json)?;
+
+    let index_path = task_document_index_path(luban_root, identity.workspace_id, identity.task_id);
+    let index = TaskDocumentIndexRecord {
+        task_ulid: identity.task_ulid.clone(),
+        workspace_id: identity.workspace_id,
+        task_id: identity.task_id,
+    };
+    let index_json = serde_json::to_string_pretty(&index)?;
+    write_text_atomic(&index_path, &index_json)?;
+    Ok(())
+}
+
+fn ensure_task_document_identity(
+    luban_root: &Path,
+    workspace_id: u64,
+    task_id: u64,
+) -> anyhow::Result<TaskDocumentIdentityRecord> {
+    if let Some(identity) = read_task_document_identity(luban_root, workspace_id, task_id)? {
+        return Ok(identity);
+    }
+
+    let now = now_unix_ms();
+    let identity = TaskDocumentIdentityRecord {
+        schema_version: TASK_DOCUMENT_SCHEMA_VERSION,
+        task_ulid: ulid::Ulid::new().to_string(),
+        workspace_id,
+        task_id,
+        created_at_unix_ms: now,
+        updated_at_unix_ms: now,
+    };
+    write_task_document_identity(luban_root, &identity)?;
+    Ok(identity)
+}
+
+fn ensure_task_document_identity_for_thread(
+    workspace_id: WorkspaceId,
+    thread_id: WorkspaceThreadId,
+) -> anyhow::Result<TaskDocumentIdentityRecord> {
+    let luban_root = resolve_luban_root()?;
+    ensure_task_document_identity(&luban_root, workspace_id.as_u64(), thread_id.as_u64())
+}
+
+fn task_document_paths_for_dir(root: &Path) -> TaskDocumentPaths {
+    let task_path = root.join(DomainTaskDocumentKind::Task.file_name());
+    let plan_path = root.join(DomainTaskDocumentKind::Plan.file_name());
+    let memory_path = root.join(DomainTaskDocumentKind::Memory.file_name());
+    TaskDocumentPaths {
+        task_path,
+        plan_path,
+        memory_path,
+    }
+}
+
+fn resolve_task_document_paths(
+    workspace_id: WorkspaceId,
+    thread_id: WorkspaceThreadId,
+) -> anyhow::Result<TaskDocumentPaths> {
+    let luban_root = resolve_luban_root()?;
+    let task_ulid =
+        ensure_task_document_identity(&luban_root, workspace_id.as_u64(), thread_id.as_u64())?
+            .task_ulid;
+    let task_dir = task_document_task_dir(&luban_root, &task_ulid);
+    Ok(task_document_paths_for_dir(&task_dir))
+}
+
+fn inject_task_document_prompt(prompt: &str, paths: &TaskDocumentPaths) -> String {
+    format!(
+        "{prompt}\n\n---\nTask document maintenance (required)\nEdit these files directly on disk as you work. Do not use API calls for task documents.\n- TASK.md: {}\n- PLAN.md: {}\n- MEMORY.md: {}\n\nPolicy scope for these three files:\n- TASK.md / PLAN.md / MEMORY.md are task-conversation artifacts, not repository source files.\n- Repository policy files (including AGENTS.md in the target repo) do not constrain the language/style/content for these three files.\n\nCreation rule:\n- If a file does not exist, create it yourself at the exact path above before updating it.\n\nUpdate expectations:\n1. Keep TASK.md current on status/progress/blockers.\n2. Keep PLAN.md current when plan or milestones change.\n3. Keep MEMORY.md current for durable decisions, constraints, and facts.\n4. Before your final reply, make sure all three files reflect the latest state.\n---",
+        paths.task_path.display(),
+        paths.plan_path.display(),
+        paths.memory_path.display()
+    )
+}
+
 fn should_sync_branch_watchers(action: &Action) -> bool {
     matches!(
         action,
@@ -5396,7 +5782,7 @@ fn task_summaries_workspace_id_for_action(action: &Action) -> Option<WorkspaceId
         Action::TaskStarSet { workspace_id, .. } => Some(*workspace_id),
         Action::OpenWorkspace { workspace_id } => Some(*workspace_id),
         Action::DashboardPreviewOpened { workspace_id } => Some(*workspace_id),
-        Action::CreateWorkspaceThread { workspace_id } => Some(*workspace_id),
+        Action::CreateWorkspaceThread { workspace_id, .. } => Some(*workspace_id),
         Action::ActivateWorkspaceThread { workspace_id, .. } => Some(*workspace_id),
         Action::CloseWorkspaceThreadTab { workspace_id, .. } => Some(*workspace_id),
         Action::RestoreWorkspaceThreadTab { workspace_id, .. } => Some(*workspace_id),
@@ -6054,11 +6440,15 @@ fn map_client_action(action: luban_api::ClientAction) -> Option<Action> {
             workspace_id: WorkspaceId::from_u64(workspace_id.0),
             thread_id: WorkspaceThreadId::from_u64(thread_id.0),
         }),
-        luban_api::ClientAction::CreateWorkspaceThread { workspace_id } => {
-            Some(Action::CreateWorkspaceThread {
-                workspace_id: WorkspaceId::from_u64(workspace_id.0),
-            })
-        }
+        luban_api::ClientAction::CreateWorkspaceThread {
+            workspace_id,
+            model_id,
+            thinking_effort,
+        } => Some(Action::CreateWorkspaceThread {
+            workspace_id: WorkspaceId::from_u64(workspace_id.0),
+            model_id,
+            thinking_effort: map_api_thinking_effort(thinking_effort),
+        }),
         luban_api::ClientAction::ActivateWorkspaceThread {
             workspace_id,
             thread_id,
@@ -6228,6 +6618,18 @@ fn map_api_attachment(att: luban_api::AttachmentRef) -> AttachmentRef {
         mime: att.mime,
         byte_len: att.byte_len,
     }
+}
+
+fn map_api_thinking_effort(
+    effort: Option<luban_api::ThinkingEffort>,
+) -> Option<luban_domain::ThinkingEffort> {
+    effort.map(|e| match e {
+        luban_api::ThinkingEffort::Minimal => luban_domain::ThinkingEffort::Minimal,
+        luban_api::ThinkingEffort::Low => luban_domain::ThinkingEffort::Low,
+        luban_api::ThinkingEffort::Medium => luban_domain::ThinkingEffort::Medium,
+        luban_api::ThinkingEffort::High => luban_domain::ThinkingEffort::High,
+        luban_api::ThinkingEffort::XHigh => luban_domain::ThinkingEffort::XHigh,
+    })
 }
 
 fn map_api_agent_runner_kind(kind: luban_api::AgentRunnerKind) -> luban_domain::AgentRunnerKind {
@@ -6917,6 +7319,7 @@ mod tests {
             events,
             tx,
             branch_watch: BranchWatchHandle::disabled(),
+            task_document_watch: TaskDocumentWatchHandle::disabled(),
             cancel_flags: HashMap::new(),
             pull_requests: HashMap::new(),
             pull_requests_in_flight: HashSet::new(),
@@ -6981,6 +7384,7 @@ mod tests {
             events,
             tx,
             branch_watch: BranchWatchHandle::disabled(),
+            task_document_watch: TaskDocumentWatchHandle::disabled(),
             cancel_flags: HashMap::new(),
             pull_requests: HashMap::new(),
             pull_requests_in_flight: HashSet::new(),
@@ -7134,6 +7538,7 @@ mod tests {
             events,
             tx,
             branch_watch: BranchWatchHandle::disabled(),
+            task_document_watch: TaskDocumentWatchHandle::disabled(),
             cancel_flags: HashMap::new(),
             pull_requests: HashMap::new(),
             pull_requests_in_flight: HashSet::new(),
@@ -7292,8 +7697,16 @@ mod tests {
         let workspace_id = state.projects[0].workspaces[0].id;
         state.apply(Action::OpenWorkspace { workspace_id });
 
-        state.apply(Action::CreateWorkspaceThread { workspace_id });
-        state.apply(Action::CreateWorkspaceThread { workspace_id });
+        state.apply(Action::CreateWorkspaceThread {
+            workspace_id,
+            model_id: None,
+            thinking_effort: None,
+        });
+        state.apply(Action::CreateWorkspaceThread {
+            workspace_id,
+            model_id: None,
+            thinking_effort: None,
+        });
 
         let open_tabs = state
             .workspace_tabs(workspace_id)
@@ -7339,6 +7752,7 @@ mod tests {
             events,
             tx,
             branch_watch: BranchWatchHandle::disabled(),
+            task_document_watch: TaskDocumentWatchHandle::disabled(),
             cancel_flags: HashMap::new(),
             pull_requests: HashMap::new(),
             pull_requests_in_flight: HashSet::new(),
@@ -7437,6 +7851,7 @@ mod tests {
             events,
             tx,
             branch_watch: BranchWatchHandle::disabled(),
+            task_document_watch: TaskDocumentWatchHandle::disabled(),
             cancel_flags: HashMap::new(),
             pull_requests: HashMap::new(),
             pull_requests_in_flight: HashSet::new(),
@@ -7459,6 +7874,56 @@ mod tests {
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].thread_id.0, thread_id.as_u64());
         assert_eq!(threads[0].title, "alpha");
+    }
+
+    #[tokio::test]
+    async fn task_document_observed_emits_task_document_changed_event() {
+        let (events, _) = broadcast::channel::<WsServerMessage>(4);
+        let mut rx = events.subscribe();
+        let (tx, _rx_cmd) = mpsc::channel::<EngineCommand>(1);
+
+        let mut engine = Engine {
+            state: AppState::new(),
+            rev: 42,
+            services: Arc::new(TestServices),
+            events,
+            tx,
+            branch_watch: BranchWatchHandle::disabled(),
+            task_document_watch: TaskDocumentWatchHandle::disabled(),
+            cancel_flags: HashMap::new(),
+            pull_requests: HashMap::new(),
+            pull_requests_in_flight: HashSet::new(),
+            workspace_threads_cache: HashMap::new(),
+            auto_archive_workspaces: HashSet::new(),
+            telegram_pairing: None,
+        };
+
+        engine
+            .handle(EngineCommand::TaskDocumentObserved {
+                workspace_id: WorkspaceId::from_u64(7),
+                thread_id: WorkspaceThreadId::from_u64(9),
+                kind: DomainTaskDocumentKind::Plan,
+            })
+            .await;
+
+        let message = rx.try_recv().expect("expected task document event");
+        let WsServerMessage::Event { rev, event } = message else {
+            panic!("expected WsServerMessage::Event");
+        };
+        assert_eq!(rev, 42);
+
+        let luban_api::ServerEvent::TaskDocumentChanged {
+            workspace_id,
+            thread_id,
+            kind,
+        } = *event
+        else {
+            panic!("expected task_document_changed event");
+        };
+
+        assert_eq!(workspace_id.0, 7);
+        assert_eq!(thread_id.0, 9);
+        assert_eq!(kind, luban_api::TaskDocumentKind::Plan);
     }
 
     #[test]
@@ -7553,6 +8018,7 @@ mod tests {
             events,
             tx,
             branch_watch: BranchWatchHandle::disabled(),
+            task_document_watch: TaskDocumentWatchHandle::disabled(),
             cancel_flags: HashMap::new(),
             pull_requests: HashMap::new(),
             pull_requests_in_flight: HashSet::new(),
@@ -7643,6 +8109,7 @@ mod tests {
             events,
             tx,
             branch_watch: BranchWatchHandle::disabled(),
+            task_document_watch: TaskDocumentWatchHandle::disabled(),
             cancel_flags: HashMap::new(),
             pull_requests: HashMap::new(),
             pull_requests_in_flight: HashSet::new(),
@@ -7704,7 +8171,11 @@ mod tests {
 
         let workspace_id = state.projects[0].workspaces[0].id;
         state.apply(Action::OpenWorkspace { workspace_id });
-        state.apply(Action::CreateWorkspaceThread { workspace_id });
+        state.apply(Action::CreateWorkspaceThread {
+            workspace_id,
+            model_id: None,
+            thinking_effort: None,
+        });
         let thread_id = state
             .workspace_tabs(workspace_id)
             .expect("workspace tabs exist after creating thread")
@@ -7720,6 +8191,7 @@ mod tests {
             events,
             tx,
             branch_watch: BranchWatchHandle::disabled(),
+            task_document_watch: TaskDocumentWatchHandle::disabled(),
             cancel_flags: HashMap::new(),
             pull_requests: HashMap::new(),
             pull_requests_in_flight: HashSet::new(),
@@ -7797,7 +8269,11 @@ mod tests {
 
         let workspace_id = state.projects[0].workspaces[0].id;
         state.apply(Action::OpenWorkspace { workspace_id });
-        state.apply(Action::CreateWorkspaceThread { workspace_id });
+        state.apply(Action::CreateWorkspaceThread {
+            workspace_id,
+            model_id: None,
+            thinking_effort: None,
+        });
         let thread_id = state
             .workspace_tabs(workspace_id)
             .expect("workspace tabs exist after creating thread")
@@ -7813,6 +8289,7 @@ mod tests {
             events,
             tx,
             branch_watch: BranchWatchHandle::disabled(),
+            task_document_watch: TaskDocumentWatchHandle::disabled(),
             cancel_flags: HashMap::new(),
             pull_requests: HashMap::new(),
             pull_requests_in_flight: HashSet::new(),
@@ -8166,6 +8643,7 @@ mod tests {
             events,
             tx,
             branch_watch: BranchWatchHandle::disabled(),
+            task_document_watch: TaskDocumentWatchHandle::disabled(),
             cancel_flags: HashMap::new(),
             pull_requests: HashMap::new(),
             pull_requests_in_flight: HashSet::new(),
@@ -8230,7 +8708,11 @@ mod tests {
             .expect("workspace should exist")
             .id;
 
-        state.apply(Action::CreateWorkspaceThread { workspace_id });
+        state.apply(Action::CreateWorkspaceThread {
+            workspace_id,
+            model_id: None,
+            thinking_effort: None,
+        });
         let thread_id = state
             .active_thread_id(workspace_id)
             .expect("active thread should exist");
@@ -8254,6 +8736,7 @@ mod tests {
             events,
             tx,
             branch_watch: BranchWatchHandle::disabled(),
+            task_document_watch: TaskDocumentWatchHandle::disabled(),
             cancel_flags: HashMap::from([(
                 (workspace_id, thread_id),
                 CancelFlagEntry {
@@ -8546,6 +9029,7 @@ mod tests {
             events,
             tx,
             branch_watch: BranchWatchHandle::disabled(),
+            task_document_watch: TaskDocumentWatchHandle::disabled(),
             cancel_flags: HashMap::new(),
             pull_requests: HashMap::new(),
             pull_requests_in_flight: HashSet::new(),
@@ -8595,6 +9079,7 @@ mod tests {
             events,
             tx,
             branch_watch: BranchWatchHandle::disabled(),
+            task_document_watch: TaskDocumentWatchHandle::disabled(),
             cancel_flags: HashMap::new(),
             pull_requests: HashMap::new(),
             pull_requests_in_flight: HashSet::new(),
@@ -9070,6 +9555,7 @@ mod tests {
             events,
             tx: tx.clone(),
             branch_watch: BranchWatchHandle::disabled(),
+            task_document_watch: TaskDocumentWatchHandle::disabled(),
             cancel_flags: HashMap::new(),
             pull_requests: HashMap::new(),
             pull_requests_in_flight: HashSet::new(),
@@ -9137,6 +9623,7 @@ mod tests {
             events,
             tx,
             branch_watch: BranchWatchHandle::disabled(),
+            task_document_watch: TaskDocumentWatchHandle::disabled(),
             cancel_flags: HashMap::new(),
             pull_requests: HashMap::new(),
             pull_requests_in_flight: HashSet::new(),
@@ -9168,6 +9655,43 @@ mod tests {
 
     #[tokio::test]
     async fn task_execute_start_passes_attachments_to_agent_turn() {
+        struct EnvGuard {
+            prev_root: Option<std::ffi::OsString>,
+            root: PathBuf,
+        }
+
+        impl Drop for EnvGuard {
+            fn drop(&mut self) {
+                if let Some(prev) = self.prev_root.take() {
+                    unsafe {
+                        std::env::set_var(luban_domain::paths::LUBAN_ROOT_ENV, prev);
+                    }
+                } else {
+                    unsafe {
+                        std::env::remove_var(luban_domain::paths::LUBAN_ROOT_ENV);
+                    }
+                }
+                let _ = std::fs::remove_dir_all(&self.root);
+            }
+        }
+
+        let root = std::env::temp_dir().join(format!(
+            "luban-tests-task-execute-docs-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).expect("create temp root");
+        let _env_guard = EnvGuard {
+            prev_root: std::env::var_os(luban_domain::paths::LUBAN_ROOT_ENV),
+            root: root.clone(),
+        };
+        unsafe {
+            std::env::set_var(luban_domain::paths::LUBAN_ROOT_ENV, root.as_os_str());
+        }
+
         let (sender, receiver) = std::sync::mpsc::channel::<luban_domain::RunAgentTurnRequest>();
         let services: Arc<dyn ProjectWorkspaceService> =
             Arc::new(CaptureRunAgentTurnServices { sender });
@@ -9196,6 +9720,7 @@ mod tests {
             events,
             tx,
             branch_watch: BranchWatchHandle::disabled(),
+            task_document_watch: TaskDocumentWatchHandle::disabled(),
             cancel_flags: HashMap::new(),
             pull_requests: HashMap::new(),
             pull_requests_in_flight: HashSet::new(),
@@ -9219,6 +9744,8 @@ mod tests {
                 luban_api::TaskExecuteMode::Start,
                 Some(luban_api::WorkspaceId(workspace_id.as_u64())),
                 vec![api_attachment.clone()],
+                None,
+                None,
             )
             .await
             .expect("task execute prompt should succeed");
@@ -9236,6 +9763,42 @@ mod tests {
         assert_eq!(
             request.attachments[0].kind,
             luban_domain::AttachmentKind::Image
+        );
+        assert!(
+            request
+                .prompt
+                .contains("Task document maintenance (required)")
+        );
+        assert!(
+            request
+                .prompt
+                .contains("Do not use API calls for task documents.")
+        );
+        assert!(request.prompt.contains(
+            "Repository policy files (including AGENTS.md in the target repo) do not constrain"
+        ));
+        assert!(request.prompt.contains("TASK.md:"));
+        assert!(request.prompt.contains("PLAN.md:"));
+        assert!(request.prompt.contains("MEMORY.md:"));
+
+        let task_line = request
+            .prompt
+            .lines()
+            .find(|line| line.starts_with("- TASK.md: "))
+            .expect("task prompt line should exist");
+        let task_path = task_line.trim_start_matches("- TASK.md: ").trim();
+        let task_ulid = std::path::Path::new(task_path)
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|name| name.to_str())
+            .expect("task path should include ulid directory");
+        assert!(
+            ulid::Ulid::from_string(task_ulid).is_ok(),
+            "task document path should use ULID directory"
+        );
+        assert!(
+            !task_ulid.starts_with("task-"),
+            "fallback task-* identity should not be used"
         );
     }
 
@@ -9270,6 +9833,7 @@ mod tests {
             events,
             tx,
             branch_watch: BranchWatchHandle::disabled(),
+            task_document_watch: TaskDocumentWatchHandle::disabled(),
             cancel_flags: HashMap::new(),
             pull_requests: HashMap::new(),
             pull_requests_in_flight: HashSet::new(),
@@ -9341,6 +9905,7 @@ mod tests {
             events,
             tx,
             branch_watch: BranchWatchHandle::disabled(),
+            task_document_watch: TaskDocumentWatchHandle::disabled(),
             cancel_flags: HashMap::new(),
             pull_requests: HashMap::new(),
             pull_requests_in_flight: HashSet::new(),

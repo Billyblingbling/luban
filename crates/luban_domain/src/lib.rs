@@ -17,8 +17,9 @@ pub use adapters::{
     AmpConfigEntry, AmpConfigEntryKind, ClaudeConfigEntry, ClaudeConfigEntryKind, CodexConfigEntry,
     CodexConfigEntryKind, ContextImage, CreatedWorkspace, DroidConfigEntry, DroidConfigEntryKind,
     NewTaskDraft, NewTaskStash, OpenTarget, ProjectIdentity, ProjectWorkspaceService,
-    PullRequestCiState, PullRequestInfo, PullRequestState, RunAgentTurnRequest, TaskIntentKind,
-    TaskIssueInfo, TaskStatusAutoUpdateSuggestion,
+    PullRequestCiState, PullRequestInfo, PullRequestState, RunAgentTurnRequest, TaskDocumentEvent,
+    TaskDocumentEventType, TaskDocumentIndex, TaskDocumentKind, TaskIntentKind, TaskIssueInfo,
+    TaskStatusAutoUpdateSuggestion,
 };
 mod context_tokens;
 pub use context_tokens::{
@@ -40,7 +41,7 @@ pub use agent_settings::{
     AgentModelSpec, AgentRunnerKind, ThinkingEffort, agent_model_label, agent_models,
     default_agent_model_id, default_agent_runner_kind, default_amp_mode, default_model_for_runner,
     default_thinking_effort, droid_models, model_valid_for_runner, models_for_runner,
-    normalize_thinking_effort, parse_agent_runner_kind, parse_thinking_effort,
+    normalize_thinking_effort, parse_agent_runner_kind, parse_thinking_effort, runner_for_model,
     thinking_effort_supported,
 };
 pub use task_prompts::{default_task_prompt_template, default_task_prompt_templates};
